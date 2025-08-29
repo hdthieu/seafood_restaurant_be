@@ -17,41 +17,43 @@ export class MenuitemsService {
     private readonly menuCategoryRepo: Repository<MenuCategory>,
     @InjectRepository(MenuItemIngredient)
     private readonly menuItemIngredientRepo: Repository<MenuItemIngredient>,
-
-    
   ) { }
 
-  // async createMenuItem(dto: CreateMenuItemDto): Promise<MenuItem> {
-  //   const category = await this.menuCategoryRepo.findOneBy({ id: dto.categoryId });
-  //   if (!category) throw new ResponseException('Danh mục không tồn tại', 400);
+  async createMenuItem(dto: CreateMenuItemDto): Promise<MenuItem> {
+    const category = await this.menuCategoryRepo.findOneBy({ id: dto.categoryId });
+    if (!category) throw new ResponseException('Danh mục không tồn tại', 400);
 
-  //   const menuItem = this.menuItemRepo.create({
-  //     name: dto.name,
-  //     price: dto.price,
-  //     description: dto.description,
-  //     image: dto.image,
-  //     category,
-  //     isAvailable: true,
-  //   });
+    const menuItem = this.menuItemRepo.create({
+      name: dto.name,
+      price: dto.price,
+      description: dto.description,
+      image: dto.image,
+      category,
+      isAvailable: true,
+    });
 
-  //   const savedItem = await this.menuItemRepo.save(menuItem);
+    const savedItem = await this.menuItemRepo.save(menuItem);
 
-  //   // Gắn nguyên liệu
-  //   const ingredients = dto.ingredients.map((i) => {
-  //     return this.menuItemIngredientRepo.create({
-  //       menuItem: savedItem,
-  //       inventoryItem: { id: i.inventoryItemId }, // chỉ cần id
-  //       quantity: i.quantity,
-  //       note: i.note,
-  //     });
-  //   });
+    // Gắn nguyên liệu
+    const ingredients = dto.ingredients.map((i) => {
+      return this.menuItemIngredientRepo.create({
+        menuItem: savedItem,
+        inventoryItem: { id: i.inventoryItemId }, // chỉ cần id
+        quantity: i.quantity,
+        note: i.note,
+      });
+    });
 
-  //   await this.menuItemIngredientRepo.save(ingredients);
+    await this.menuItemIngredientRepo.save(ingredients);
 
-  //   return this.menuItemRepo.findOne({
-  //     where: { id: savedItem.id },
-  //     relations: ['ingredients', 'ingredients.inventoryItem', 'category'],
-  //   });
-  // }
+    const fullItem = await this.menuItemRepo.findOne({
+      where: { id: savedItem.id },
+      relations: ['ingredients', 'ingredients.inventoryItem', 'category'],
+    });
+
+    if (!fullItem) throw new ResponseException('Không tìm thấy món sau khi tạo');
+
+    return fullItem;
+  }
 
 }
