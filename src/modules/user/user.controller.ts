@@ -20,11 +20,12 @@ export class UserController {
     return this.userService.createUser(dto);
   }
 
+  // this endpoint for get list user (MANAGER only)
   @Get("get-list-user")
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Lấy danh sách nhân viên [MANAGER]' })
   async getListUser(@CurrentUser() user: User) {
-    return this.userService.getListUser(user.id); // truyền user id vào
+    return this.userService.getListUser(user.id);
   }
 
 

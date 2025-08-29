@@ -22,5 +22,22 @@ export class AreaService {
         return this.areaRepo.save(area);
     }
 
+    async getInfoArea(dto: any): Promise<Area[]> {
+        const query = this.areaRepo
+            .createQueryBuilder('area')
+            .leftJoinAndSelect('area.tables', 'table');
+
+        if (dto?.name) {
+            query.andWhere('LOWER(area.name) LIKE LOWER(:name)', {
+                name: `%${dto.name}%`,
+            });
+        }
+
+        if (dto?.status) {
+            query.andWhere('area.status = :status', { status: dto.status });
+        }
+
+        return query.getMany();
+    }
 
 }
