@@ -52,4 +52,10 @@ export class User {
         eager: true,
     })
     profile: Profile;
+
+    @Column({ name: 'refresh_token', nullable: true })
+    refreshToken: string;
+
+    @Column({ name: 'refresh_token_expiry', type: 'timestamptz', nullable: true })
+    refreshTokenExpiry: Date;
 }

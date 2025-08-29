@@ -1,5 +1,6 @@
 import { MenuCategory } from "src/modules/menucategory/entities/menucategory.entity";
-import { Column, Entity, ManyToOne, PrimaryGeneratedColumn } from "typeorm";
+import { MenuItemIngredient } from "src/modules/menuitemingredient/entities/menuitemingredient.entity";
+import { Column, Entity, ManyToOne, OneToMany, PrimaryGeneratedColumn } from "typeorm";
 
 @Entity('menu_items')
 export class MenuItem {
@@ -23,4 +24,8 @@ export class MenuItem {
 
     @Column({ default: true })
     isAvailable: boolean;
+
+    @OneToMany(() => MenuItemIngredient, (ingredient) => ingredient.menuItem, { cascade: true })
+    ingredients: MenuItemIngredient[];
+
 }

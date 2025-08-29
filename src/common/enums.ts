@@ -33,3 +33,13 @@ export enum OrderStatus {
     PAID = 'PAID',                  // Đã thanh toán
     CANCELLED = 'CANCELLED',        // Đơn bị hủy (khách hủy hoặc admin)
 }
+
+export enum TableStatus {
+    ACTIVE = 'ACTIVE',     // Đang hoạt động
+    INACTIVE = 'INACTIVE', // Tạm ngưng
+}
+
+export enum OrderType {
+    DINE_IN = 'DINE_IN',
+    TAKE_AWAY = 'TAKE_AWAY'
+}

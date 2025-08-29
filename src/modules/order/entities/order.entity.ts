@@ -1,7 +1,8 @@
-import { OrderStatus } from "src/common/enums";
+import { OrderStatus, OrderType } from "src/common/enums";
 import { OrderItem } from "src/modules/orderitems/entities/orderitem.entity";
+import { RestaurantTable } from "src/modules/restauranttable/entities/restauranttable.entity";
 import { User } from "src/modules/user/entities/user.entity";
-import { Column, CreateDateColumn, Entity, ManyToOne, OneToMany, PrimaryGeneratedColumn, Table, UpdateDateColumn } from "typeorm";
+import { Column, CreateDateColumn, Entity, ManyToOne, OneToMany, PrimaryGeneratedColumn, UpdateDateColumn } from "typeorm";
 
 @Entity('orders')
 export class Order {
@@ -11,8 +12,8 @@ export class Order {
     @ManyToOne(() => User)
     createdBy: User;
 
-    @ManyToOne(() => Table)
-    table: Table;
+    @ManyToOne(() => RestaurantTable)
+    table: RestaurantTable;
 
     @OneToMany(() => OrderItem, (item: OrderItem) => item.order, { cascade: true })
     items: OrderItem[];
@@ -25,4 +26,8 @@ export class Order {
 
     @UpdateDateColumn()
     updatedAt: Date;
+
+    @Column({ type: 'enum', enum: OrderType, default: OrderType.DINE_IN })
+    orderType: OrderType;
+
 }
