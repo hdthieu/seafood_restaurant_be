@@ -1,26 +1,23 @@
 import { Injectable } from '@nestjs/common';
 import { CreateInventoryitemDto } from './dto/create-inventoryitem.dto';
 import { UpdateInventoryitemDto } from './dto/update-inventoryitem.dto';
+import { InventoryItem } from './entities/inventoryitem.entity';
+import { Repository } from 'typeorm';
+import { InjectRepository } from '@nestjs/typeorm';
 
 @Injectable()
 export class InventoryitemsService {
-  create(createInventoryitemDto: CreateInventoryitemDto) {
-    return 'This action adds a new inventoryitem';
+  constructor(
+    @InjectRepository(InventoryItem)
+    private readonly inventoryRepo: Repository<InventoryItem>,
+  ) { }
+
+  async create(dto: CreateInventoryitemDto): Promise<InventoryItem> {
+    const item = this.inventoryRepo.create(dto);
+    return this.inventoryRepo.save(item);
   }
 
-  findAll() {
-    return `This action returns all inventoryitems`;
-  }
-
-  findOne(id: number) {
-    return `This action returns a #${id} inventoryitem`;
-  }
-
-  update(id: number, updateInventoryitemDto: UpdateInventoryitemDto) {
-    return `This action updates a #${id} inventoryitem`;
-  }
-
-  remove(id: number) {
-    return `This action removes a #${id} inventoryitem`;
+  async findAll(): Promise<InventoryItem[]> {
+    return this.inventoryRepo.find();
   }
 }
