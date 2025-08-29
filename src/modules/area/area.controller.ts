@@ -11,7 +11,7 @@ export class AreaController {
   constructor(private readonly areaService: AreaService) { }
 
   // this endpoint for create new area
-  @Post()
+  @Post('create-area')
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Tạo khu vực' })
   create(@Body() dto: CreateAreaDto) {
@@ -19,12 +19,22 @@ export class AreaController {
   }
 
   // this endpoint for get area
-  @Post()
+  @Get('get-list-area')
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Lấy danh sách khu vực (có bàn)' })
   getInfoArea(@Body() dto: any) {
     return this.areaService.getInfoArea(dto);
   }
+
+  // this endpoint for get area by name
+  @Post('get-id')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Lấy ID khu vực theo tên' })
+  async getAreaIdByName(@Body() body: { name: string }) {
+    return this.areaService.getAreaIdByName(body.name);
+  }
+
+
 
 
 }

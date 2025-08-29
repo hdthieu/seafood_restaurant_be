@@ -5,6 +5,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Area } from './entities/area.entity';
 import { Repository } from 'typeorm';
 import { AreaStatus } from 'src/common/enums';
+import { ResponseException } from 'src/common/common_dto/respone.dto';
 
 @Injectable()
 export class AreaService {
@@ -39,5 +40,19 @@ export class AreaService {
 
         return query.getMany();
     }
+
+    async getAreaIdByName(name: string): Promise<{ id: string }> {
+        const area = await this.areaRepo.findOne({
+            where: { name },
+            select: ['id'],
+        });
+
+        if (!area) {
+            throw new ResponseException('Khu vực không tồn tại', 404);
+        }
+
+        return { id: area.id };
+    }
+
 
 }
