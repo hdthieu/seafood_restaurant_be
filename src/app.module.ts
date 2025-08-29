@@ -17,6 +17,7 @@ import { ConfigModule } from '@nestjs/config';
 import { SeederModule } from './modules/seeder/seeder.module';
 import { RestauranttableModule } from './modules/restauranttable/restauranttable.module';
 import { AuthModule } from './modules/core/auth/auth.module';
+import { AreaModule } from './modules/area/area.module';
 @Module({
   imports: [ConfigModule.forRoot({ isGlobal: true }),
   TypeOrmModule.forRoot({
@@ -30,7 +31,7 @@ import { AuthModule } from './modules/core/auth/auth.module';
     synchronize: true,
     autoLoadEntities: true
   }),
-    UserModule, ProfileModule, MenucategoryModule, MenuitemsModule, OrderModule, OrderitemsModule, InventoryitemsModule, InventorytransactionModule, InvoiceModule, MenuitemingredientModule, OrderstatushistoryModule, SeederModule, RestauranttableModule, AuthModule],
+    UserModule, ProfileModule, MenucategoryModule, MenuitemsModule, OrderModule, OrderitemsModule, InventoryitemsModule, InventorytransactionModule, InvoiceModule, MenuitemingredientModule, OrderstatushistoryModule, SeederModule, RestauranttableModule, AuthModule, AreaModule],
   controllers: [AppController],
   providers: [AppService],
 })

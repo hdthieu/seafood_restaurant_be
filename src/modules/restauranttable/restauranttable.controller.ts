@@ -1,34 +1,19 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete } from '@nestjs/common';
-import { RestauranttableService } from './restauranttable.service';
-import { CreateRestauranttableDto } from './dto/create-restauranttable.dto';
-import { UpdateRestauranttableDto } from './dto/update-restauranttable.dto';
+import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards } from '@nestjs/common';
+import { RestaurantTablesService } from './restauranttable.service';
+import { CreateRestaurantTableDto } from './dto/create-restauranttable.dto';
+import { RestaurantTable } from './entities/restauranttable.entity';
+import { ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
 
 @Controller('restauranttable')
+@ApiBearerAuth()
 export class RestauranttableController {
-  constructor(private readonly restauranttableService: RestauranttableService) {}
+  constructor(private readonly restauranttableService: RestaurantTablesService) { }
 
   @Post()
-  create(@Body() createRestauranttableDto: CreateRestauranttableDto) {
-    return this.restauranttableService.create(createRestauranttableDto);
-  }
-
-  @Get()
-  findAll() {
-    return this.restauranttableService.findAll();
-  }
-
-  @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.restauranttableService.findOne(+id);
-  }
-
-  @Patch(':id')
-  update(@Param('id') id: string, @Body() updateRestauranttableDto: UpdateRestauranttableDto) {
-    return this.restauranttableService.update(+id, updateRestauranttableDto);
-  }
-
-  @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.restauranttableService.remove(+id);
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Thêm mới bàn [Only Admin]' })
+  async create(@Body() dto: CreateRestaurantTableDto): Promise<RestaurantTable> {
+    return this.restauranttableService.create(dto);
   }
 }

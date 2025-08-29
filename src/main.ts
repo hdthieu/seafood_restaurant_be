@@ -29,6 +29,11 @@ function initialSwagger(app: NestExpressApplication): void {
 async function bootstrap() {
   console.log('🚀 Starting NestJS application...');
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  app.enableCors({
+    origin: 'http://localhost:3000', // FE chạy trên port 3000
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
+    credentials: true, // Nếu cần gửi cookie hoặc thông tin xác thực
+  });
   const configService = app.get<ConfigService>(ConfigService);
 
   console.log(`[ENV] Environment: ${configurations.nodeEnv}`);

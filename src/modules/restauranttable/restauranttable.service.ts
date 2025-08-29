@@ -1,26 +1,49 @@
 import { Injectable } from '@nestjs/common';
-import { CreateRestauranttableDto } from './dto/create-restauranttable.dto';
-import { UpdateRestauranttableDto } from './dto/update-restauranttable.dto';
+import { InjectRepository } from '@nestjs/typeorm';
+import { RestaurantTable } from './entities/restauranttable.entity';
+import { Repository } from 'typeorm';
+import { Area } from '../area/entities/area.entity';
+import { CreateRestaurantTableDto } from './dto/create-restauranttable.dto';
+import { ResponseException } from 'src/common/common_dto/respone.dto';
+import { TableStatus } from 'src/common/enums';
 
 @Injectable()
-export class RestauranttableService {
-  create(createRestauranttableDto: CreateRestauranttableDto) {
-    return 'This action adds a new restauranttable';
-  }
+export class RestaurantTablesService {
+    constructor(
+        @InjectRepository(RestaurantTable)
+        private readonly tableRepo: Repository<RestaurantTable>,
+        @InjectRepository(Area)
+        private readonly areaRepo: Repository<Area>,
+    ) { }
 
-  findAll() {
-    return `This action returns all restauranttable`;
-  }
+    async create(createDto: CreateRestaurantTableDto): Promise<RestaurantTable> {
+        // 1. Kiểm tra tên bàn đã tồn tại chưa
+        const existed = await this.tableRepo.findOne({
+            where: {
+                name: createDto.name,
+                area: { id: createDto.areaId },
+            },
+        });
 
-  findOne(id: number) {
-    return `This action returns a #${id} restauranttable`;
-  }
+        if (existed) {
+            throw new ResponseException('Bàn đã tồn tại', 400);
+        }
 
-  update(id: number, updateRestauranttableDto: UpdateRestauranttableDto) {
-    return `This action updates a #${id} restauranttable`;
-  }
+        // 2. Kiểm tra areaId có tồn tại không
+        const area = await this.areaRepo.findOne({ where: { id: createDto.areaId } });
+        if (!area) {
+            throw new ResponseException('Khu vực không tồn tại', 400);
+        }
 
-  remove(id: number) {
-    return `This action removes a #${id} restauranttable`;
-  }
+        // 3. Tạo mới bàn
+        const newTable = this.tableRepo.create({
+            name: createDto.name,
+            seats: createDto.seats ?? 4,
+            note: createDto.note,
+            status: createDto.status ?? TableStatus.ACTIVE,
+            area,
+        });
+
+        return this.tableRepo.save(newTable);
+    }
 }

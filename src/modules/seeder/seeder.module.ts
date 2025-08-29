@@ -10,6 +10,7 @@ import { User } from '../user/entities/user.entity';
 import { Profile } from '../profile/entities/profile.entity';
 import { MenuItemIngredient } from '../menuitemingredient/entities/menuitemingredient.entity';
 import { InventoryTransaction } from '../inventorytransaction/entities/inventorytransaction.entity';
+import { Area } from '../area/entities/area.entity';
 
 @Module({
   imports: [
@@ -21,7 +22,8 @@ import { InventoryTransaction } from '../inventorytransaction/entities/inventory
       User,
       Profile,
       MenuItemIngredient,
-      InventoryTransaction
+      InventoryTransaction, 
+      Area
     ]),
   ],
   controllers: [SeederController],

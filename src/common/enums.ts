@@ -39,6 +39,13 @@ export enum TableStatus {
     INACTIVE = 'INACTIVE', // Tạm ngưng
 }
 
+export enum AreaStatus {
+    AVAILABLE = 'AVAILABLE',   // Đang hoạt động, cho phép đặt bàn
+    UNAVAILABLE = 'UNAVAILABLE', // Không hoạt động (tạm ngưng)
+    MAINTENANCE = 'MAINTENANCE', // Đang bảo trì (tùy chọn)
+    FULL = 'FULL'  // Đầy bàn
+}
+
 export enum OrderType {
     DINE_IN = 'DINE_IN',
     TAKE_AWAY = 'TAKE_AWAY'
