@@ -53,9 +53,10 @@ export class User {
     })
     profile: Profile;
 
-    @Column({ name: 'refresh_token', nullable: true })
-    refreshToken: string;
+    @Column({ name: 'refresh_token', type: 'text', nullable: true })
+    refreshToken: string | null;
 
     @Column({ name: 'refresh_token_expiry', type: 'timestamptz', nullable: true })
-    refreshTokenExpiry: Date;
+    refreshTokenExpiry: Date | null;
+
 }
