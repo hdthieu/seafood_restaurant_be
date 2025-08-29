@@ -45,4 +45,24 @@ export class UserService {
     return this.userRepository.save(user);
   }
 
+  // function get list user
+  async getListUser(currentUserId: string): Promise<any[]> {
+    return this.userRepository
+      .createQueryBuilder('user')
+      .leftJoin('user.profile', 'profile')
+      .select([
+        'user.id',
+        'user.email',
+        'user.phoneNumber',
+        'user.username',
+        'user.password',
+        'user.role',
+        'profile.fullName',
+      ])
+      .where('user.isDelete = false')
+      .andWhere('user.id != :currentUserId', { currentUserId })
+      .getMany();
+  }
+
+
 }

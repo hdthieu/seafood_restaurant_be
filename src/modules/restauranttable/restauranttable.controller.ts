@@ -12,7 +12,7 @@ export class RestauranttableController {
 
   @Post()
   @UseGuards(JwtAuthGuard)
-  @ApiOperation({ summary: 'Thêm mới bàn [Only Admin]' })
+  @ApiOperation({ summary: 'Thêm mới bàn [Only MANAGER]' })
   async create(@Body() dto: CreateRestaurantTableDto): Promise<RestaurantTable> {
     return this.restauranttableService.create(dto);
   }
