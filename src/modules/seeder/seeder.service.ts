@@ -56,7 +56,7 @@ export class SeederService implements OnApplicationBootstrap {
         if (areaCount === 0) {
             const areas = this.areaRepo.create([
                 { name: 'Lầu 1', note: 'Khu vực tầng 1' },
-                { name: 'Lầu 2', note: 'Khu vực tầng 2'},
+                { name: 'Lầu 2', note: 'Khu vực tầng 2' },
             ]);
             await this.areaRepo.save(areas);
             this.logger.log('✅ Seeded Areas');
@@ -125,7 +125,7 @@ export class SeederService implements OnApplicationBootstrap {
         // 5) Admin User + Profile
         const userCount = await this.userRepo.count();
         if (userCount === 0) {
-            const hashedPassword = await bcrypt.hash('admin123', 10);
+            const hashedPassword = await bcrypt.hash('Admin123@', 10);
             const user = this.userRepo.create({
                 email: 'admin@restaurant.com',
                 password: hashedPassword,
