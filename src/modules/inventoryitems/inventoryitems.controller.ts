@@ -1,34 +1,27 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards } from '@nestjs/common';
 import { InventoryitemsService } from './inventoryitems.service';
 import { CreateInventoryitemDto } from './dto/create-inventoryitem.dto';
 import { UpdateInventoryitemDto } from './dto/update-inventoryitem.dto';
+import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
+import { ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 
 @Controller('inventoryitems')
+@ApiBearerAuth()
 export class InventoryitemsController {
-  constructor(private readonly inventoryitemsService: InventoryitemsService) {}
+  constructor(private readonly inventoryitemsService: InventoryitemsService) { }
 
-  @Post()
-  create(@Body() createInventoryitemDto: CreateInventoryitemDto) {
-    return this.inventoryitemsService.create(createInventoryitemDto);
+  // this endpoint create new inventory item
+  @Post('/stockin-ingredients')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Stock In Ingredients [By MANAGEMENT]' })
+  async create(@Body() dto: CreateInventoryitemDto) {
+    return this.inventoryitemsService.create(dto);
   }
 
-  @Get()
-  findAll() {
+  @Get('/list-ingredients')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Get List Ingredients' })
+  async getAll() {
     return this.inventoryitemsService.findAll();
-  }
-
-  @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.inventoryitemsService.findOne(+id);
-  }
-
-  @Patch(':id')
-  update(@Param('id') id: string, @Body() updateInventoryitemDto: UpdateInventoryitemDto) {
-    return this.inventoryitemsService.update(+id, updateInventoryitemDto);
-  }
-
-  @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.inventoryitemsService.remove(+id);
   }
 }
