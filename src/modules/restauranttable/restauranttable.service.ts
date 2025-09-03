@@ -46,4 +46,9 @@ export class RestaurantTablesService {
 
         return this.tableRepo.save(newTable);
     }
+
+    // function for get all tables
+    async findAll(): Promise<RestaurantTable[]> {
+        return this.tableRepo.find({ relations: ['area'] });
+    }
 }
