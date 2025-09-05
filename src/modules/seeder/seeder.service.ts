@@ -2,7 +2,7 @@ import { Injectable, OnApplicationBootstrap, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
-import { Category } from '../category/entities/category.entity';
+import { Category, CategoryType } from '../category/entities/category.entity';
 import { MenuItem } from '../menuitems/entities/menuitem.entity';
 import { InventoryItem } from '../inventoryitems/entities/inventoryitem.entity';
 import { RestaurantTable } from '../restauranttable/entities/restauranttable.entity';
@@ -66,11 +66,11 @@ export class SeederService implements OnApplicationBootstrap {
         const categoryCount = await this.CategoryRepo.count();
         if (categoryCount === 0) {
             const categories = this.CategoryRepo.create([
-                { name: 'Đồ uống' },
-                { name: 'Hải sản' },
+                { name: 'Đồ uống', type: CategoryType.MENU },
+                { name: 'Hải sản', type: CategoryType.MENU },
             ]);
             await this.CategoryRepo.save(categories);
-            this.logger.log('✅ Seeded Menu Categories');
+            this.logger.log('✅ Seeded Categories');
         }
 
         // 2) Inventory Items
