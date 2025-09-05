@@ -2,8 +2,8 @@ import { InventoryItem } from "src/modules/inventoryitems/entities/inventoryitem
 import { MenuItem } from "src/modules/menuitems/entities/menuitem.entity";
 import { Column, Entity, ManyToOne, PrimaryGeneratedColumn } from "typeorm";
 
-@Entity('menu_item_ingredients')
-export class MenuItemIngredient {
+@Entity('ingredients')
+export class Ingredient {
     @PrimaryGeneratedColumn('uuid')
     id: string;
 

@@ -7,10 +7,10 @@ import { InventoryitemsModule } from './modules/inventoryitems/inventoryitems.mo
 import { OrderitemsModule } from './modules/orderitems/orderitems.module';
 import { OrderModule } from './modules/order/order.module';
 import { MenuitemsModule } from './modules/menuitems/menuitems.module';
-import { MenucategoryModule } from './modules/menucategory/menucategory.module';
+import { Category } from './modules/category/entities/category.entity';
 import { ProfileModule } from './modules/profile/profile.module';
 import { UserModule } from './modules/user/user.module';
-import { MenuitemingredientModule } from './modules/menuitemingredient/menuitemingredient.module';
+import { Ingredient } from './modules/ingredient/entities/ingredient.entity';
 import { OrderstatushistoryModule } from './modules/orderstatushistory/orderstatushistory.module';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule } from '@nestjs/config';
@@ -18,6 +18,9 @@ import { SeederModule } from './modules/seeder/seeder.module';
 import { RestauranttableModule } from './modules/restauranttable/restauranttable.module';
 import { AuthModule } from './modules/core/auth/auth.module';
 import { AreaModule } from './modules/area/area.module';
+import { ConfigS3Module } from './common/AWS/config-s3/config-s3.module';
+import { IngredientModule } from './modules/ingredient/ingredient.module';
+import { CategoryModule } from './modules/category/category.module';
 @Module({
   imports: [ConfigModule.forRoot({ isGlobal: true }),
   TypeOrmModule.forRoot({
@@ -31,7 +34,7 @@ import { AreaModule } from './modules/area/area.module';
     synchronize: true,
     autoLoadEntities: true
   }),
-    UserModule, ProfileModule, MenucategoryModule, MenuitemsModule, OrderModule, OrderitemsModule, InventoryitemsModule, InventorytransactionModule, InvoiceModule, MenuitemingredientModule, OrderstatushistoryModule, SeederModule, RestauranttableModule, AuthModule, AreaModule],
+    UserModule, ProfileModule, Category, MenuitemsModule, OrderModule, OrderitemsModule, InventoryitemsModule, InventorytransactionModule, InvoiceModule, IngredientModule, OrderstatushistoryModule, SeederModule, RestauranttableModule, AuthModule, AreaModule, ConfigS3Module, IngredientModule, CategoryModule],
   controllers: [AppController],
   providers: [AppService],
 })

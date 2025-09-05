@@ -6,6 +6,7 @@ import { Area } from '../area/entities/area.entity';
 import { CreateRestaurantTableDto } from './dto/create-restauranttable.dto';
 import { ResponseException } from 'src/common/common_dto/respone.dto';
 import { TableStatus } from 'src/common/enums';
+import { UpdateTableDto } from './dto/update-table.dto';
 
 @Injectable()
 export class RestaurantTablesService {
@@ -51,4 +52,32 @@ export class RestaurantTablesService {
     async findAll(): Promise<RestaurantTable[]> {
         return this.tableRepo.find({ relations: ['area'] });
     }
+
+    // function for get table by id
+    async getInfoTable(id: string): Promise<RestaurantTable> {
+        const table = await this.tableRepo.findOne({
+            where: { id },
+        });
+
+        if (!table) {
+            throw new ResponseException('Bàn không tồn tại', 404);
+        }
+
+        return table;
+    }
+
+    // function for update table by id
+    async updateTable(id: string, dto: UpdateTableDto): Promise<RestaurantTable> {
+        const table = await this.getInfoTable(id);
+        Object.assign(table, dto);
+        return this.tableRepo.save(table);
+    }
+
+    // function for delete table by id
+    async deleteTable(id: string): Promise<{ message: string }> {
+        const table = await this.getInfoTable(id);
+        await this.tableRepo.remove(table);
+        return { message: 'Xóa bàn thành công' };
+    }
+
 }

@@ -3,12 +3,12 @@ import { SeederService } from './seeder.service';
 import { SeederController } from './seeder.controller';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { InventoryItem } from '../inventoryitems/entities/inventoryitem.entity';
-import { MenuCategory } from '../menucategory/entities/menucategory.entity';
+import { Category } from '../category/entities/category.entity';
 import { MenuItem } from '../menuitems/entities/menuitem.entity';
 import { RestaurantTable } from '../restauranttable/entities/restauranttable.entity';
 import { User } from '../user/entities/user.entity';
 import { Profile } from '../profile/entities/profile.entity';
-import { MenuItemIngredient } from '../menuitemingredient/entities/menuitemingredient.entity';
+import { Ingredient } from '../ingredient/entities/ingredient.entity';
 import { InventoryTransaction } from '../inventorytransaction/entities/inventorytransaction.entity';
 import { Area } from '../area/entities/area.entity';
 
@@ -16,13 +16,13 @@ import { Area } from '../area/entities/area.entity';
   imports: [
     TypeOrmModule.forFeature([
       InventoryItem,
-      MenuCategory,
+      Category,
       MenuItem,
       RestaurantTable,
       User,
       Profile,
-      MenuItemIngredient,
-      InventoryTransaction, 
+      Ingredient,
+      InventoryTransaction,
       Area
     ]),
   ],

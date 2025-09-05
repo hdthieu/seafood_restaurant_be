@@ -4,8 +4,9 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { MenuItem } from './entities/menuitem.entity';
 import { ResponseException } from 'src/common/common_dto/respone.dto';
 import { Repository } from 'typeorm';
-import { MenuCategory } from '../menucategory/entities/menucategory.entity';
-import { MenuItemIngredient } from '../menuitemingredient/entities/menuitemingredient.entity';
+import { Category } from '../category/entities/category.entity';
+import { Ingredient } from '../ingredient/entities/ingredient.entity';
+import { ConfigS3Service } from 'src/common/AWS/config-s3/config-s3.service';
 
 @Injectable()
 export class MenuitemsService {
@@ -13,21 +14,25 @@ export class MenuitemsService {
   constructor(
     @InjectRepository(MenuItem)
     private readonly menuItemRepo: Repository<MenuItem>,
-    @InjectRepository(MenuCategory)
-    private readonly menuCategoryRepo: Repository<MenuCategory>,
-    @InjectRepository(MenuItemIngredient)
-    private readonly menuItemIngredientRepo: Repository<MenuItemIngredient>,
+    @InjectRepository(Category)
+    private readonly CategoryRepo: Repository<Category>,
+    @InjectRepository(Ingredient)
+    private readonly IngredientRepo: Repository<Ingredient>,
+    private readonly configS3Service: ConfigS3Service,
   ) { }
 
   async createMenuItem(dto: CreateMenuItemDto): Promise<MenuItem> {
-    const category = await this.menuCategoryRepo.findOneBy({ id: dto.categoryId });
+    const category = await this.CategoryRepo.findOneBy({ id: dto.categoryId });
     if (!category) throw new ResponseException('Danh mục không tồn tại', 400);
-
+    let imageUrl = '';
+    if (dto.image) {
+      imageUrl = await this.configS3Service.uploadFile(dto.image, 'menu-items');
+    }
     const menuItem = this.menuItemRepo.create({
       name: dto.name,
       price: dto.price,
       description: dto.description,
-      image: dto.image,
+      image: imageUrl,
       category,
       isAvailable: true,
     });
@@ -36,7 +41,7 @@ export class MenuitemsService {
 
     // Gắn nguyên liệu
     const ingredients = dto.ingredients.map((i) => {
-      return this.menuItemIngredientRepo.create({
+      return this.IngredientRepo.create({
         menuItem: savedItem,
         inventoryItem: { id: i.inventoryItemId }, // chỉ cần id
         quantity: i.quantity,
@@ -44,7 +49,7 @@ export class MenuitemsService {
       });
     });
 
-    await this.menuItemIngredientRepo.save(ingredients);
+    await this.IngredientRepo.save(ingredients);
 
     const fullItem = await this.menuItemRepo.findOne({
       where: { id: savedItem.id },

@@ -1,6 +1,7 @@
-import { Column, Entity, ManyToOne, PrimaryGeneratedColumn } from "typeorm";
-@Entity('menu_categories')
-export class MenuCategory {
+import { Column, Entity, PrimaryGeneratedColumn } from "typeorm";
+
+@Entity('categories')
+export class Category {
     @PrimaryGeneratedColumn('uuid')
     id: string;
 

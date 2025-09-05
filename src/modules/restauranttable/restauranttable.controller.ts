@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Put } from '@nestjs/common';
 import { RestaurantTablesService } from './restauranttable.service';
 import { CreateRestaurantTableDto } from './dto/create-restauranttable.dto';
 import { RestaurantTable } from './entities/restauranttable.entity';
@@ -7,6 +7,7 @@ import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
 import { Roles } from 'src/common/decorators/roles.decorator';
 import { UserRole } from 'src/common/enums';
 import { RolesGuard } from '../core/auth/guards/roles.guard';
+import { UpdateTableDto } from './dto/update-table.dto';
 
 @Controller('restauranttable')
 @ApiBearerAuth()
@@ -26,9 +27,32 @@ export class RestauranttableController {
   // this endpoint for get all tables
   @Get('/get-all-tables')
   @UseGuards(JwtAuthGuard)
-  @ApiOperation({ summary: 'Lấy danh sách tất cả bàn' })
+  @ApiOperation({ summary: 'Lấy danh sách tất cả bàn [Tất cả các Roles]' })
   async findAll(): Promise<RestaurantTable[]> {
     return this.restauranttableService.findAll();
   }
 
+  // this endpoint for get table by id
+  @Get('/get-table/:id')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Lấy thông tin bàn theo ID [Tất cả các Roles]' })
+  async getInfoTable(@Param('id') id: string): Promise<RestaurantTable> {
+    return this.restauranttableService.getInfoTable(id);
+  }
+
+  // this endpoint for delete table by id
+  @Put('/:id')
+  @ApiOperation({ summary: 'Cập nhật thông tin bàn [Only MANAGER]' })
+  @Roles(UserRole.MANAGER)
+  async update(@Param('id') id: string, @Body() dto: UpdateTableDto): Promise<RestaurantTable> {
+    return this.restauranttableService.updateTable(id, dto);
+  }
+
+  // this endpoint for delete table by id
+  @Delete('/:id')
+  @ApiOperation({ summary: 'Xoá bàn [Only MANAGER]' })
+  @Roles(UserRole.MANAGER)
+  async delete(@Param('id') id: string): Promise<{ message: string }> {
+    return this.restauranttableService.deleteTable(id);
+  }
 }
