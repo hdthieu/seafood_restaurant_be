@@ -1,46 +1,62 @@
-import {
-    S3Client,
-    PutObjectCommand,
-    PutObjectCommandInput,
-} from '@aws-sdk/client-s3';
+// src/s3/config-s3.service.ts
+import { S3Client, PutObjectCommand, PutObjectCommandInput } from '@aws-sdk/client-s3';
 import { Injectable } from '@nestjs/common';
 import { v4 as uuid } from 'uuid';
-import { extname } from 'path';
-import * as dotenv from 'dotenv';
-
-dotenv.config();
 
 @Injectable()
 export class ConfigS3Service {
-    private s3: S3Client;
-    private bucket: string;
+    private readonly s3: S3Client;
+    private readonly bucket: string;
+    private readonly region: string;
 
     constructor() {
+        this.region = process.env.AWS_REGION!;
+        this.bucket = process.env.AWS_BUCKET_NAME!;
+
         this.s3 = new S3Client({
-            region: process.env.AWS_REGION,
+            region: this.region,
             credentials: {
                 accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
                 secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
             },
         });
-        this.bucket = process.env.AWS_BUCKET_NAME!;
     }
 
-    async uploadFile(base64: string, folder = 'menu-items'): Promise<string> {
-        const buffer = Buffer.from(base64.replace(/^data:image\/\w+;base64,/, ''), 'base64');
-        const type = base64.match(/^data:image\/(\w+);base64/)?.[1] || 'png';
-        const filename = `${folder}/${uuid()}${extname(`.${type}`)}`;
-
-        const uploadParams: PutObjectCommandInput = {
-            Bucket: this.bucket,
-            Key: filename,
-            Body: buffer,
-            ContentEncoding: 'base64',
-            ContentType: `image/${type}`
+    private extFromMime(mime?: string) {
+        if (!mime) return '.bin';
+        const map: Record<string, string> = {
+            'image/jpeg': '.jpg',
+            'image/png': '.png',
+            'image/webp': '.webp',
+            'image/gif': '.gif',
+            'image/svg+xml': '.svg',
         };
+        return map[mime] ?? '.bin';
+    }
 
-        await this.s3.send(new PutObjectCommand(uploadParams));
+    private makeKey(folder: string, ext: string) {
+        const clean = (folder || 'uploads').replace(/^\/+|\/+$/g, '');
+        const dotExt = ext.startsWith('.') ? ext : `.${ext}`;
+        return `${clean}/${uuid()}${dotExt}`;
+    }
 
-        return `https://${this.bucket}.s3.${process.env.AWS_REGION}.amazonaws.com/${filename}`;
+    /** Upload ảnh từ file (memoryStorage -> buffer). Trả về key S3. */
+    async uploadBuffer(buffer: Buffer, mime?: string, folder = 'menu-items'): Promise<string> {
+        const Key = this.makeKey(folder, this.extFromMime(mime));
+        const put: PutObjectCommandInput = {
+            Bucket: this.bucket,
+            Key,
+            Body: buffer,
+            ContentType: mime,
+            // KHÔNG set ACL — tránh AccessControlListNotSupported
+            CacheControl: 'public, max-age=31536000, immutable',
+        };
+        await this.s3.send(new PutObjectCommand(put));
+        return Key; // trả về key; nếu cần URL, ghép sau
+    }
+
+    /** (tuỳ chọn) Tạo URL public S3 theo region/bucket nếu object public/qua CDN */
+    makeS3Url(key: string) {
+        return `https://${this.bucket}.s3.${this.region}.amazonaws.com/${key}`;
     }
 }

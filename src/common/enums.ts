@@ -16,6 +16,8 @@ export enum UserStatus {
 export enum InventoryAction {
     IMPORT = 'IMPORT',
     EXPORT = 'EXPORT',
+    ADJUST = 'ADJUST',       // điều chỉnh chênh lệch
+    WASTE = 'WASTE',
 }
 
 export enum Country {
