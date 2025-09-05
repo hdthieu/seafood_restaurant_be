@@ -1,4 +1,5 @@
-import { Column, Entity, PrimaryGeneratedColumn, UpdateDateColumn } from "typeorm";
+import { Category } from "src/modules/category/entities/category.entity";
+import { Column, Entity, JoinColumn, ManyToOne, PrimaryGeneratedColumn, UpdateDateColumn } from "typeorm";
 
 @Entity('inventory_items')
 export class InventoryItem {
@@ -22,4 +23,9 @@ export class InventoryItem {
 
     @UpdateDateColumn()
     updatedAt: Date;
+
+    @ManyToOne(() => Category, { nullable: true, onDelete: 'SET NULL' })
+    @JoinColumn({ name: 'category_id' })
+    category?: Category;
+
 }
