@@ -2,13 +2,13 @@ import { Injectable, OnApplicationBootstrap, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
-import { MenuCategory } from '../menucategory/entities/menucategory.entity';
+import { Category } from '../category/entities/category.entity';
 import { MenuItem } from '../menuitems/entities/menuitem.entity';
 import { InventoryItem } from '../inventoryitems/entities/inventoryitem.entity';
 import { RestaurantTable } from '../restauranttable/entities/restauranttable.entity';
 import { User } from '../user/entities/user.entity';
 import { Profile } from '../profile/entities/profile.entity';
-import { MenuItemIngredient } from '../menuitemingredient/entities/menuitemingredient.entity';
+import { Ingredient } from '../ingredient/entities/ingredient.entity';
 import { InventoryTransaction } from '../inventorytransaction/entities/inventorytransaction.entity';
 import { Area } from '../area/entities/area.entity';
 
@@ -20,8 +20,8 @@ export class SeederService implements OnApplicationBootstrap {
     private readonly logger = new Logger(SeederService.name);
 
     constructor(
-        @InjectRepository(MenuCategory)
-        private readonly menuCategoryRepo: Repository<MenuCategory>,
+        @InjectRepository(Category)
+        private readonly CategoryRepo: Repository<Category>,
 
         @InjectRepository(MenuItem)
         private readonly menuItemRepo: Repository<MenuItem>,
@@ -38,8 +38,8 @@ export class SeederService implements OnApplicationBootstrap {
         @InjectRepository(Profile)
         private readonly profileRepo: Repository<Profile>,
 
-        @InjectRepository(MenuItemIngredient)
-        private readonly menuItemIngredientRepo: Repository<MenuItemIngredient>,
+        @InjectRepository(Ingredient)
+        private readonly IngredientRepo: Repository<Ingredient>,
 
         @InjectRepository(InventoryTransaction)
         private readonly inventoryTransactionRepo: Repository<InventoryTransaction>,
@@ -63,13 +63,13 @@ export class SeederService implements OnApplicationBootstrap {
         }
 
         // 1) Menu Categories
-        const categoryCount = await this.menuCategoryRepo.count();
+        const categoryCount = await this.CategoryRepo.count();
         if (categoryCount === 0) {
-            const categories = this.menuCategoryRepo.create([
+            const categories = this.CategoryRepo.create([
                 { name: 'Đồ uống' },
                 { name: 'Hải sản' },
             ]);
-            await this.menuCategoryRepo.save(categories);
+            await this.CategoryRepo.save(categories);
             this.logger.log('✅ Seeded Menu Categories');
         }
 
@@ -87,7 +87,7 @@ export class SeederService implements OnApplicationBootstrap {
         // 3) Menu Items
         const itemCount = await this.menuItemRepo.count();
         if (itemCount === 0) {
-            const categories = await this.menuCategoryRepo.find();
+            const categories = await this.CategoryRepo.find();
             const items = this.menuItemRepo.create([
                 {
                     name: 'Bia Heineken',
@@ -147,7 +147,7 @@ export class SeederService implements OnApplicationBootstrap {
         }
 
         // 6) Menu Item Ingredients
-        const ingredientCount = await this.menuItemIngredientRepo.count();
+        const ingredientCount = await this.IngredientRepo.count();
         if (ingredientCount === 0) {
             const menuItems = await this.menuItemRepo.find({ relations: ['category'] });
             const inventoryItems = await this.inventoryItemRepo.find();
@@ -157,7 +157,7 @@ export class SeederService implements OnApplicationBootstrap {
             const tomHapBia = menuItems.find((i) => i.name.includes('Tôm hấp bia'));
 
             if (tom && bia && tomHapBia) {
-                const ingredients = this.menuItemIngredientRepo.create([
+                const ingredients = this.IngredientRepo.create([
                     {
                         menuItem: tomHapBia,
                         inventoryItem: tom,
@@ -171,7 +171,7 @@ export class SeederService implements OnApplicationBootstrap {
                         note: 'Bia Heineken lon',
                     },
                 ]);
-                await this.menuItemIngredientRepo.save(ingredients);
+                await this.IngredientRepo.save(ingredients);
                 this.logger.log('✅ Seeded Menu Item Ingredients');
             } else {
                 this.logger.warn('⚠️ Không đủ dữ liệu để seed nguyên liệu món ăn');

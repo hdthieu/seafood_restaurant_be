@@ -4,6 +4,7 @@ import { CreateAreaDto } from './dto/create-area.dto';
 import { UpdateAreaDto } from './dto/update-area.dto';
 import { ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
+import { GetAreaIdDto } from './dto/get-area-id.dto';
 
 @Controller('area')
 @ApiBearerAuth()
@@ -30,9 +31,10 @@ export class AreaController {
   @Post('get-id')
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Lấy ID khu vực theo tên' })
-  async getAreaIdByName(@Body() body: { name: string }) {
-    return this.areaService.getAreaIdByName(body.name);
+  async getAreaIdByName(@Body() dto: GetAreaIdDto) {
+    return this.areaService.getAreaIdByName(dto.name);
   }
+
 
 
 
