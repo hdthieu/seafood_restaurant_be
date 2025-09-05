@@ -74,15 +74,17 @@ export class SeederService implements OnApplicationBootstrap {
         }
 
         // 2) Inventory Items
+        // 2) Inventory Items
         const inventoryCount = await this.inventoryItemRepo.count();
         if (inventoryCount === 0) {
             const inventoryItems = this.inventoryItemRepo.create([
-                { name: 'Tôm sú', unit: 'kg', quantity: 100, alertThreshold: 10 },
-                { name: 'Bia Heineken', unit: 'chai', quantity: 200, alertThreshold: 20 },
+                { name: 'Tôm sú', unit: 'kg', quantity: 0, alertThreshold: 10 },   // <— quantity = 0
+                { name: 'Bia Heineken', unit: 'chai', quantity: 0, alertThreshold: 20 },
             ]);
             await this.inventoryItemRepo.save(inventoryItems);
             this.logger.log('✅ Seeded Inventory Items');
         }
+
 
         // 3) Menu Items
         const itemCount = await this.menuItemRepo.count();
@@ -178,39 +180,51 @@ export class SeederService implements OnApplicationBootstrap {
             }
         }
 
-        // 7) Inventory Transactions
+        // 7) Inventory Transactions (Opening stock via ledger)
         const transactionCount = await this.inventoryTransactionRepo.count();
         if (transactionCount === 0) {
-            const inventoryItems = await this.inventoryItemRepo.find();
-            const tTomSu = inventoryItems.find((i) => i.name === 'Tôm sú');
-            const tHeineken = inventoryItems.find((i) => i.name === 'Bia Heineken');
-            const user = await this.userRepo.findOne({
-                where: { email: 'admin@restaurant.com' },
-            });
+            const user = await this.userRepo.findOne({ where: { email: 'admin@restaurant.com' } });
+            const tTomSu = await this.inventoryItemRepo.findOne({ where: { name: 'Tôm sú' } });
+            const tHeineken = await this.inventoryItemRepo.findOne({ where: { name: 'Bia Heineken' } });
 
             if (!tTomSu || !tHeineken || !user) {
                 this.logger.warn('⚠️ Không đủ dữ liệu để seed Inventory Transactions');
             } else {
-                const transactions = this.inventoryTransactionRepo.create([
-                    {
-                        item: tTomSu,
-                        quantity: 50,
+                // Kịch bản nhập đầu kỳ
+                const openingList: Array<{ item: InventoryItem; qty: number; note: string }> = [
+                    { item: tTomSu, qty: 50, note: 'Nhập kho đầu kỳ' },
+                    { item: tHeineken, qty: 100, note: 'Nhập kho đầu kỳ' },
+                ];
+
+                for (const row of openingList) {
+                    // Lấy tồn trước dưới dạng number (decimal từ DB có thể là string)
+                    const before = Number(row.item.quantity ?? 0);
+                    const delta = Number(row.qty);
+                    const after = before + delta;
+
+                    // 1) Cập nhật tồn cho item
+                    row.item.quantity = after;
+                    await this.inventoryItemRepo.save(row.item);
+
+                    // 2) Lưu giao dịch có before/after
+                    const tx = this.inventoryTransactionRepo.create({
+                        item: row.item,
+                        quantity: delta,
                         action: InventoryAction.IMPORT,
-                        note: 'Nhập kho đầu kỳ',
+                        note: row.note,
+                        beforeQty: before,
+                        afterQty: after,
+                        refType: 'OPENING',
+                        refId: row.item.id,         // tuỳ bạn, có thể để null
                         performedBy: user,
-                    },
-                    {
-                        item: tHeineken,
-                        quantity: 100,
-                        action: InventoryAction.IMPORT,
-                        note: 'Nhập kho đầu kỳ',
-                        performedBy: user,
-                    },
-                ]);
-                await this.inventoryTransactionRepo.save(transactions);
-                this.logger.log('✅ Seeded Inventory Transactions');
+                    });
+                    await this.inventoryTransactionRepo.save(tx);
+                }
+
+                this.logger.log('✅ Seeded Inventory Transactions (opening balances)');
             }
         }
+
 
         this.logger.log('🎉 Seeder hoàn tất.');
     }
