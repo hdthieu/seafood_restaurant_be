@@ -108,6 +108,12 @@ export class SeederService implements OnApplicationBootstrap {
             this.logger.log('✅ Seeded Menu Items');
         }
 
+
+
+
+
+
+
         // 4) Tables (tham chiếu Area)
         const tableCount = await this.tableRepo.count();
         if (tableCount === 0) {
@@ -118,6 +124,20 @@ export class SeederService implements OnApplicationBootstrap {
                 const tables = this.tableRepo.create([
                     { name: 'Bàn 1', seats: 4, area: lau1 },
                     { name: 'Bàn 2', seats: 4, area: lau1 },
+                    { name: 'Bàn 3', seats: 6, area: lau1 },
+                    { name: 'Bàn 4', seats: 2, area: lau1 },
+                    { name: 'Bàn 5', seats: 8, area: lau1 },
+                    { name: 'Bàn 6', seats: 4, area: lau1 },
+                    { name: 'Bàn 7', seats: 4, area: lau1 },
+                    { name: 'Bàn 8', seats: 6, area: lau1 },
+                    { name: 'Bàn 9', seats: 2, area: lau1 },
+                    { name: 'Bàn 10', seats: 8, area: lau1 },
+                    { name: 'Bàn 11', seats: 4, area: lau1 },
+
+                    { name: 'Bàn 12', seats: 4, area: lau1 },   
+                    { name: 'Bàn 13', seats: 6, area: lau1 },
+                    { name: 'Bàn 14', seats: 2, area: lau1 },
+                    { name: 'Bàn 15', seats: 8, area: lau1 },
                 ]);
                 await this.tableRepo.save(tables);
                 this.logger.log('✅ Seeded Tables');
@@ -125,27 +145,45 @@ export class SeederService implements OnApplicationBootstrap {
         }
 
         // 5) Admin User + Profile
+        // 5) Seed Users + Profiles (Admin, Cashier, Kitchen) – chạy khi bảng user đang rỗng
         const userCount = await this.userRepo.count();
         if (userCount === 0) {
-            const hashedPassword = await bcrypt.hash('Admin123@', 10);
-            const user = this.userRepo.create({
-                email: 'admin@restaurant.com',
-                password: hashedPassword,
-                role: UserRole.MANAGER,
-                status: UserStatus.ACTIVE,
-                isActive: true,
-            });
-            const savedUser = await this.userRepo.save(user);
+            const usersToSeed: Array<{
+                email: string;
+                pass: string;
+                role: UserRole;
+                fullName: string;
+            }> = [
+                    { email: 'admin@restaurant.com', pass: 'Admin123@', role: UserRole.MANAGER, fullName: 'Quản lý hệ thống' },
+                    { email: 'cashier@restaurant.com', pass: 'Cashier123@', role: UserRole.CASHIER, fullName: 'Thu ngân' },
+                    { email: 'kitchen@restaurant.com', pass: 'Kitchen123@', role: UserRole.KITCHEN, fullName: 'Nhân viên bếp' },
+                    { email: 'waiter@restaurant.com',  pass: 'Waiter123@',  role: UserRole.WAITER,  fullName: 'Nhân viên phục vụ' },
+                ];
 
-            const profile = this.profileRepo.create({
-                fullName: 'Quản lý hệ thống',
-                user: savedUser,
-                address: 'Nhà hàng Hải sản ABC',
-                city: 'Hồ Chí Minh',
-            });
-            await this.profileRepo.save(profile);
+            for (const u of usersToSeed) {
+                const hashed = await bcrypt.hash(u.pass, 10);
 
-            this.logger.log('✅ Seeded Admin User: admin@restaurant.com / admin123');
+                const user = await this.userRepo.save(
+                    this.userRepo.create({
+                        email: u.email,
+                        password: hashed,
+                        role: u.role,
+                        status: UserStatus.ACTIVE,
+                        isActive: true,
+                    }),
+                );
+
+                await this.profileRepo.save(
+                    this.profileRepo.create({
+                        fullName: u.fullName,
+                        user,
+                        address: 'Nhà hàng Hải sản ABC',
+                        city: 'Hồ Chí Minh',
+                    }),
+                );
+
+                this.logger.log(`✅ Seeded ${u.role}: ${u.email} / ${u.pass}`);
+            }
         }
 
         // 6) Menu Item Ingredients

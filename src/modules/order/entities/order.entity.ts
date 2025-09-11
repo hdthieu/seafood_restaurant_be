@@ -3,7 +3,8 @@ import { OrderItem } from "src/modules/orderitems/entities/orderitem.entity";
 import { RestaurantTable } from "src/modules/restauranttable/entities/restauranttable.entity";
 import { User } from "src/modules/user/entities/user.entity";
 import { Column, CreateDateColumn, Entity, ManyToOne, OneToMany, PrimaryGeneratedColumn, UpdateDateColumn } from "typeorm";
-
+import { Invoice } from "src/modules/invoice/entities/invoice.entity";
+import { OneToOne } from "typeorm";
 @Entity('orders')
 export class Order {
     @PrimaryGeneratedColumn('uuid')
@@ -29,5 +30,6 @@ export class Order {
 
     @Column({ type: 'enum', enum: OrderType, default: OrderType.DINE_IN })
     orderType: OrderType;
-
+@OneToOne(() => Invoice, (inv) => inv.order) invoice?: Invoice;
+invoices: Invoice[];
 }

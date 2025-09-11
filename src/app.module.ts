@@ -5,7 +5,7 @@ import { InvoiceModule } from './modules/invoice/invoice.module';
 import { InventorytransactionModule } from './modules/inventorytransaction/inventorytransaction.module';
 import { InventoryitemsModule } from './modules/inventoryitems/inventoryitems.module';
 import { OrderitemsModule } from './modules/orderitems/orderitems.module';
-import { OrderModule } from './modules/order/order.module';
+import { OrdersModule } from './modules/order/order.module';
 import { MenuitemsModule } from './modules/menuitems/menuitems.module';
 import { Category } from './modules/category/entities/category.entity';
 import { ProfileModule } from './modules/profile/profile.module';
@@ -21,6 +21,7 @@ import { AreaModule } from './modules/area/area.module';
 import { ConfigS3Module } from './common/AWS/config-s3/config-s3.module';
 import { IngredientModule } from './modules/ingredient/ingredient.module';
 import { CategoryModule } from './modules/category/category.module';
+import { PaymentModule } from './modules/payments/payments.module';
 @Module({
   imports: [ConfigModule.forRoot({ isGlobal: true }),
   TypeOrmModule.forRoot({
@@ -34,7 +35,7 @@ import { CategoryModule } from './modules/category/category.module';
     synchronize: true,
     autoLoadEntities: true
   }),
-    UserModule, ProfileModule, Category, MenuitemsModule, OrderModule, OrderitemsModule, InventoryitemsModule, InventorytransactionModule, InvoiceModule, IngredientModule, OrderstatushistoryModule, SeederModule, RestauranttableModule, AuthModule, AreaModule, ConfigS3Module, IngredientModule, CategoryModule],
+    UserModule, ProfileModule, Category, MenuitemsModule, OrdersModule, OrderitemsModule, InventoryitemsModule, InventorytransactionModule, InvoiceModule, IngredientModule, OrderstatushistoryModule, SeederModule, RestauranttableModule, AuthModule, AreaModule, ConfigS3Module, IngredientModule, CategoryModule, PaymentModule],
   controllers: [AppController],
   providers: [AppService],
 })

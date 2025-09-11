@@ -18,6 +18,8 @@ export enum InventoryAction {
     EXPORT = 'EXPORT',
     ADJUST = 'ADJUST',       // điều chỉnh chênh lệch
     WASTE = 'WASTE',
+     IN = 'IN',
+  OUT = 'OUT',
 }
 
 export enum Country {
@@ -36,6 +38,11 @@ export enum OrderStatus {
     CANCELLED = 'CANCELLED',        // Đơn bị hủy (khách hủy hoặc admin)
 }
 
+
+
+
+
+
 export enum TableStatus {
     ACTIVE = 'ACTIVE',     // Đang hoạt động
     INACTIVE = 'INACTIVE', // Tạm ngưng
@@ -52,3 +59,27 @@ export enum OrderType {
     DINE_IN = 'DINE_IN',
     TAKE_AWAY = 'TAKE_AWAY'
 }
+
+
+
+
+
+
+export enum InvoiceStatus {
+  UNPAID = 'UNPAID',
+  PARTIAL = 'PARTIAL',
+  PAID    = 'PAID',
+}
+
+export enum PaymentMethod {
+  CASH  = 'CASH',
+  CARD  = 'CARD',
+  VNPAY = 'VNPAY',
+}
+
+export enum PaymentStatus {
+  PENDING = 'PENDING',
+  SUCCESS = 'SUCCESS',
+  FAILED  = 'FAILED',
+}
+
