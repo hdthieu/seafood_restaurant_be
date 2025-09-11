@@ -46,10 +46,10 @@ export class InvoicesService {
     });
   }
 
-  /** Thêm payment vào invoice và tính lại trạng thái (UNPAID|PARTIAL|PAID).
-   *  Nếu hóa đơn PAID thì set luôn Order.status = PAID.
-   */
-  async addPayment(invoiceId: string, dto: { amount: number; method?: PaymentMethod }) {
+  async addPayment(
+  invoiceId: string,
+  dto: { amount: number; method?: PaymentMethod; txnRef?: string }
+) {
   return this.ds.transaction(async (em) => {
     const invRepo = em.getRepository(Invoice);
     const payRepo = em.getRepository(Payment);
@@ -63,23 +63,29 @@ export class InvoicesService {
       throw new BadRequestException('INVALID_AMOUNT');
     }
 
-    // 🔴 Quan trọng: set invoiceId & paymentMethod đúng field
+    // Map enum bên ngoài -> union type của entity
+    
+     
+
+    // Tạo bản ghi payment (đã nhận tiền nên status='PAID')
     const payment = payRepo.create({
-      invoiceId: inv.id,                                   // <<<
-      paymentMethod: dto.method ?? PaymentMethod.CASH,     // <<<
-      amount: amountNum.toFixed(2),                        // <<<
-      status: PaymentStatus.SUCCESS,                       // <<< nếu muốn pending thì đổi
-      // transactionNo: ... (nếu có)
-    });
+      invoiceId: inv.id,
+      invoice: inv,                // ManyToOne
+      amount: amountNum,           // bigint -> number
+      method:     dto.method === PaymentMethod.VNPAY ? 'VNPAY' : 'CASH',    // 'CASH' | 'VNPAY'
+      status: 'PAID',              // PaymentState
+      txnRef: dto.txnRef ?? null,
+    } as Partial<Payment>);
     await payRepo.save(payment);
 
-    // Tính lại số tiền đã thanh toán (SUCCESS)
+    // Tính tổng đã trả (chỉ tính những payment 'PAID')
     const successPayments = await payRepo.find({
-      where: { invoiceId: inv.id, status: PaymentStatus.SUCCESS },
+      where: { invoiceId: inv.id, status: 'PAID' },
     });
     const paid = successPayments.reduce((s, p) => s + Number(p.amount), 0);
     const total = Number(inv.totalAmount);
 
+    // Cập nhật trạng thái invoice theo enum InvoiceStatus
     inv.status =
       paid >= total
         ? InvoiceStatus.PAID
@@ -88,8 +94,8 @@ export class InvoicesService {
           : InvoiceStatus.UNPAID;
     await invRepo.save(inv);
 
-    // Mirror đóng order khi invoice ĐÃ PAID
-    if (inv.status === InvoiceStatus.PAID) {
+    // Nếu invoice đã PAID thì đóng order tương ứng
+    if (inv.status === InvoiceStatus.PAID && inv.orderId) {
       const order = await oRepo.findOne({ where: { id: inv.orderId } });
       if (order && order.status !== OrderStatus.PAID) {
         order.status = OrderStatus.PAID;

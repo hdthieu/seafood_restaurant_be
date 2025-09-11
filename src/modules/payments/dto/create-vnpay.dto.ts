@@ -1,15 +1,23 @@
-import { IsNotEmpty, IsOptional, IsString, IsUUID } from 'class-validator';
+import { IsIP, IsInt, IsOptional, IsPositive, IsString } from 'class-validator';
 
-export class CreateVNPayPaymentDto {
-  @IsUUID()
-  @IsNotEmpty()
-  invoiceId: string;
+export class CreateVNPayDto {
+  @IsString()
+  invoiceId!: string;
+
+  @IsOptional()
+  @IsInt()
+  @IsPositive()
+  amount?: number;
 
   @IsOptional()
   @IsString()
-  bankCode?: string;
+  bankCode?: string; // 'VNBANK' | 'INTCARD' | 'VNPAYQR' | '<shortBank>'
+
+  @IsIP()
+  ipAddress!: string;
 
   @IsOptional()
-  @IsString()
-  returnUrl?: string; // Nếu muốn override env
+  @IsInt()
+  @IsPositive()
+  expireInMinutes?: number; // default 15
 }
