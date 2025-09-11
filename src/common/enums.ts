@@ -83,3 +83,7 @@ export enum PaymentStatus {
   FAILED  = 'FAILED',
 }
 
+//Khách hàng 
+export enum CustomerType { PERSON = 'PERSON', COMPANY = 'COMPANY' }
+export enum Gender { MALE = 'MALE', FEMALE = 'FEMALE', OTHER = 'OTHER' }
+

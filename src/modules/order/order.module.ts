@@ -10,6 +10,7 @@ import { InventoryItem } from '../inventoryitems/entities/inventoryitem.entity';
 import { InventoryTransaction } from '../inventorytransaction/entities/inventorytransaction.entity';
 import { RestaurantTable } from '../restauranttable/entities/restauranttable.entity';
 import { OrdersController } from './order.controller';
+import {CustomersModule} from 'src/modules/customers/customers.module'
 @Module({
   imports: [
     TypeOrmModule.forFeature([
@@ -22,6 +23,7 @@ import { OrdersController } from './order.controller';
       InventoryTransaction,
       RestaurantTable,
     ]),
+    CustomersModule,
   ],
   controllers: [OrdersController],
   providers: [OrdersService],

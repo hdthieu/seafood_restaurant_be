@@ -20,7 +20,9 @@ import { UpdateOrderItemQtyDto } from './dto/update-order-item';
 import { CancelOrderDto } from './dto/cancel-order.dto';
 import { InvoiceStatus } from 'src/common/enums';
 import { Invoice } from 'src/modules/invoice/entities/invoice.entity';
-
+import { AttachCustomerDto } from 'src/modules/customers/dtos/attach-customers.dto';
+import { Customer } from 'src/modules/customers/entities/customers.entity';
+import {CustomersService} from 'src/modules/customers/customers.service';
 const ALLOWED_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   [OrderStatus.PENDING]:   [OrderStatus.CONFIRMED, OrderStatus.CANCELLED],
   [OrderStatus.CONFIRMED]: [OrderStatus.PREPARING, OrderStatus.CANCELLED],
@@ -43,6 +45,8 @@ export class OrdersService {
     @InjectRepository(InventoryItem) private readonly invRepo: Repository<InventoryItem>,
     @InjectRepository(InventoryTransaction) private readonly invTxRepo: Repository<InventoryTransaction>,
     @InjectRepository(RestaurantTable) private readonly tableRepo: Repository<RestaurantTable>,
+    @InjectRepository(Customer) private readonly customers: Repository<Customer>,
+    private readonly customersSvc: CustomersService,
     
   ) {}
 
@@ -458,4 +462,31 @@ async cancel(orderId: string, dto: CancelOrderDto) {
       return { ...updated, cancelReason: dto.reason ?? null };
     });
   }
+
+async attachCustomer(orderId: string, dto: AttachCustomerDto) {
+    const order = await this.orderRepo.findOne({ where: { id: orderId } });
+    if (!order) throw new NotFoundException('ORDER_NOT_FOUND');
+
+    let customerId: string | null = null;
+
+    if (dto.walkin) {
+      customerId = (await this.customersSvc.getOrCreateWalkin()).id;
+    } else if (dto.customerId) {
+      customerId = dto.customerId;
+    } else if (dto.phone) {
+      const c = await this.customersSvc.upsertByPhone(dto.phone, dto.name);
+      customerId = c.id;
+    } else {
+      throw new BadRequestException('MISSING_CUSTOMER_INFO');
+    }
+
+    order.customerId = customerId;
+    await this.orderRepo.save(order);
+    return order;
+  }
 }
+
+
+
+
+

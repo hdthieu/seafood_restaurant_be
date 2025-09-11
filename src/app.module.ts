@@ -22,6 +22,7 @@ import { ConfigS3Module } from './common/AWS/config-s3/config-s3.module';
 import { IngredientModule } from './modules/ingredient/ingredient.module';
 import { CategoryModule } from './modules/category/category.module';
 import { PaymentModule } from './modules/payments/payments.module';
+import { CustomersModule } from './modules/customers/customers.module';
 @Module({
   imports: [ConfigModule.forRoot({ isGlobal: true }),
   TypeOrmModule.forRoot({
@@ -35,7 +36,7 @@ import { PaymentModule } from './modules/payments/payments.module';
     synchronize: true,
     autoLoadEntities: true
   }),
-    UserModule, ProfileModule, Category, MenuitemsModule, OrdersModule, OrderitemsModule, InventoryitemsModule, InventorytransactionModule, InvoiceModule, IngredientModule, OrderstatushistoryModule, SeederModule, RestauranttableModule, AuthModule, AreaModule, ConfigS3Module, IngredientModule, CategoryModule, PaymentModule],
+    UserModule, ProfileModule, Category, MenuitemsModule, OrdersModule, OrderitemsModule, InventoryitemsModule, InventorytransactionModule, InvoiceModule, IngredientModule, OrderstatushistoryModule, SeederModule, RestauranttableModule, AuthModule, AreaModule, ConfigS3Module, IngredientModule, CategoryModule, PaymentModule, CustomersModule],
   controllers: [AppController],
   providers: [AppService],
 })
