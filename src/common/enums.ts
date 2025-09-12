@@ -87,3 +87,14 @@ export enum PaymentStatus {
 export enum CustomerType { PERSON = 'PERSON', COMPANY = 'COMPANY' }
 export enum Gender { MALE = 'MALE', FEMALE = 'FEMALE', OTHER = 'OTHER' }
 
+
+// Trạng thái 
+export enum ItemStatus {
+  PENDING   = 'PENDING',
+  CONFIRMED = 'CONFIRMED',
+  PREPARING = 'PREPARING',
+  READY     = 'READY',
+  SERVED    = 'SERVED',
+  CANCELLED = 'CANCELLED',
+}
+

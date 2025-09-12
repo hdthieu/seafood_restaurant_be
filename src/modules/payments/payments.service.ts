@@ -40,7 +40,7 @@ export class PaymentService {
   async createVNPayUrl(dto: CreateVNPayParams) {
     const inv = await this.invoiceRepo.findOne({ where: { id: dto.invoiceId } });
     if (!inv) throw new BadRequestException('INVOICE_NOT_FOUND');
-
+    console.log('[VNPay][createVNPayUrl] invoice=', inv);
     const amount = Math.round(Number(dto.amount ?? inv.totalAmount));
     if (!amount || amount <= 0) throw new BadRequestException('INVALID_AMOUNT');
 

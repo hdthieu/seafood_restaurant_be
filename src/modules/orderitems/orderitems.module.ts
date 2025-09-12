@@ -1,9 +1,16 @@
 import { Module } from '@nestjs/common';
-import { OrderitemsService } from './orderitems.service';
-import { OrderitemsController } from './orderitems.controller';
-
+import { OrderItemsService } from './orderitems.service';
+import { OrderItemsController } from './orderitems.controller';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import { OrderItem } from './entities/orderitem.entity';
+import { Order } from 'src/modules/order/entities/order.entity';
+import { OrderStatusHistory } from '../orderstatushistory/entities/orderstatushistory.entity';
 @Module({
-  controllers: [OrderitemsController],
-  providers: [OrderitemsService],
+  imports: [
+    TypeOrmModule.forFeature([OrderItem, Order, OrderStatusHistory]), // PHẢI có
+  ],
+  controllers: [OrderItemsController],
+  providers: [OrderItemsService],
+  exports: [OrderItemsService,TypeOrmModule],
 })
 export class OrderitemsModule {}
