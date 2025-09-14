@@ -245,5 +245,48 @@ async updateStatusBulk(dto: UpdateItemsStatusDto) {
   }
 
 
+async moveOne(itemId: string, to: ItemStatus) {
+  return this.ds.transaction(async (em) => {
+    const iRepo = em.getRepository(OrderItem);
+    const oRepo = em.getRepository(Order);
+
+    const it = await iRepo.findOne({
+      where: { id: itemId },
+      relations: ['order', 'menuItem'],
+    });
+    if (!it) throw new NotFoundException('ITEM_NOT_FOUND');
+
+    // validate transition cho 1 đơn vị
+    if (!ALLOWED_ITEM_TRANSITIONS[it.status]?.includes(to)) {
+      throw new BadRequestException(`INVALID_ITEM_TRANSITION: ${it.status} -> ${to}`);
+    }
+
+    if (it.quantity > 1) {
+      // giảm 1 ở row cũ
+      it.quantity -= 1;
+      await iRepo.save(it);
+
+      // tạo row mới số lượng 1, trạng thái = to
+      const clone = iRepo.create({
+        order: it.order,
+        menuItem: it.menuItem,
+        quantity: 1,
+        status: to,
+      });
+      await iRepo.save(clone);
+
+      await this.recomputeOrderStatus(em, it.order.id);
+      return { movedId: clone.id, fromId: it.id, qtyChanged: 1, status: to };
+    } else {
+      // quantity = 1: đổi trạng thái chính row đó
+      it.status = to;
+      await iRepo.save(it);
+
+      await this.recomputeOrderStatus(em, it.order.id);
+      return { movedId: it.id, fromId: null, qtyChanged: 1, status: to };
+    }
+  });
+}
+
 
 }

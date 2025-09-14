@@ -7,17 +7,9 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { ILike, Repository } from 'typeorm';
 import { Customer } from './entities/customers.entity';
 import { Order } from '../order/entities/order.entity';
-
-type CreateCustomerDto = {
-  name: string;
-  phone?: string;
-  email?: string;
-  gender?: string;         // hoặc enum của bạn
-  birthday?: string;       // 'YYYY-MM-DD'
-  address?: string;
-  code?: string;           // cho phép truyền, nếu không sẽ gen
-};
-
+import { Brackets } from 'typeorm';
+import { CreateCustomerDto } from './dtos/create-customers.dto';
+import { CustomersFilterDto } from './dtos/customers-filter.dto';
 @Injectable()
 export class CustomersService {
   constructor(
@@ -32,6 +24,30 @@ export class CustomersService {
     const rnd = Math.floor(Math.random() * 9000 + 1000);
     return `CUS-${ymd}-${rnd}`;
   }
+
+async findAll(
+  page = 1,
+  limit = 20,
+): Promise<{ data: Customer[]; total: number; page: number; limit: number }> {
+  // page bắt đầu từ 1
+  const [data, total] = await this.cusRepo.findAndCount({
+    where: { isWalkin: false },   // nếu muốn loại bỏ khách vãng lai
+    order: { createdAt: 'DESC' }, // sắp xếp mới nhất trước
+    skip: (page - 1) * limit,
+    take: limit,
+  });
+
+  return {
+    data,
+    total,
+    page,
+    limit,
+  };
+}
+
+
+
+
 
   // ===== APIs =====
   async getOrCreateWalkin(): Promise<Customer> {
@@ -52,30 +68,37 @@ export class CustomersService {
     return this.cusRepo.save(entity);
   }
 
-  async create(dto: CreateCustomerDto): Promise<Customer> {
-    if (!dto.name?.trim()) throw new BadRequestException('NAME_REQUIRED');
 
-    const entity = this.cusRepo.create({
-      code: dto.code ?? this.genCode(),
-      name: dto.name.trim(),
-      phone: dto.phone ?? null,
-      email: dto.email ?? null,
-      gender: dto.gender ?? null,
-      birthday: dto.birthday ? new Date(dto.birthday) : null,
-      address: dto.address ?? null,
-      isWalkin: false,
-    });
+async create(dto: CreateCustomerDto): Promise<Customer> {
+  if (!dto.name?.trim()) throw new BadRequestException('NAME_REQUIRED');
 
-    try {
-      return await this.cusRepo.save(entity);
-    } catch (e: any) {
-      if (e?.code === '23505') {
-        // unique violation (phone/code)
-        throw new BadRequestException('Số điện thoại hoặc mã đã tồn tại');
-      }
-      throw e;
+  const entity = this.cusRepo.create({
+    type: dto.type,                                   // PERSONAL | COMPANY
+    code: dto.code ?? this.genCode(),
+    name: dto.name.trim(),
+    companyName: dto.companyName ?? null,
+    phone: dto.phone ?? null,
+    email: dto.email ?? null,
+    gender: dto.gender ?? null,
+    birthday: dto.birthday ? new Date(dto.birthday) : null,
+    address: dto.address ?? null,
+    province: dto.province ?? null,
+    district: dto.district ?? null,
+    ward: dto.ward ?? null,
+    taxNo: dto.taxNo ?? null,
+    identityNo: dto.identityNo ?? null,
+    isWalkin: false,
+  });
+
+  try {
+    return await this.cusRepo.save(entity);
+  } catch (e: any) {
+    if (e?.code === '23505') {
+      throw new BadRequestException('Số điện thoại hoặc mã đã tồn tại');
     }
+    throw e;
   }
+}
 
   /**
    * Tạo mới (nếu chưa có) theo phone, hoặc cập nhật một số field nếu đã tồn tại
@@ -165,4 +188,54 @@ export class CustomersService {
     await this.orderRepo.save(order);
     return { ok: true, orderId: order.id, customerId: customer.id };
   }
+
+
+
+
+async filterAndPaginate(dto: CustomersFilterDto) {
+  const page = Math.max(1, dto.page ?? 1);
+  const limit = Math.min(100, Math.max(1, dto.limit ?? 20));
+  const qb = this.cusRepo.createQueryBuilder('c')
+    .where('c.isWalkin = :w', { w: false });
+
+  // q: tìm theo code/name/phone/email
+  if (dto.q?.trim()) {
+    const key = `%${dto.q.trim()}%`;
+    qb.andWhere(new Brackets(b => {
+      b.where('c.code ILIKE :key', { key })
+       .orWhere('c.name ILIKE :key', { key })
+       .orWhere('c.phone ILIKE :key', { key })
+       .orWhere('c.email ILIKE :key', { key });
+    }));
+  }
+
+  if (dto.type)   qb.andWhere('c.type = :type', { type: dto.type });
+  if (dto.gender) qb.andWhere('c.gender = :gender', { gender: dto.gender });
+
+  // created_at range
+  if (dto.createdFrom) qb.andWhere('c.created_at >= :cf', { cf: dto.createdFrom });
+  if (dto.createdTo)   qb.andWhere('c.created_at <  :ct', { ct: dto.createdTo + ' 23:59:59' });
+
+  // birthday range (cột date)
+  if (dto.birthdayFrom) qb.andWhere('c.birthday >= :bf', { bf: dto.birthdayFrom });
+  if (dto.birthdayTo)   qb.andWhere('c.birthday <= :bt', { bt: dto.birthdayTo });
+
+  if (dto.province) qb.andWhere('c.province ILIKE :prov', { prov: `%${dto.province}%` });
+  if (dto.district) qb.andWhere('c.district ILIKE :dist', { dist: `%${dto.district}%` });
+  if (dto.ward)     qb.andWhere('c.ward ILIKE :ward',     { ward: `%${dto.ward}%` });
+
+  qb.orderBy('c.updated_at', 'DESC')
+    .skip((page - 1) * limit)
+    .take(limit);
+
+  const [rows, total] = await qb.getManyAndCount();
+  return {
+    data: rows,
+    total,
+    page,
+    limit,
+    pages: Math.ceil(total / limit),
+  };
+}
+
 }

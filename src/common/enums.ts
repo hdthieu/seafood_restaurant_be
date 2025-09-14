@@ -84,8 +84,9 @@ export enum PaymentStatus {
 }
 
 //Khách hàng 
-export enum CustomerType { PERSON = 'PERSON', COMPANY = 'COMPANY' }
+export enum CustomerType { PERSONAL = 'PERSONAL', COMPANY = 'COMPANY' }
 export enum Gender { MALE = 'MALE', FEMALE = 'FEMALE', OTHER = 'OTHER' }
+
 
 
 // Trạng thái 

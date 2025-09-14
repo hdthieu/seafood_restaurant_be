@@ -27,4 +27,9 @@ export class OrderItemsController {
   // cancelItems(@Body() dto: CancelItemsDto) {
   //   return this.svc.cancelItems(dto);
   // }
+  @Patch('move-one')
+async moveOne(@Body() dto: { itemId: string; to: ItemStatus }) {
+  return this.svc.moveOne(dto.itemId, dto.to);
+}
+
 }

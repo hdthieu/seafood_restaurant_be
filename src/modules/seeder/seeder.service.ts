@@ -11,8 +11,10 @@ import { Profile } from '../profile/entities/profile.entity';
 import { Ingredient } from '../ingredient/entities/ingredient.entity';
 import { InventoryTransaction } from '../inventorytransaction/entities/inventorytransaction.entity';
 import { Area } from '../area/entities/area.entity';
-
+import { Customer } from '../customers/entities/customers.entity';
 import { UserStatus, UserRole, InventoryAction } from 'src/common/enums';
+import {CustomerType} from 'src/common/enums';
+import {Gender} from 'src/common/enums';
 import * as bcrypt from 'bcrypt';
 
 @Injectable()
@@ -46,6 +48,8 @@ export class SeederService implements OnApplicationBootstrap {
 
         @InjectRepository(Area)
         private readonly areaRepo: Repository<Area>,
+    @InjectRepository(Customer)
+    private readonly customerRepo: Repository<Customer>,
     ) { }
 
     async onApplicationBootstrap() {
@@ -107,6 +111,96 @@ export class SeederService implements OnApplicationBootstrap {
             await this.menuItemRepo.save(items);
             this.logger.log('✅ Seeded Menu Items');
         }
+
+
+
+ const hasCustomers = await this.customerRepo.count();
+    if (hasCustomers === 0) {
+      // Khách lẻ (WALKIN) – để attach nhanh khi bán lẻ
+      const walkin = this.customerRepo.create({
+        code: 'WALKIN',
+        type: CustomerType.PERSONAL,
+        name: 'Khách lẻ',
+        isWalkin: true,
+        phone: null,
+        email: null,
+        gender: null,
+        birthday: null,
+        address: null,
+        province: null,
+        district: null,
+        ward: null,
+      });
+
+      // Một vài khách mẫu
+      const samples: Partial<Customer>[] = [
+        {
+          code: this.genCusCode(),
+          type: CustomerType.PERSONAL,
+          name: 'Anh Giang - Kim Mã',
+          phone: '0901000001',
+          email: 'giang@example.com',
+          gender: Gender.MALE,
+          address: 'Kim Mã, Ba Đình, Hà Nội',
+          province: 'Hà Nội',
+          district: 'Ba Đình',
+          ward: 'Kim Mã',
+        },
+        {
+          code: this.genCusCode(),
+          type: CustomerType.PERSONAL,
+          name: 'Anh Hoàng - Sài Gòn',
+          phone: '0901000002',
+          email: 'hoang@example.com',
+          gender: Gender.MALE,
+          address: 'Q1, TP.HCM',
+          province: 'Hồ Chí Minh',
+          district: 'Quận 1',
+          ward: 'Bến Nghé',
+        },
+        {
+          code: this.genCusCode(),
+          type: CustomerType.COMPANY,
+          name: 'Công ty TNHH ABC',
+          companyName: 'Công ty TNHH ABC',
+          phone: '02873001234',
+          email: 'contact@abc.com',
+          gender: null, // công ty không cần giới tính
+          taxNo: '0312345678',
+          address: 'Tân Bình, TP.HCM',
+          province: 'Hồ Chí Minh',
+          district: 'Tân Bình',
+          ward: '4',
+        },
+      ];
+
+      // Lưu (bỏ qua trùng lặp nếu có)
+      await this.customerRepo.save(walkin);
+      for (const s of samples) {
+        try {
+          // tránh phone/code trùng
+          const existed =
+            (s.phone && (await this.customerRepo.findOne({ where: { phone: s.phone } }))) ||
+            (s.code && (await this.customerRepo.findOne({ where: { code: s.code } })));
+          if (!existed) {
+            await this.customerRepo.save(this.customerRepo.create(s));
+          }
+        } catch (e) {
+          // 23505 = unique_violation -> bỏ qua
+          if ((e as any)?.code !== '23505') throw e;
+        }
+      }
+
+      this.logger.log('✅ Seeded Customers (WALKIN + samples)');
+    }
+
+
+
+
+
+
+
+
 
 
 
@@ -266,4 +360,9 @@ export class SeederService implements OnApplicationBootstrap {
 
         this.logger.log('🎉 Seeder hoàn tất.');
     }
+     private genCusCode() {
+    const ymd = new Date().toISOString().slice(2, 10).replace(/-/g, '');
+    const rnd = Math.floor(Math.random() * 9000 + 1000);
+    return `CUS-${ymd}-${rnd}`;
+  }
 }

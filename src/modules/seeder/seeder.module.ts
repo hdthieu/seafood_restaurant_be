@@ -11,6 +11,7 @@ import { Profile } from '../profile/entities/profile.entity';
 import { Ingredient } from '../ingredient/entities/ingredient.entity';
 import { InventoryTransaction } from '../inventorytransaction/entities/inventorytransaction.entity';
 import { Area } from '../area/entities/area.entity';
+import { Customer } from '../customers/entities/customers.entity';
 
 @Module({
   imports: [
@@ -23,7 +24,8 @@ import { Area } from '../area/entities/area.entity';
       Profile,
       Ingredient,
       InventoryTransaction,
-      Area
+      Area,
+      Customer,
     ]),
   ],
   controllers: [SeederController],

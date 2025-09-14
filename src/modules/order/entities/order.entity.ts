@@ -33,7 +33,7 @@ export class Order {
     @Column({ type: 'enum', enum: OrderType, default: OrderType.DINE_IN })
     orderType: OrderType;
 @OneToOne(() => Invoice, (inv) => inv.order) invoice?: Invoice;
-invoices: Invoice[];
+invoices: Invoice;
 @ManyToOne(() => Customer, { nullable: true, eager: true })
 @JoinColumn({ name: 'customer_id' })
 customer?: Customer | null;
