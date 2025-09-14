@@ -4,7 +4,7 @@ import { User } from "src/modules/user/entities/user.entity";
 
 
 
-    import {
+import {
   Column,
   CreateDateColumn,
   Entity,
@@ -33,9 +33,6 @@ export class Invoice {
   @JoinColumn({ name: 'order_id' })
   order: Order;
 
-  @Column({ name: 'order_id' })
-  orderId: string;
-
   @Column('decimal', { name: 'total_amount', precision: 12, scale: 2 })
   totalAmount: string;
 
@@ -53,6 +50,6 @@ export class Invoice {
 
 
 
-    // @ManyToOne(() => User) // Thu ngân thực hiện
-    // cashier: User||null;
+  // @ManyToOne(() => User) // Thu ngân thực hiện
+  // cashier: User||null;
 }

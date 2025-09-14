@@ -11,11 +11,12 @@ import {
 import { InventoryItem } from 'src/modules/inventoryitems/entities/inventoryitem.entity';
 import { User } from 'src/modules/user/entities/user.entity';
 import { InventoryAction } from 'src/common/enums';
+import { Supplier } from '@modules/supplier/entities/supplier.entity';
 
 
 @Entity('inventory_transactions')
 @Index(['item', 'createdAt'])                 // tra cứu giao dịch 1 mặt hàng theo thời gian
-@Check(`"quantity" > 0`)                      // luôn lưu số dương; tăng/giảm do action quyết định
+@Check(`"quantity" > 0`)                   // luôn lưu số dương; tăng/giảm do action quyết định
 export class InventoryTransaction {
     @PrimaryGeneratedColumn('uuid')
     id: string;
@@ -57,4 +58,8 @@ export class InventoryTransaction {
     @ManyToOne(() => User, { nullable: true, onDelete: 'SET NULL' })
     @JoinColumn({ name: 'performed_by_id' })
     performedBy?: User;
+
+    @ManyToOne(() => Supplier, { nullable: true, onDelete: 'SET NULL' })
+    @JoinColumn({ name: 'supplier_id' })
+    supplier?: Supplier | null;
 }

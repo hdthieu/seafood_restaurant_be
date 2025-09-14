@@ -1,23 +1,19 @@
-import { IsIP, IsInt, IsOptional, IsPositive, IsString } from 'class-validator';
-
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsIP, IsInt, IsOptional, IsPositive, IsString, IsUUID, Min } from 'class-validator';
 export class CreateVNPayDto {
-  @IsString()
-  invoiceId!: string;
+  @ApiProperty({ example: 'c4e5e8a0-1234-4a7f-9e5b-2b8c2b0d7f11' })
+  @IsUUID()
+  invoiceId: string;
 
-  @IsOptional()
-  @IsInt()
-  @IsPositive()
+  @ApiPropertyOptional({ example: 150000, description: 'VND' })
+  @IsOptional() @IsInt() @Min(1)
   amount?: number;
 
-  @IsOptional()
-  @IsString()
-  bankCode?: string; // 'VNBANK' | 'INTCARD' | 'VNPAYQR' | '<shortBank>'
+  @ApiPropertyOptional({ example: 'NCB' })
+  @IsOptional() @IsString()
+  bankCode?: string;
 
-  @IsIP()
-  ipAddress!: string;
-
-  @IsOptional()
-  @IsInt()
-  @IsPositive()
-  expireInMinutes?: number; // default 15
+  @ApiPropertyOptional({ example: 15 })
+  @IsOptional() @IsInt() @Min(1)
+  expireInMinutes?: number;
 }
