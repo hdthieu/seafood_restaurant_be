@@ -1,51 +1,47 @@
-import { SupplierStatus } from 'src/common/enums';
 import {
-    Column,
-    CreateDateColumn,
-    Entity,
-    PrimaryGeneratedColumn,
-    UpdateDateColumn,
+    Column, CreateDateColumn, Entity, PrimaryGeneratedColumn, UpdateDateColumn,
+    ManyToOne, JoinColumn, Index
 } from 'typeorm';
+import { SupplierStatus } from 'src/common/enums';
+import { SupplierGroup } from '@modules/suppliergroup/entities/suppliergroup.entity';
+
 @Entity('suppliers')
 export class Supplier {
     @PrimaryGeneratedColumn('uuid')
     id: string;
 
-    @Column({ unique: true })
-    code: string; // Mã nhà cung cấp
-
+    @Index({ unique: true })
     @Column()
-    name: string; // Tên nhà cung cấp
+    code: string; // Mã NCC
 
-    @Column({ nullable: true })
-    company?: string; // Công ty
+    @Index()
+    @Column()
+    name: string;
 
-    @Column({ nullable: true })
-    taxCode?: string;
+    @Column({ nullable: true }) company?: string;
+    @Column({ nullable: true }) taxCode?: string;
 
-    @Column({ nullable: true })
-    phone?: string;
+    @Index()
+    @Column({ nullable: true }) phone?: string;
 
-    @Column({ nullable: true })
-    email?: string;
+    @Index()
+    @Column({ nullable: true }) email?: string;
 
-    @Column({ nullable: true })
-    address?: string; // địa chỉ chi tiết (số nhà, đường)
+    @Column({ nullable: true }) address?: string;
+    @Column({ nullable: true }) city?: string;
+    @Column({ nullable: true }) district?: string;
+    @Column({ nullable: true }) ward?: string;
 
-    @Column({ nullable: true })
-    city?: string; // Tỉnh / Thành phố
+    // FK + Relation tới bảng nhóm
+    @Index()
+    @Column({ name: 'supplier_group_id', nullable: true })
+    supplierGroupId?: string | null;
 
-    @Column({ nullable: true })
-    district?: string; // Quận / Huyện
+    @ManyToOne(() => SupplierGroup, { nullable: true, onDelete: 'SET NULL' })
+    @JoinColumn({ name: 'supplier_group_id' })
+    supplierGroup?: SupplierGroup | null;
 
-    @Column({ nullable: true })
-    ward?: string; // Phường / Xã
-
-    @Column({ nullable: true })
-    group?: string; // Nhóm NCC
-
-    @Column({ nullable: true })
-    note?: string;
+    @Column({ nullable: true }) note?: string;
 
     @Column({
         type: 'enum',

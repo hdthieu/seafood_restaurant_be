@@ -40,10 +40,6 @@ export enum OrderStatus {
 
 export enum SupplierStatus { ACTIVE = 'ACTIVE', INACTIVE = 'INACTIVE' }
 
-
-
-
-
 export enum TableStatus {
   ACTIVE = 'ACTIVE',     // Đang hoạt động
   INACTIVE = 'INACTIVE', // Tạm ngưng
@@ -94,3 +90,4 @@ export enum ItemStatus {
   CANCELLED = 'CANCELLED',
 }
 
+export enum ReceiptStatus { DRAFT = 'DRAFT', POSTED = 'POSTED', VOID = 'VOID' }

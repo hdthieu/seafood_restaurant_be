@@ -27,17 +27,17 @@ export class InventoryTransaction {
     item: InventoryItem;
 
     // Số lượng biến động (luôn là số dương). Dùng 12,3 để hỗ trợ gram/ml
-    @Column({ type: 'decimal', precision: 12, scale: 3 })
+    @Column({ type: 'numeric', precision: 12, scale: 3 })
     quantity: number;
 
     @Column({ type: 'enum', enum: InventoryAction })
     action: InventoryAction;
 
     // Audit tồn trước/sau giao dịch để truy vết nhanh
-    @Column({ type: 'decimal', precision: 12, scale: 3, nullable: true })
+    @Column({ type: 'numeric', precision: 12, scale: 3, nullable: true })
     beforeQty?: number;
 
-    @Column({ type: 'decimal', precision: 12, scale: 3, nullable: true })
+    @Column({ type: 'numeric', precision: 12, scale: 3, nullable: true })
     afterQty?: number;
 
     // Gốc phát sinh (polymorphic ref) để backtrace chứng từ

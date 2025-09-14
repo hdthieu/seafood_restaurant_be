@@ -8,10 +8,10 @@ export class InventoryItem {
     @Column() name: string;
     @Column() unit: string;
 
-    @Column({ type: 'decimal', precision: 12, scale: 3, default: 0 }) // mặc định 0
+    @Column({ type: 'numeric', precision: 12, scale: 3, default: 0 }) // mặc định 0
     quantity: number;
 
-    @Column({ type: 'decimal', precision: 12, scale: 3, default: 0 })
+    @Column({ type: 'numeric', precision: 12, scale: 3, default: 0 })
     alertThreshold: number;
 
     @Column({ nullable: true }) description: string;
