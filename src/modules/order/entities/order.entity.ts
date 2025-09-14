@@ -38,6 +38,6 @@ invoices: Invoice;
 @JoinColumn({ name: 'customer_id' })
 customer?: Customer | null;
 
-@Column({ name: 'customer_id', nullable: true })
-customerId?: string | null;
+    @Column({ name: 'customer_id', nullable: true })
+    customerId?: string | null;
 }

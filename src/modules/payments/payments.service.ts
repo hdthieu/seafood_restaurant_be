@@ -6,6 +6,7 @@ import { InvoicesService } from 'src/modules/invoice/invoice.service';
 import { PaymentMethod, PaymentStatus } from 'src/common/enums';
 import { hmacSHA512, sortObject, toQueryString, nowYmdHisGMT7, addMinutesYmdHisGMT7 } from 'src/lib/vnpay';
 import { Payment } from 'src/modules/payments/entities/payment.entity';
+import { ResponseCommon, ResponseException } from 'src/common/common_dto/respone.dto';
 
 type CreateVNPayParams = {
   invoiceId: string;
@@ -21,16 +22,17 @@ export class PaymentService {
     @InjectRepository(Invoice) private readonly invoiceRepo: Repository<Invoice>,
     @InjectRepository(Payment) private readonly paymentRepo: Repository<Payment>,
     private readonly invoiceService: InvoicesService,
-  ) {}
+  ) { }
 
   private get config() {
-    const vnpUrl     = (process.env.VNP_URL ?? '').trim().replace(/\/+$/,'');
-    const tmnCode    = (process.env.VNP_TMN_CODE ?? '').trim();
+    const vnpUrl = (process.env.VNP_URL ?? '').trim().replace(/\/+$/, '');
+    const tmnCode = (process.env.VNP_TMN_CODE ?? '').trim();
     const hashSecret = (process.env.VNP_HASH_SECRET ?? '').trim();
-    const returnUrl  = (process.env.VNP_RETURN_URL ?? '').trim();
-    const version    = (process.env.VNP_VERSION ?? '2.1.0').trim();
-    const locale     = (process.env.VNP_LOCALE ?? 'vn').trim();
+    const returnUrl = (process.env.VNP_RETURN_URL ?? '').trim();
+    const version = (process.env.VNP_VERSION ?? '2.1.0').trim();
+    const locale = (process.env.VNP_LOCALE ?? 'vn').trim();
     if (!vnpUrl || !tmnCode || !hashSecret || !returnUrl) {
+      console.log('[VNPay] Missing config:', { vnpUrl, tmnCode, hashSecret: !!hashSecret, returnUrl });
       throw new Error('VNPay ENV is missing!');
     }
     return { tmnCode, hashSecret, vnpUrl, returnUrl, version, locale };
@@ -39,10 +41,9 @@ export class PaymentService {
   /** Tạo URL VNPay + lưu payment PENDING để FE polling */
   async createVNPayUrl(dto: CreateVNPayParams) {
     const inv = await this.invoiceRepo.findOne({ where: { id: dto.invoiceId } });
-    if (!inv) throw new BadRequestException('INVOICE_NOT_FOUND');
-    console.log('[VNPay][createVNPayUrl] invoice=', inv);
+    if (!inv) throw new ResponseException('INVOICE_NOT_FOUND', 400);
     const amount = Math.round(Number(dto.amount ?? inv.totalAmount));
-    if (!amount || amount <= 0) throw new BadRequestException('INVALID_AMOUNT');
+    if (!amount || amount <= 0) throw new ResponseException('INVALID_AMOUNT', 400);
 
     const { tmnCode, hashSecret, vnpUrl, returnUrl, version, locale } = this.config;
 
@@ -199,47 +200,47 @@ export class PaymentService {
   }
 
   /** Endpoint cho FE polling theo txnRef */
-async getStatusByTxnRef(txnRef: string) {
-  const p = await this.paymentRepo.findOne({
-    where: { txnRef },
-    relations: ['invoice'],            // load invoice
-  });
-  if (!p) return { status: 'PENDING' };
+  async getStatusByTxnRef(txnRef: string) {
+    const p = await this.paymentRepo.findOne({
+      where: { txnRef },
+      relations: ['invoice'],            // load invoice
+    });
+    if (!p) return { status: 'PENDING' };
 
-  return {
-    status: p.status,
-    invoiceId: p.invoice?.id ?? p.invoiceId, // vẫn fallback đề phòng
-    amount: Number(p.amount),
-  };
-}
-// payment.service.ts
-async tryMarkPaidFromReturn(q: any) {
-  // tái dùng verify như handleVnpReturn
-  const r = await this.handleVnpReturn(q);
-  if (!r.ok || r.code !== '00' || !r.invoiceId || !r.amount) return false;
-
-  // idempotent: nếu invoice đã PAID thì thôi
-  const inv = await this.invoiceRepo.findOne({ where: { id: r.invoiceId } });
-  if (!inv) return false;
-  if (inv.status === 'PAID') return true;
-
-  // cập nhật bản ghi payment theo txnRef nếu đã tạo lúc createVNPayUrl
-  const p = await this.paymentRepo.findOne({ where: { txnRef: r.txnRef || '' } });
-  if (p) {
-    p.status = 'PAID';
-    p.responseCode = '00';
-    await this.paymentRepo.save(p);
+    return {
+      status: p.status,
+      invoiceId: p.invoice?.id ?? p.invoiceId, // vẫn fallback đề phòng
+      amount: Number(p.amount),
+    };
   }
+  // payment.service.ts
+  async tryMarkPaidFromReturn(q: any) {
+    // tái dùng verify như handleVnpReturn
+    const r = await this.handleVnpReturn(q);
+    if (!r.ok || r.code !== '00' || !r.invoiceId || !r.amount) return false;
 
-  // cộng tiền & set invoice = PAID
-  await this.invoiceService.addPayment(inv.id, {
-    amount: r.amount,
-    method: PaymentMethod.VNPAY,       
-    txnRef: r.txnRef,
-  });
+    // idempotent: nếu invoice đã PAID thì thôi
+    const inv = await this.invoiceRepo.findOne({ where: { id: r.invoiceId } });
+    if (!inv) return false;
+    if (inv.status === 'PAID') return true;
 
-  return true;
-}
+    // cập nhật bản ghi payment theo txnRef nếu đã tạo lúc createVNPayUrl
+    const p = await this.paymentRepo.findOne({ where: { txnRef: r.txnRef || '' } });
+    if (p) {
+      p.status = 'PAID';
+      p.responseCode = '00';
+      await this.paymentRepo.save(p);
+    }
+
+    // cộng tiền & set invoice = PAID
+    await this.invoiceService.addPayment(inv.id, {
+      amount: r.amount,
+      method: PaymentMethod.VNPAY,
+      txnRef: r.txnRef,
+    });
+
+    return true;
+  }
 
 
 

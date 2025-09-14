@@ -10,10 +10,12 @@ import {
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { PaymentService } from './payments.service';
+import { ApiBadRequestResponse, ApiBody, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { CreateVNPayDto } from './dto/create-vnpay.dto';
 
 @Controller('payments')
 export class PaymentController {
-  constructor(private readonly svc: PaymentService) {}
+  constructor(private readonly svc: PaymentService) { }
 
   /** Thanh toán tiền mặt demo */
   @Post('manual')
@@ -22,45 +24,44 @@ export class PaymentController {
   }
 
   /** Tạo URL VNPay */
+  @ApiTags('payments')
   @Post('vnpay/create')
-  async createVNPay(
-    @Body() dto: { invoiceId: string; amount?: number; bankCode?: string },
-    @Req() req: Request,
-  ) {
+  @ApiOperation({ summary: 'Tạo URL VNPay' })
+  @ApiBody({ type: CreateVNPayDto })
+  async createVNPay(@Body() dto: CreateVNPayDto, @Req() req: Request) {
     const ip =
       (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ||
-      (req.socket?.remoteAddress as string) ||
-      '127.0.0.1';
+      (req.socket?.remoteAddress as string) || '127.0.0.1';
 
     return this.svc.createVNPayUrl({ ...dto, ipAddress: ip });
   }
 
   /** Return (browser redirect): verify checksum và redirect về FE */
   @Get('vnpay/return')
-async vnpReturn(@Query() q: any, @Res() res: Response) {
-  // thử đánh PAID ngay khi RETURN=00 (không chờ IPN)
-  try { await this.svc.tryMarkPaidFromReturn(q); } catch {}
+  async vnpReturn(@Query() q: any, @Res() res: Response) {
+    // thử đánh PAID ngay khi RETURN=00 (không chờ IPN)
+    try { await this.svc.tryMarkPaidFromReturn(q); } catch { }
 
-  const r = await this.svc.handleVnpReturn(q);
-  const FRONTEND_URL = (process.env.FRONTEND_URL || '').replace(/\/+$/,'');
-  const status = r.ok && r.code === '00' ? 'success' : 'fail';
+    const r = await this.svc.handleVnpReturn(q);
+    const FRONTEND_URL = (process.env.FRONTEND_URL || '').replace(/\/+$/, '');
+    const status = r.ok && r.code === '00' ? 'success' : 'fail';
 
-  const params = new URLSearchParams({
-    status,
-    invoiceId: r.invoiceId || '',
-    txnRef: String(q.vnp_TxnRef || ''),
-    amount: String(Number(q.vnp_Amount || 0) / 100),
-    bankCode: q.vnp_BankCode || '',
-    code: r.code || '',
-  });
+    const params = new URLSearchParams({
+      status,
+      invoiceId: r.invoiceId || '',
+      txnRef: String(q.vnp_TxnRef || ''),
+      amount: String(Number(q.vnp_Amount || 0) / 100),
+      bankCode: q.vnp_BankCode || '',
+      code: r.code || '',
+    });
 
-  const target =
-    status === 'success'
-      ? `${FRONTEND_URL}/checkout/success?${params.toString()}`
-      : `${FRONTEND_URL}/checkout/fail?${params.toString()}`;
+    const target =
+      status === 'success'
+        ? `${FRONTEND_URL}/checkout/success?${params.toString()}`
+        : `${FRONTEND_URL}/checkout/fail?${params.toString()}`;
 
-  return res.redirect(target);
-}
+    return res.redirect(target);
+  }
 
   /** IPN (server-to-server) */
   @Get('vnpay/ipn')

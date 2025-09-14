@@ -7,14 +7,11 @@ import { InventoryitemsModule } from './modules/inventoryitems/inventoryitems.mo
 import { OrderitemsModule } from './modules/orderitems/orderitems.module';
 import { OrdersModule } from './modules/order/order.module';
 import { MenuitemsModule } from './modules/menuitems/menuitems.module';
-import { Category } from './modules/category/entities/category.entity';
 import { ProfileModule } from './modules/profile/profile.module';
 import { UserModule } from './modules/user/user.module';
-import { Ingredient } from './modules/ingredient/entities/ingredient.entity';
 import { OrderstatushistoryModule } from './modules/orderstatushistory/orderstatushistory.module';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule } from '@nestjs/config';
-import { SeederModule } from './modules/seeder/seeder.module';
 import { RestauranttableModule } from './modules/restauranttable/restauranttable.module';
 import { AuthModule } from './modules/core/auth/auth.module';
 import { AreaModule } from './modules/area/area.module';
@@ -23,6 +20,10 @@ import { IngredientModule } from './modules/ingredient/ingredient.module';
 import { CategoryModule } from './modules/category/category.module';
 import { PaymentModule } from './modules/payments/payments.module';
 import { CustomersModule } from './modules/customers/customers.module';
+import { SupplierModule } from './modules/supplier/supplier.module';
+import { PurchasereceiptModule } from './modules/purchasereceipt/purchasereceipt.module';
+import { PurchasereceiptitemModule } from './modules/purchasereceiptitem/purchasereceiptitem.module';
+import { SuppliergroupModule } from './modules/suppliergroup/suppliergroup.module';
 @Module({
   imports: [ConfigModule.forRoot({ isGlobal: true }),
   TypeOrmModule.forRoot({
@@ -36,7 +37,7 @@ import { CustomersModule } from './modules/customers/customers.module';
     synchronize: true,
     autoLoadEntities: true
   }),
-    UserModule, ProfileModule, Category, MenuitemsModule, OrdersModule, OrderitemsModule, InventoryitemsModule, InventorytransactionModule, InvoiceModule, IngredientModule, OrderstatushistoryModule, SeederModule, RestauranttableModule, AuthModule, AreaModule, ConfigS3Module, IngredientModule, CategoryModule, PaymentModule, CustomersModule],
+    UserModule, ProfileModule, CategoryModule, MenuitemsModule, OrdersModule, OrderitemsModule, InventoryitemsModule, InventorytransactionModule, InvoiceModule, IngredientModule, OrderstatushistoryModule, RestauranttableModule, AuthModule, AreaModule, ConfigS3Module, IngredientModule, CategoryModule, PaymentModule, CustomersModule, SupplierModule, PurchasereceiptModule, PurchasereceiptitemModule, SuppliergroupModule],
   controllers: [AppController],
   providers: [AppService],
 })
