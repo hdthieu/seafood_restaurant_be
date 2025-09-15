@@ -1,12 +1,6 @@
+// create-supplier.dto.ts
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import {
-    IsEmail,
-    IsEnum,
-    IsOptional,
-    IsString,
-    IsUUID,
-    Length,
-} from 'class-validator';
+import { IsEmail, IsEnum, IsOptional, IsString, IsUUID, Length } from 'class-validator';
 import { SupplierStatus } from 'src/common/enums';
 
 export class CreateSupplierDto {
@@ -14,12 +8,6 @@ export class CreateSupplierDto {
     @IsString()
     @Length(1, 50)
     name!: string;
-
-    @ApiPropertyOptional({ example: 'SUP-001', maxLength: 32 })
-    @IsOptional()
-    @IsString()
-    @Length(1, 32)
-    code?: string;
 
     @ApiPropertyOptional({ example: 'ABC Group' })
     @IsOptional()
@@ -61,7 +49,6 @@ export class CreateSupplierDto {
     @IsString()
     ward?: string;
 
-    /** 🔹 Thay supplierGroup:string bằng supplierGroupId:uuid */
     @ApiPropertyOptional({
         example: '2f3a8e47-9c45-4a11-9e9f-2a42e46adabc',
         description: 'ID nhóm nhà cung cấp',
