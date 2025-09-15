@@ -31,7 +31,7 @@ export class SupplierService {
       const exists = await this.supplierRepo.exists({ where: { code } });
       if (!exists) return code;
     }
-    throw new Error('CANNOT_GENERATE_UNIQUE_SUPPLIER_CODE');
+    throw new ResponseCommon(500, false, 'CANNOT_GENERATE_UNIQUE_SUPPLIER_CODE');
   }
 
   async create(dto: CreateSupplierDto) {
@@ -54,7 +54,7 @@ export class SupplierService {
         entity.code = await this.generateUniqueSupplierCode();
         return await this.supplierRepo.save(entity);
       }
-      throw e;
+      throw new ResponseCommon(500, false, 'CREATE_SUPPLIER_FAILED', e?.message);
     }
   }
 
