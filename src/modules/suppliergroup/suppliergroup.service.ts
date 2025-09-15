@@ -78,13 +78,13 @@ export class SuppliergroupService {
   }
 
   async findOneById(id: string) {
-    const found = await this.groupRepo.findOne({ where: { id } });
+    const found = await this.groupRepo.findOne({ where: { id } , relations: ['suppliers']});
     if (!found) throw new ResponseCommon(404, false, 'SUPPLIER_GROUP_NOT_FOUND');
     return found;
   }
 
   async findOneByCode(code: string) {
-    const found = await this.groupRepo.findOne({ where: { code } });
+    const found = await this.groupRepo.findOne({ where: { code }, relations: ['suppliers'] });
     if (!found) throw new ResponseCommon(404, false, 'SUPPLIER_GROUP_NOT_FOUND');
     return found;
   }

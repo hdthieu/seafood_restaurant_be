@@ -43,6 +43,23 @@ export class SuppliergroupController {
     return this.suppliergroupService.deactivate(id);
   }
 
+
+  // 🔹 Lấy chi tiết theo ID
+  @Get(':id')
+  @Roles(UserRole.CASHIER, UserRole.MANAGER, UserRole.WAITER, UserRole.KITCHEN)
+  @ApiOperation({ summary: 'Get Supplier Group detail by ID' })
+  findOne(@Param('id') id: string) {
+    return this.suppliergroupService.findOneById(id);
+  }
+
+  // 🔹 Lấy chi tiết theo CODE
+  @Get('by-code/:code')
+  @Roles(UserRole.CASHIER, UserRole.MANAGER, UserRole.WAITER, UserRole.KITCHEN)
+  @ApiOperation({ summary: 'Get Supplier Group detail by CODE' })
+  findOneByCode(@Param('code') code: string) {
+    return this.suppliergroupService.findOneByCode(code);
+  }
+
   // Delete với tuỳ chọn chuyển nhóm
   // @Delete('/:id')
   // @Roles(UserRole.MANAGER)
