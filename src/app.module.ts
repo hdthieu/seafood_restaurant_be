@@ -34,7 +34,7 @@ import { SuppliergroupModule } from './modules/suppliergroup/suppliergroup.modul
     password: process.env.DB_PASSWORD as string,
     database: process.env.DB_DATABASE as string,
     // entities: [__dirname + '/**/*.entity{.ts,.js}'],
-    synchronize: false,
+    synchronize: true,
     autoLoadEntities: true
   }),
     UserModule, ProfileModule, MenuitemsModule, OrdersModule, OrderitemsModule, InventoryitemsModule, InventorytransactionModule, InvoiceModule, OrderstatushistoryModule, RestauranttableModule, AuthModule, AreaModule, ConfigS3Module, IngredientModule, CategoryModule, PaymentModule, CustomersModule, SupplierModule, PurchasereceiptModule, PurchasereceiptitemModule, SuppliergroupModule],

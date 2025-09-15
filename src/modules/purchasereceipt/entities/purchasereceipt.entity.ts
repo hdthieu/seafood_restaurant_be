@@ -7,15 +7,18 @@ import { Check, Column, CreateDateColumn, Entity, Index, JoinColumn, ManyToOne, 
 @Entity('purchase_receipts')
 @Index(['receiptDate'])
 export class PurchaseReceipt {
-    @PrimaryGeneratedColumn('uuid') id: string;
+    @PrimaryGeneratedColumn('uuid') 
+    id: string;
 
-    @Column({ unique: true }) code: string;
+    @Column({ unique: true }) 
+    code: string;
 
     @ManyToOne(() => Supplier, { nullable: false, onDelete: 'RESTRICT' })
     @JoinColumn({ name: 'supplier_id' })
     supplier: Supplier;
 
-    @Column({ type: 'date' }) receiptDate: string;
+    @Column({ type: 'date' }) 
+    receiptDate: string;
 
     @OneToMany(() => PurchaseReceiptItem, i => i.receipt, { cascade: true })
     items: PurchaseReceiptItem[];
@@ -25,6 +28,9 @@ export class PurchaseReceipt {
 
     @Column({ type: 'text', nullable: true }) note?: string;
 
-    @CreateDateColumn({ type: 'timestamptz' }) createdAt: Date;
-    @UpdateDateColumn({ type: 'timestamptz' }) updatedAt: Date;
+    @CreateDateColumn({ type: 'timestamptz' }) 
+    createdAt: Date;
+
+    @UpdateDateColumn({ type: 'timestamptz' }) 
+    updatedAt: Date;
 }

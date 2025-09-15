@@ -36,4 +36,7 @@ export class SupplierGroup {
 
     @UpdateDateColumn({ type: 'timestamptz' })
     updatedAt: Date;
+
+    @Column({ type: 'timestamptz', nullable: true })
+    deletedAt?: Date | null;
 }
