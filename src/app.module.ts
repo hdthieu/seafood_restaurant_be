@@ -33,11 +33,11 @@ import { SuppliergroupModule } from './modules/suppliergroup/suppliergroup.modul
     username: process.env.DB_USERNAME as string,
     password: process.env.DB_PASSWORD as string,
     database: process.env.DB_DATABASE as string,
-    entities: [__dirname + '/**/*.entity{.ts,.js}'],
-    synchronize: true,
+    // entities: [__dirname + '/**/*.entity{.ts,.js}'],
+    synchronize: false,
     autoLoadEntities: true
   }),
-    UserModule, ProfileModule, CategoryModule, MenuitemsModule, OrdersModule, OrderitemsModule, InventoryitemsModule, InventorytransactionModule, InvoiceModule, IngredientModule, OrderstatushistoryModule, RestauranttableModule, AuthModule, AreaModule, ConfigS3Module, IngredientModule, CategoryModule, PaymentModule, CustomersModule, SupplierModule, PurchasereceiptModule, PurchasereceiptitemModule, SuppliergroupModule],
+    UserModule, ProfileModule, MenuitemsModule, OrdersModule, OrderitemsModule, InventoryitemsModule, InventorytransactionModule, InvoiceModule, OrderstatushistoryModule, RestauranttableModule, AuthModule, AreaModule, ConfigS3Module, IngredientModule, CategoryModule, PaymentModule, CustomersModule, SupplierModule, PurchasereceiptModule, PurchasereceiptitemModule, SuppliergroupModule],
   controllers: [AppController],
   providers: [AppService],
 })

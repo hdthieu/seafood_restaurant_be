@@ -1,17 +1,13 @@
 import { ValidationPipe } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import * as bodyParser from 'body-parser';
-import * as compression from 'compression';
 import { AppModule } from './app.module';
-import * as rateLimit from 'express-rate-limit';
 import { configurations } from './common/configs';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { join } from 'path';
 import * as express from 'express';
-
 function initialSwagger(app: NestExpressApplication): void {
   const options = new DocumentBuilder()
     .setTitle('Seafood Restaurant API Document')
@@ -37,11 +33,6 @@ async function bootstrap() {
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
     credentials: true,
   });
-
-  const configService = app.get<ConfigService>(ConfigService);
-
-  console.log(`[ENV] Environment: ${configurations.nodeEnv}`);
-  console.log('[Setup] Applying timezone formatter for Date.prototype.toJSON');
 
   Date.prototype.toJSON = function () {
     var tzo = -this.getTimezoneOffset(),

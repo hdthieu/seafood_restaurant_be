@@ -3,7 +3,7 @@ import { CreateSupplierDto } from './dto/create-supplier.dto';
 import { UpdateSupplierDto } from './dto/update-supplier.dto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Supplier } from './entities/supplier.entity';
-import { ILike, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
 import { ResponseCommon } from 'src/common/common_dto/respone.dto';
 import { SupplierStatus } from 'src/common/enums';
 import { QuerySupplierDto } from './dto/query-supplier.dto';
@@ -19,19 +19,56 @@ export class SupplierService {
   ) { }
 
   /** Tạo NCC: check trùng code + validate group */
-  async create(dto: CreateSupplierDto) {
-    // unique code
-    const dup = await this.supplierRepo.exists({ where: { code: dto.code } });
-    if (dup) throw new ResponseCommon(400, false, 'SUPPLIER_CODE_EXISTS');
+  private async generateSupplierCode(): Promise<string> {
+    // Ví dụ: SUP-7D3K9Q (6 ký tự base36), đơn giản và đủ dùng cho khoá luận
+    const rand = Math.random().toString(36).toUpperCase().slice(2, 8);
+    return `SUP-${rand}`;
+  }
 
+  private async generateUniqueSupplierCode(maxRetries = 5): Promise<string> {
+    for (let i = 0; i < maxRetries; i++) {
+      const code = await this.generateSupplierCode();
+      const exists = await this.supplierRepo.exists({ where: { code } });
+      if (!exists) return code;
+    }
+    throw new Error('CANNOT_GENERATE_UNIQUE_SUPPLIER_CODE');
+  }
+
+  async create(dto: CreateSupplierDto) {
     // validate group
     if (dto.supplierGroupId) {
       const ok = await this.groupRepo.exists({ where: { id: dto.supplierGroupId } });
       if (!ok) throw new ResponseCommon(400, false, 'SUPPLIER_GROUP_NOT_FOUND');
     }
 
-    const entity = this.supplierRepo.create(dto as any);
-    return this.supplierRepo.save(entity);
+    // Tự sinh code, không nhận từ FE
+    const code = await this.generateUniqueSupplierCode();
+
+    const entity = this.supplierRepo.create({ ...dto, code } as Supplier);
+    // Dù đã check, vẫn nên để unique index ở DB để chốt chặn
+    try {
+      return await this.supplierRepo.save(entity);
+    } catch (e: any) {
+      // Nếu race-condition hiếm gặp → thử lại 1 lần
+      if (e?.code === '23505' /* unique_violation */) {
+        entity.code = await this.generateUniqueSupplierCode();
+        return await this.supplierRepo.save(entity);
+      }
+      throw e;
+    }
+  }
+
+  /** Cập nhật: check đổi code + validate group */
+  async update(id: string, dto: UpdateSupplierDto) {
+    const sup = await this.findOne(id);
+
+    if (dto.supplierGroupId) {
+      const ok = await this.groupRepo.exists({ where: { id: dto.supplierGroupId } });
+      if (!ok) throw new ResponseCommon(400, false, 'SUPPLIER_GROUP_NOT_FOUND');
+    }
+
+    Object.assign(sup, dto);
+    return this.supplierRepo.save(sup);
   }
 
   /**
@@ -82,24 +119,6 @@ export class SupplierService {
     });
     if (!sup) throw new ResponseCommon(404, false, 'SUPPLIER_NOT_FOUND');
     return sup;
-  }
-
-  /** Cập nhật: check đổi code + validate group */
-  async update(id: string, dto: UpdateSupplierDto) {
-    const sup = await this.findOne(id);
-
-    if (dto.code && dto.code !== sup.code) {
-      const dup = await this.supplierRepo.exists({ where: { code: dto.code } });
-      if (dup) throw new ResponseCommon(400, false, 'SUPPLIER_CODE_EXISTS');
-    }
-
-    if (dto.supplierGroupId) {
-      const ok = await this.groupRepo.exists({ where: { id: dto.supplierGroupId } });
-      if (!ok) throw new ResponseCommon(400, false, 'SUPPLIER_GROUP_NOT_FOUND');
-    }
-
-    Object.assign(sup, dto);
-    return this.supplierRepo.save(sup);
   }
 
   /** Xóa mềm: đặt status=INACTIVE */
