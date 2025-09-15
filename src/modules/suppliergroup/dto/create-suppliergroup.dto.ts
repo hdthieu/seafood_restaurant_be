@@ -3,11 +3,6 @@ import { IsEnum, IsOptional, IsString, MaxLength } from "class-validator";
 import { SupplierStatus } from "src/common/enums";
 
 export class CreateSupplierGroupDto {
-    @ApiPropertyOptional({ example: 'SG-001', maxLength: 50 })
-    @IsString()
-    @MaxLength(50)
-    code: string;
-
     @ApiPropertyOptional({ example: 'Nhóm cung cấp rau', maxLength: 100 })
     @IsString()
     @MaxLength(100)
