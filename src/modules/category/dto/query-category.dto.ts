@@ -2,7 +2,7 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsBooleanString, IsEnum, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 import { Type as TransformType } from 'class-transformer';
-import { CategoryType } from '../entities/category.entity';
+import { CategoryType } from 'src/common/enums';
 
 export class QueryCategoryDto {
     @ApiPropertyOptional({ enum: CategoryType })
