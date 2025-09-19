@@ -24,6 +24,9 @@ import { SupplierModule } from './modules/supplier/supplier.module';
 import { PurchasereceiptModule } from './modules/purchasereceipt/purchasereceipt.module';
 import { PurchasereceiptitemModule } from './modules/purchasereceiptitem/purchasereceiptitem.module';
 import { SuppliergroupModule } from './modules/suppliergroup/suppliergroup.module';
+import {ReportModule} from './report/report.module';
+import { ReportController } from './report/report.controller';
+import { ReportService } from './report/report.service';
 @Module({
   imports: [ConfigModule.forRoot({ isGlobal: true }),
   TypeOrmModule.forRoot({
@@ -37,7 +40,7 @@ import { SuppliergroupModule } from './modules/suppliergroup/suppliergroup.modul
     synchronize: true,
     autoLoadEntities: true
   }),
-    UserModule, ProfileModule, MenuitemsModule, OrdersModule, OrderitemsModule, InventoryitemsModule, InventorytransactionModule, InvoiceModule, OrderstatushistoryModule, RestauranttableModule, AuthModule, AreaModule, ConfigS3Module, IngredientModule, CategoryModule, PaymentModule, CustomersModule, SupplierModule, PurchasereceiptModule, PurchasereceiptitemModule, SuppliergroupModule],
+    UserModule, ProfileModule, MenuitemsModule, OrdersModule, OrderitemsModule, InventoryitemsModule, InventorytransactionModule, InvoiceModule, OrderstatushistoryModule, RestauranttableModule, AuthModule, AreaModule, ConfigS3Module, IngredientModule, CategoryModule, PaymentModule, CustomersModule, SupplierModule, PurchasereceiptModule, PurchasereceiptitemModule, SuppliergroupModule, ReportModule],
   controllers: [AppController],
   providers: [AppService],
 })
