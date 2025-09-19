@@ -10,6 +10,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { DiscountType, ReceiptStatus } from 'src/common/enums';
 import { v4 as uuidv4 } from 'uuid';
 import { In } from 'typeorm';
+import { calcLineTotal, calcReceiptTotals } from '@modules/helper/purchasereceipt.service';
 @Injectable()
 export class PurchasereceiptService {
   constructor(
@@ -92,4 +93,71 @@ export class PurchasereceiptService {
     });
   }
 
+  // this function is used to get detail of a receipt by id
+  async getDetail(id: string) {
+    const r = await this.receiptRepo.findOne({
+      where: { id },
+      relations: ['supplier', 'items', 'items.item'],
+    });
+    if (!r) throw new ResponseCommon(404, false, 'RECEIPT_NOT_FOUND');
+    const totals = calcReceiptTotals(r.items, r);
+    return {
+      id: r.id,
+      code: r.code,
+      status: r.status,
+      supplier: { id: r.supplier.id, name: r.supplier.name },
+      receiptDate: r.receiptDate,
+      shippingFee: Number(r.shippingFee),
+      amountPaid: Number(r.amountPaid),
+      globalDiscountType: r.globalDiscountType,
+      globalDiscountValue: Number(r.globalDiscountValue),
+      note: r.note,
+      subTotal: totals.subTotal,
+      grandTotal: totals.total,
+      items: r.items.map(i => ({
+        id: i.id,
+        itemId: i.item.id,
+        itemName: i.item.name,
+        quantity: Number(i.quantity),
+        unitPrice: Number(i.unitPrice),
+        discountType: i.discountType,
+        discountValue: Number(i.discountValue),
+        receivedUnit: i.receivedUnit,
+        conversionToBase: Number(i.conversionToBase),
+        lotNumber: i.lotNumber,
+        expiryDate: i.expiryDate,
+        lineTotal: calcLineTotal(i),
+      })),
+    };
+  }
+
+  // this endpoint is used to get list of receipts with pagination
+  async getList(page: number = 1, limit: number = 10): Promise<any> {
+    const [receipts, total] = await this.receiptRepo.findAndCount({
+      relations: ['supplier', 'items'],
+      order: { createdAt: 'DESC' },
+      skip: (page - 1) * limit,
+      take: limit,
+    });
+
+    return {
+      data: receipts.map(r => ({
+        id: r.id,
+        code: r.code,
+        status: r.status,
+        supplier: r.supplier ? { id: r.supplier.id, name: r.supplier.name } : null,
+        receiptDate: r.receiptDate,
+        shippingFee: Number(r.shippingFee),
+        amountPaid: Number(r.amountPaid),
+        globalDiscountType: r.globalDiscountType,
+        globalDiscountValue: Number(r.globalDiscountValue),
+        createdAt: r.createdAt,
+        updatedAt: r.updatedAt,
+      })),
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
+  }
 }

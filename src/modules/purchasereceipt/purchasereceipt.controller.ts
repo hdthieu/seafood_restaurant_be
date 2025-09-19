@@ -1,4 +1,4 @@
-import { Controller, Post, Body, UseGuards, Req } from '@nestjs/common';
+import { Controller, Post, Body, UseGuards, Req, Get, Param, Query } from '@nestjs/common';
 import { PurchasereceiptService } from './purchasereceipt.service';
 import { CreatePurchaseReceiptDto } from './dto/create-purchasereceipt.dto';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
@@ -26,4 +26,24 @@ export class PurchasereceiptController {
     console.log('userId controller ', userId);
     return this.purchasereceiptService.createDraft(userId, dto);
   }
+
+  // this endpoint will get purchase receipt detail by its ID
+  @Get('/getId/:id')
+  @Roles(UserRole.MANAGER, UserRole.CASHIER, UserRole.WAITER, UserRole.KITCHEN)
+  @ApiOperation({ summary: 'Get Purchase Receipt detail by ID' })
+  getDetail(@Param('id') id: string) {
+    return this.purchasereceiptService.getDetail(id);
+  }
+
+  // this endpoint will get purchase receipt detail by its CODE
+  @Get('list')
+  @Roles(UserRole.MANAGER, UserRole.CASHIER, UserRole.WAITER, UserRole.KITCHEN)
+  @ApiOperation({ summary: 'Get paginated list of Purchase Receipts' })
+  async getList(
+    @Query('page') page: number = 1,
+    @Query('limit') limit: number = 10,
+  ) {
+    return this.purchasereceiptService.getList(Number(page), Number(limit));
+  }
+
 }
