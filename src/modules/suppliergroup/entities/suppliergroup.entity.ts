@@ -1,22 +1,23 @@
 import {
     Column, CreateDateColumn, Entity, PrimaryGeneratedColumn,
-    UpdateDateColumn, OneToMany, Index
+    UpdateDateColumn, OneToMany, Index,
+    Unique
 } from 'typeorm';
 import { Supplier } from '@modules/supplier/entities/supplier.entity';
 import { SupplierStatus } from 'src/common/enums';
 
 @Entity('supplier_groups')
+@Unique(['code'])
+@Unique(['name'])
 export class SupplierGroup {
     @PrimaryGeneratedColumn('uuid')
     id: string;
 
-    @Index({ unique: true })
     @Column()
-    code: string; // Mã nhóm duy nhất
+    code: string;
 
-    @Index({ unique: true })
     @Column()
-    name: string; // Tên nhóm duy nhất
+    name: string;
 
     @Column({ nullable: true })
     description?: string;
