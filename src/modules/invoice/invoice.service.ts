@@ -7,7 +7,7 @@ import { Order } from 'src/modules/order/entities/order.entity';
 import { Payment } from 'src/modules/payments/entities/payment.entity';
 import { InvoiceStatus, OrderStatus, PaymentMethod, PaymentStatus } from 'src/common/enums';
 import { BadRequestException } from '@nestjs/common';
-
+import { DeepPartial } from 'typeorm';
 @Injectable()
 export class InvoicesService {
   constructor(
@@ -18,32 +18,47 @@ export class InvoicesService {
   ) { }
 
   /** Tạo invoice từ order (idempotent) */
-  async createFromOrder(orderId: string) {
-    return this.ds.transaction(async (em) => {
-      const oRepo = em.getRepository(Order);
-      const invRepo = em.getRepository(Invoice);
 
-      const order = await oRepo.findOne({
-        where: { id: orderId },
-        relations: ['items', 'items.menuItem', 'table'],
-      });
-      if (!order) throw new NotFoundException('ORDER_NOT_FOUND');
 
-      // idempotent
-      const existed = await invRepo.findOne({ where: { order: { id: orderId } } });
-      if (existed) return existed;
+async createFromOrder(orderId: string, dto?: { customerId?: string | null },guestCount?: number,) {
+  return this.ds.transaction(async (em) => {
+    const oRepo = em.getRepository(Order);
+    const invRepo = em.getRepository(Invoice);
 
-      const total = order.items.reduce((s, it) => s + Number(it.price) * it.quantity, 0);
-
-      const inv = invRepo.create({
-        invoiceNumber: await this.genNumber(),
-        order: { id: orderId } as any,
-        totalAmount: total.toFixed(2),       // decimal -> string
-        status: InvoiceStatus.UNPAID,
-      });
-      return invRepo.save(inv);
+    const order = await oRepo.findOne({
+      where: { id: orderId },
+      relations: ['items', 'items.menuItem', 'table'],
     });
-  }
+    if (!order) throw new NotFoundException('ORDER_NOT_FOUND');
+
+    const existed = await invRepo.findOne({ where: { order: { id: orderId } } });
+    if (existed) {
+      // cho phép cập nhật customer nếu gọi lại
+      if (typeof dto?.customerId !== 'undefined') {
+        existed.customer = dto.customerId ? ({ id: dto.customerId } as any) : null;
+        await invRepo.save(existed);
+      }
+      return existed;
+    }
+
+    const total = order.items.reduce((s, it) => s + Number(it.price) * it.quantity, 0);
+
+    // 👉 Dùng DeepPartial, chỉ cast chỗ quan hệ
+    const payload: DeepPartial<Invoice> = {
+      invoiceNumber: await this.genNumber(),
+      order: { id: orderId } as any,
+        guestCount: typeof guestCount === 'number' ? guestCount : null,
+      customer: dto?.customerId ? ({ id: dto.customerId } as any) : null,
+      totalAmount: total.toFixed(2),
+      status: InvoiceStatus.UNPAID,
+    };
+
+    const inv = invRepo.create(payload); // trả về Invoice (không phải Invoice[])
+    return invRepo.save(inv);
+  });
+}
+
+
 
   async addPayment(
     invoiceId: string,

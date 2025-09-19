@@ -8,9 +8,12 @@ export class InvoicesController {
   constructor(private readonly svc: InvoicesService) {}
 
   @Post('from-order/:orderId')
-  createFromOrder(@Param('orderId', new ParseUUIDPipe()) orderId: string) {
-    return this.svc.createFromOrder(orderId);
-  }
+  createFromOrder(
+  @Param('orderId') orderId: string,
+  @Body() body: {guestCount?: number; customerId?: string | null } // 👈 nhận customerId
+) {
+  return this.svc.createFromOrder(orderId, body);
+}
 
   @Post(':id/payments')
   addPayment(

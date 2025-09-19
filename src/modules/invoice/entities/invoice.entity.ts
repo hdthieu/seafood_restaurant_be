@@ -19,7 +19,7 @@ import {
 import { InvoiceStatus } from 'src/common/enums';
 import { Payment } from 'src/modules/payments/entities/payment.entity';
 import { Order } from 'src/modules/order/entities/order.entity';
-
+import { Customer } from "src/modules/customers/entities/customers.entity";
 // invoices.entity.ts
 @Entity('invoices')
 export class Invoice {
@@ -48,8 +48,11 @@ export class Invoice {
   @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' })
   updatedAt: Date;
 
-
-
+  @ManyToOne(() => Customer, { nullable: true, eager: true })
+  @JoinColumn({ name: 'customer_id' })
+  customer: Customer | null;
+ @Column({ name: 'guest_count', type: 'int', nullable: true })
+  guestCount: number | null;
   // @ManyToOne(() => User) // Thu ngân thực hiện
   // cashier: User||null;
 }

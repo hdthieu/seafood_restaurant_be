@@ -7,6 +7,7 @@ import { RolesGuard } from '@modules/core/auth/guards/roles.guard';
 import { JwtAuthGuard } from '@modules/core/auth/guards/jwt-auth.guard';
 import { UserRole } from 'src/common/enums';
 import { CurrentUser } from 'src/common/decorators/user.decorator';
+import { PayReceiptDto } from './dto/pay-receipt.dto';
 
 @ApiTags('Purchase Receipts')
 @Controller('purchasereceipt')
@@ -19,20 +20,20 @@ export class PurchasereceiptController {
   @Post('create-purchase-receipt')
   @Roles(UserRole.MANAGER)
   @ApiOperation({ summary: 'Create Draft Purchase Receipt' })
-  create(
+  async create(
     @CurrentUser('id') userId: string,
     @Body() dto: CreatePurchaseReceiptDto,
   ) {
     console.log('userId controller ', userId);
-    return this.purchasereceiptService.createDraft(userId, dto);
+    return await this.purchasereceiptService.createDraft(userId, dto);
   }
 
   // this endpoint will get purchase receipt detail by its ID
   @Get('/getId/:id')
   @Roles(UserRole.MANAGER, UserRole.CASHIER, UserRole.WAITER, UserRole.KITCHEN)
   @ApiOperation({ summary: 'Get Purchase Receipt detail by ID' })
-  getDetail(@Param('id') id: string) {
-    return this.purchasereceiptService.getDetail(id);
+  async getDetail(@Param('id') id: string) {
+    return await this.purchasereceiptService.getDetail(id);
   }
 
   // this endpoint will get purchase receipt detail by its CODE
@@ -43,7 +44,28 @@ export class PurchasereceiptController {
     @Query('page') page: number = 1,
     @Query('limit') limit: number = 10,
   ) {
-    return this.purchasereceiptService.getList(Number(page), Number(limit));
+    return await this.purchasereceiptService.getList(Number(page), Number(limit));
   }
 
+  // this 
+  @Post(':id/post')
+  @Roles(UserRole.MANAGER)
+  @ApiOperation({ summary: 'Post (finalize) a DRAFT receipt -> POSTED & update stock/avgCost' })
+  async postReceipt(@Param('id') id: string) {
+    return await this.purchasereceiptService.postReceipt(id);
+  }
+
+  // this endpoint will 
+  @Post(':id/cancel')
+  @Roles(UserRole.MANAGER)
+  async cancelReceipt(@Param('id') id: string) {
+    return await this.purchasereceiptService.cancelReceipt(id);
+  }
+
+  // this endpoint 
+  @Post(':id/pay')
+  @Roles(UserRole.MANAGER)
+  async payReceipt(@Param('id') id: string, @Body() dto: PayReceiptDto) {
+    return await this.purchasereceiptService.payReceipt(id, dto);
+  }
 }
