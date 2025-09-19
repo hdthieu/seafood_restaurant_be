@@ -91,7 +91,7 @@ export enum ItemStatus {
   CANCELLED = 'CANCELLED',
 }
 
-export enum ReceiptStatus { DRAFT = 'DRAFT', POSTED = 'POSTED', VOID = 'VOID' }
+export enum ReceiptStatus { DRAFT = 'DRAFT', POSTED = 'POSTED', PAID = 'PAID', CANCELLED = 'CANCELLED' }
 
 export enum DiscountType {
   AMOUNT = 'AMOUNT',   // giảm số tiền (VND)

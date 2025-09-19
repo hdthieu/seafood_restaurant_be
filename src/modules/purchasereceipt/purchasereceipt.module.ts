@@ -6,9 +6,10 @@ import { PurchaseReceipt } from './entities/purchasereceipt.entity';
 import { PurchaseReceiptItem } from '@modules/purchasereceiptitem/entities/purchasereceiptitem.entity';
 import { InventoryItem } from '@modules/inventoryitems/entities/inventoryitem.entity';
 import { Supplier } from '@modules/supplier/entities/supplier.entity';
+import { InventoryTransaction } from '@modules/inventorytransaction/entities/inventorytransaction.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([PurchaseReceipt, PurchaseReceiptItem, InventoryItem,    // <- QUAN TRỌNG
+  imports: [TypeOrmModule.forFeature([PurchaseReceipt, PurchaseReceiptItem, InventoryItem, InventoryTransaction,
     Supplier])],
   controllers: [PurchasereceiptController],
   providers: [PurchasereceiptService],
