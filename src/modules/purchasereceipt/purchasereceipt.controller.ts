@@ -1,34 +1,29 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete } from '@nestjs/common';
+import { Controller, Post, Body, UseGuards, Req } from '@nestjs/common';
 import { PurchasereceiptService } from './purchasereceipt.service';
-import { CreatePurchasereceiptDto } from './dto/create-purchasereceipt.dto';
-import { UpdatePurchasereceiptDto } from './dto/update-purchasereceipt.dto';
+import { CreatePurchaseReceiptDto } from './dto/create-purchasereceipt.dto';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Roles } from 'src/common/decorators/roles.decorator';
+import { RolesGuard } from '@modules/core/auth/guards/roles.guard';
+import { JwtAuthGuard } from '@modules/core/auth/guards/jwt-auth.guard';
+import { UserRole } from 'src/common/enums';
+import { CurrentUser } from 'src/common/decorators/user.decorator';
 
+@ApiTags('Purchase Receipts')
 @Controller('purchasereceipt')
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard, RolesGuard)
 export class PurchasereceiptController {
-  constructor(private readonly purchasereceiptService: PurchasereceiptService) {}
+  constructor(private readonly purchasereceiptService: PurchasereceiptService) { }
 
-  @Post()
-  create(@Body() createPurchasereceiptDto: CreatePurchasereceiptDto) {
-    return this.purchasereceiptService.create(createPurchasereceiptDto);
-  }
-
-  @Get()
-  findAll() {
-    return this.purchasereceiptService.findAll();
-  }
-
-  @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.purchasereceiptService.findOne(+id);
-  }
-
-  @Patch(':id')
-  update(@Param('id') id: string, @Body() updatePurchasereceiptDto: UpdatePurchasereceiptDto) {
-    return this.purchasereceiptService.update(+id, updatePurchasereceiptDto);
-  }
-
-  @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.purchasereceiptService.remove(+id);
+  // this endpoint will create a purchase receipt along with its items (DRAFT status)
+  @Post('create-purchase-receipt')
+  @Roles(UserRole.MANAGER)
+  @ApiOperation({ summary: 'Create Draft Purchase Receipt' })
+  create(
+    @CurrentUser('id') userId: string,
+    @Body() dto: CreatePurchaseReceiptDto,
+  ) {
+    console.log('userId controller ', userId);
+    return this.purchasereceiptService.createDraft(userId, dto);
   }
 }

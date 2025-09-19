@@ -1,21 +1,30 @@
-import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-
-import { Category, CategoryType } from '../category/entities/category.entity';
-import { MenuItem } from '../menuitems/entities/menuitem.entity';
-import { InventoryItem } from '../inventoryitems/entities/inventoryitem.entity';
-import { RestaurantTable } from '../restauranttable/entities/restauranttable.entity';
-import { User } from '../user/entities/user.entity';
-import { Profile } from '../profile/entities/profile.entity';
-import { Ingredient } from '../ingredient/entities/ingredient.entity';
-import { InventoryTransaction } from '../inventorytransaction/entities/inventorytransaction.entity';
-import { Area } from '../area/entities/area.entity';
-import { Customer } from '../customers/entities/customers.entity';
-import { UserStatus, UserRole, InventoryAction } from 'src/common/enums';
-import { CustomerType } from 'src/common/enums';
-import { Gender } from 'src/common/enums';
 import * as bcrypt from 'bcrypt';
+
+// ==== Entities ====
+import { Area } from 'src/modules/area/entities/area.entity';
+import { Category } from 'src/modules/category/entities/category.entity';
+import { MenuItem } from '@modules/menuitems/entities/menuitem.entity';
+import { InventoryItem } from '@modules/inventoryitems/entities/inventoryitem.entity';
+import { RestaurantTable } from '@modules/restauranttable/entities/restauranttable.entity';
+import { User } from 'src/modules/user/entities/user.entity';
+import { Profile } from 'src/modules/profile/entities/profile.entity';
+import { Ingredient } from 'src/modules/ingredient/entities/ingredient.entity';
+import { InventoryTransaction } from '@modules/inventorytransaction/entities/inventorytransaction.entity';
+import { Customer } from '@modules/customers/entities/customers.entity';
+import { Supplier } from 'src/modules/supplier/entities/supplier.entity';
+
+// ==== Enums ====
+import {
+    CategoryType,
+    CustomerType,
+    Gender,
+    UserRole,
+    UserStatus,
+    InventoryAction,
+} from 'src/common/enums';
 
 @Injectable()
 export class SeederService {
@@ -48,8 +57,12 @@ export class SeederService {
 
         @InjectRepository(Area)
         private readonly areaRepo: Repository<Area>,
+
         @InjectRepository(Customer)
         private readonly customerRepo: Repository<Customer>,
+
+        @InjectRepository(Supplier)
+        private readonly supplierRepo: Repository<Supplier>,
     ) { }
 
     /** Gọi hàm này từ seed.main.ts */
@@ -89,6 +102,40 @@ export class SeederService {
             this.logger.log('✅ Seeded Inventory Items');
         }
 
+        // 2a) Suppliers
+        const supplierCount = await this.supplierRepo.count();
+        if (supplierCount === 0) {
+            const suppliers = this.supplierRepo.create([
+                {
+                    code: this.genSupCode(),
+                    name: 'Công ty TNHH Bia Phú Thành',
+                    phone: '0909000001',
+                    email: 'kinhdoanh@phuthanh.vn',
+                    address: 'TP.HCM',
+                },
+                {
+                    code: this.genSupCode(),
+                    name: 'Công ty CP Hải sản Minh Phú',
+                    phone: '0909000002',
+                    email: 'sales@minhphu.com',
+                    address: 'Cà Mau',
+                },
+                {
+                    code: this.genSupCode(),
+                    name: 'Công ty TNHH Hải sản Biển Xanh',
+                    phone: '0909000003',
+                    email: 'contact@bienxanh.vn',
+                    address: 'Nha Trang',
+                },
+            ]);
+            await this.supplierRepo.save(suppliers);
+            this.logger.log('✅ Seeded Suppliers');
+        }
+
+        // 2b) Link Inventory Items ↔ Suppliers
+        await this.linkInventorySuppliers();
+        this.logger.log('✅ Linked Inventory Items ↔ Suppliers');
+
         // 3) Menu Items
         const itemCount = await this.menuItemRepo.count();
         if (itemCount === 0) {
@@ -111,11 +158,9 @@ export class SeederService {
             this.logger.log('✅ Seeded Menu Items');
         }
 
-
-
+        // 3a) Customers (WALKIN + samples)
         const hasCustomers = await this.customerRepo.count();
         if (hasCustomers === 0) {
-            // Khách lẻ (WALKIN) – để attach nhanh khi bán lẻ
             const walkin = this.customerRepo.create({
                 code: 'WALKIN',
                 type: CustomerType.PERSONAL,
@@ -131,7 +176,6 @@ export class SeederService {
                 ward: null,
             });
 
-            // Một vài khách mẫu
             const samples: Partial<Customer>[] = [
                 {
                     code: this.genCusCode(),
@@ -164,7 +208,7 @@ export class SeederService {
                     companyName: 'Công ty TNHH ABC',
                     phone: '02873001234',
                     email: 'contact@abc.com',
-                    gender: null, // công ty không cần giới tính
+                    gender: null,
                     taxNo: '0312345678',
                     address: 'Tân Bình, TP.HCM',
                     province: 'Hồ Chí Minh',
@@ -173,23 +217,22 @@ export class SeederService {
                 },
             ];
 
-            // Lưu (bỏ qua trùng lặp nếu có)
             await this.customerRepo.save(walkin);
             for (const s of samples) {
                 try {
-                    // tránh phone/code trùng
                     const existed =
-                        (s.phone && (await this.customerRepo.findOne({ where: { phone: s.phone } }))) ||
-                        (s.code && (await this.customerRepo.findOne({ where: { code: s.code } })));
+                        (s.phone &&
+                            (await this.customerRepo.findOne({ where: { phone: s.phone } }))) ||
+                        (s.code &&
+                            (await this.customerRepo.findOne({ where: { code: s.code } })));
+
                     if (!existed) {
                         await this.customerRepo.save(this.customerRepo.create(s));
                     }
-                } catch (e) {
-                    // 23505 = unique_violation -> bỏ qua
-                    if ((e as any)?.code !== '23505') throw e;
+                } catch (e: any) {
+                    if (e?.code !== '23505') throw e; // unique_violation
                 }
             }
-
             this.logger.log('✅ Seeded Customers (WALKIN + samples)');
         }
 
@@ -222,17 +265,37 @@ export class SeederService {
             }
         }
 
-        // 5) Users + Profiles (upsert theo email, không phụ thuộc count===0)
+        // 5) Users + Profiles
         const usersToSeed: Array<{
             email: string;
             pass: string;
             role: UserRole;
             fullName: string;
         }> = [
-                { email: 'admin@restaurant.com', pass: 'Admin123@', role: UserRole.MANAGER, fullName: 'Quản lý hệ thống' },
-                { email: 'cashier@restaurant.com', pass: 'Cashier123@', role: UserRole.CASHIER, fullName: 'Thu ngân' },
-                { email: 'kitchen@restaurant.com', pass: 'Kitchen123@', role: UserRole.KITCHEN, fullName: 'Nhân viên bếp' },
-                { email: 'waiter@restaurant.com', pass: 'Waiter123@', role: UserRole.WAITER, fullName: 'Nhân viên phục vụ' },
+                {
+                    email: 'admin@restaurant.com',
+                    pass: 'Admin123@',
+                    role: UserRole.MANAGER,
+                    fullName: 'Quản lý hệ thống',
+                },
+                {
+                    email: 'cashier@restaurant.com',
+                    pass: 'Cashier123@',
+                    role: UserRole.CASHIER,
+                    fullName: 'Thu ngân',
+                },
+                {
+                    email: 'kitchen@restaurant.com',
+                    pass: 'Kitchen123@',
+                    role: UserRole.KITCHEN,
+                    fullName: 'Nhân viên bếp',
+                },
+                {
+                    email: 'waiter@restaurant.com',
+                    pass: 'Waiter123@',
+                    role: UserRole.WAITER,
+                    fullName: 'Nhân viên phục vụ',
+                },
             ];
 
         for (const u of usersToSeed) {
@@ -266,7 +329,6 @@ export class SeederService {
                 this.logger.log(`✅ Seeded ${u.role}: ${u.email} / ${u.pass}`);
             } catch (err) {
                 this.logger.error(`❌ Seed user thất bại: ${u.email} — ${String(err)}`);
-                // Nếu nghi vấn enum UserRole ở DB thiếu value, kiểm tra migration/enum trong DB.
             }
         }
 
@@ -305,17 +367,27 @@ export class SeederService {
         // 7) Inventory Transactions (Opening stock via ledger)
         const transactionCount = await this.inventoryTransactionRepo.count();
         if (transactionCount === 0) {
-            const user = await this.userRepo.findOne({ where: { email: 'admin@restaurant.com' } });
-            const tTomSu = await this.inventoryItemRepo.findOne({ where: { name: 'Tôm sú' } });
-            const tHeineken = await this.inventoryItemRepo.findOne({ where: { name: 'Bia Heineken' } });
+            const user = await this.userRepo.findOne({
+                where: { email: 'admin@restaurant.com' },
+            });
+            const tTomSu = await this.inventoryItemRepo.findOne({
+                where: { name: 'Tôm sú' },
+            });
+            const tHeineken = await this.inventoryItemRepo.findOne({
+                where: { name: 'Bia Heineken' },
+            });
 
             if (!tTomSu || !tHeineken || !user) {
                 this.logger.warn('⚠️ Không đủ dữ liệu để seed Inventory Transactions');
             } else {
-                const openingList: Array<{ item: InventoryItem; qty: number; note: string }> = [
-                    { item: tTomSu, qty: 50, note: 'Nhập kho đầu kỳ' },
-                    { item: tHeineken, qty: 100, note: 'Nhập kho đầu kỳ' },
-                ];
+                const openingList: Array<{
+                    item: InventoryItem;
+                    qty: number;
+                    note: string;
+                }> = [
+                        { item: tTomSu, qty: 50, note: 'Nhập kho đầu kỳ' },
+                        { item: tHeineken, qty: 100, note: 'Nhập kho đầu kỳ' },
+                    ];
 
                 for (const row of openingList) {
                     const before = Number(row.item.quantity ?? 0);
@@ -338,16 +410,75 @@ export class SeederService {
                     });
                     await this.inventoryTransactionRepo.save(tx);
                 }
-
                 this.logger.log('✅ Seeded Inventory Transactions (opening balances)');
             }
         }
 
         this.logger.log('🎉 Seeder hoàn tất.');
     }
+
+    // ========= Helpers =========
+
     private genCusCode() {
         const ymd = new Date().toISOString().slice(2, 10).replace(/-/g, '');
         const rnd = Math.floor(Math.random() * 9000 + 1000);
         return `CUS-${ymd}-${rnd}`;
+    }
+
+    private genSupCode() {
+        const ymd = new Date().toISOString().slice(2, 10).replace(/-/g, '');
+        const rnd = Math.floor(Math.random() * 9000 + 1000);
+        return `SUP-${ymd}-${rnd}`;
+    }
+
+    private mergeSuppliers(
+        existing: Supplier[] | undefined,
+        ...toAdd: Array<Supplier | undefined | null>
+    ) {
+        const list = [...(existing ?? [])];
+        const set = new Set(list.map((s) => s.id));
+
+        for (const s of toAdd) {
+            if (s && !set.has(s.id)) {
+                list.push(s);
+                set.add(s.id);
+            }
+        }
+        return list;
+    }
+
+    private async linkInventorySuppliers() {
+        const [tom, heineken] = await Promise.all([
+            this.inventoryItemRepo.findOne({
+                where: { name: 'Tôm sú' },
+                relations: ['suppliers'],
+            }),
+            this.inventoryItemRepo.findOne({
+                where: { name: 'Bia Heineken' },
+                relations: ['suppliers'],
+            }),
+        ]);
+
+        const [supBeer, supSeafood1, supSeafood2] = await Promise.all([
+            this.supplierRepo.findOne({
+                where: { name: 'Công ty TNHH Bia Phú Thành' },
+            }),
+            this.supplierRepo.findOne({
+                where: { name: 'Công ty CP Hải sản Minh Phú' },
+            }),
+            this.supplierRepo.findOne({
+                where: { name: 'Công ty TNHH Hải sản Biển Xanh' },
+            }),
+        ]);
+
+        if (tom) {
+            tom.suppliers = this.mergeSuppliers(tom.suppliers, supSeafood1, supSeafood2);
+            await this.inventoryItemRepo.save(tom);
+        }
+
+        if (heineken && supBeer) {
+            heineken.suppliers = this.mergeSuppliers(heineken.suppliers, supBeer);
+            await this.inventoryItemRepo.save(heineken);
+        }
     }
 }

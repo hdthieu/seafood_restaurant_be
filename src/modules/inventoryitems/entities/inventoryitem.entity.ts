@@ -1,7 +1,10 @@
 import { Category } from '@modules/category/entities/category.entity';
+import { Supplier } from '@modules/supplier/entities/supplier.entity';
 import {
     Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn, Index,
-    CreateDateColumn, UpdateDateColumn, VersionColumn, Check, Unique
+    CreateDateColumn, UpdateDateColumn, VersionColumn, Check, Unique,
+    ManyToMany,
+    JoinTable
 } from 'typeorm';
 
 @Entity('inventory_items')
@@ -30,8 +33,8 @@ export class InventoryItem {
     @Column({ type: 'numeric', precision: 12, scale: 3, default: 0 })
     alertThreshold: number;
 
-    @Column({ nullable: true })
-    description?: string;
+    @Column({  type: 'text',nullable: true })
+    description: string | null;
 
     @ManyToOne(() => Category, { nullable: true, onDelete: 'SET NULL' })
     @JoinColumn({ name: 'category_id' })
@@ -43,4 +46,7 @@ export class InventoryItem {
     @UpdateDateColumn({ type: 'timestamptz' })
     updatedAt: Date;
 
+    @ManyToMany(() => Supplier, { cascade: false })
+    @JoinTable({ name: 'inventory_item_suppliers' })
+    suppliers: Supplier[];
 }

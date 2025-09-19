@@ -97,3 +97,5 @@ export enum DiscountType {
   AMOUNT = 'AMOUNT',   // giảm số tiền (VND)
   PERCENT = 'PERCENT', // giảm theo %
 }
+
+export enum CategoryType { MENU = 'MENU', INGREDIENT = 'INGREDIENT' }

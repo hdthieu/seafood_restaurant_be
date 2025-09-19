@@ -1,40 +1,50 @@
-import { IsDateString, IsEnum, IsNumber, IsOptional, IsPositive, IsString, IsUUID, Max, Min } from "class-validator";
-import { DiscountType } from "src/common/enums";
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsDateString, IsEnum, IsNumber, IsOptional, IsUUID, Min } from 'class-validator';
+import { Type } from 'class-transformer';
+import { DiscountType } from 'src/common/enums';
 
 export class CreatePurchaseReceiptItemDto {
-    @IsUUID() itemId: string;
+    @ApiProperty({ example: 'inventory-item-uuid' })
+    @IsUUID()
+    itemId: string;
 
-    @IsNumber()
-    @IsPositive()
+    @ApiProperty({ example: 10 })
+    @Type(() => Number) @IsNumber() @Min(0.001)
     quantity: number;
 
-    @IsOptional()
-    @IsString()
-    receivedUnit?: string;
-
-    @IsNumber()
-    @IsPositive()
-    conversionToBase: number;
-
-    @IsNumber()
-    @Min(0)
+    @ApiProperty({ example: 50000 })
+    @Type(() => Number) @IsNumber() @Min(0)
     unitPrice: number;
 
+    @ApiPropertyOptional({ enum: DiscountType, default: DiscountType.AMOUNT })
     @IsEnum(DiscountType) @IsOptional()
     discountType?: DiscountType = DiscountType.AMOUNT;
 
-    @IsNumber()
-    @Min(0)
-    @Max(100, { each: false, message: 'discountValue must be <= 100 when type=PERCENT' })
-    discountValue: number;
+    @ApiPropertyOptional({ example: 0 })
+    @Type(() => Number) @IsNumber() @Min(0) @IsOptional()
+    discountValue?: number = 0;
 
-    @IsOptional() @IsString()
+    @ApiPropertyOptional({ example: 'kg' })
+    @IsOptional()
+    receivedUnit?: string;
+
+    @ApiPropertyOptional({ example: 1 })
+    @Type(() => Number)
+    @IsNumber()
+    @Min(0.000001)
+    @IsOptional()
+    conversionToBase?: number = 1;
+
+    @ApiPropertyOptional({ example: 'LOT-2025-09' })
+    @IsOptional()
     lotNumber?: string;
 
+    @ApiPropertyOptional({ example: '2025-09-30' })
     @IsOptional()
     @IsDateString()
     expiryDate?: string;
 
-    @IsOptional() @IsString()
+    @ApiPropertyOptional({ example: 'Ghi chú item' })
+    @IsOptional()
     note?: string;
 }

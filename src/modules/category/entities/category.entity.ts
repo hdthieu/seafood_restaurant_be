@@ -1,6 +1,5 @@
+import { CategoryType } from "src/common/enums";
 import { Column, CreateDateColumn, Entity, Index, PrimaryGeneratedColumn, UpdateDateColumn } from "typeorm";
-
-export enum CategoryType { MENU = 'MENU', INGREDIENT = 'INGREDIENT' }
 
 @Entity('categories')
 @Index(['name', 'type'], { unique: true })

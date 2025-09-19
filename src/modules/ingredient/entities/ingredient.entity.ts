@@ -18,10 +18,6 @@ export class Ingredient {
     @Column('numeric')
     quantity: number; // Lượng nguyên liệu dùng cho 1 món (vd: 0.2kg, 50ml,...)
 
-    @Column({ nullable: true })
-    note: string; // tùy chọn ghi chú
-
-    @ManyToOne(() => Supplier, { nullable: true, onDelete: 'SET NULL' })
-    @JoinColumn({ name: 'preferred_supplier_id' })
-    preferredSupplier?: Supplier | null;
+    @Column({ type: 'text', nullable: true, default: null })
+    note?: string | null;
 }

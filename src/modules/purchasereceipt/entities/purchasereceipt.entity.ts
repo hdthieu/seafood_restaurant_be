@@ -1,8 +1,9 @@
 import { InventoryItem } from "@modules/inventoryitems/entities/inventoryitem.entity";
 import { PurchaseReceiptItem } from "@modules/purchasereceiptitem/entities/purchasereceiptitem.entity";
 import { Supplier } from "@modules/supplier/entities/supplier.entity";
+import { User } from "@modules/user/entities/user.entity";
 import { DiscountType, ReceiptStatus } from "src/common/enums";
-import { Check, Column, CreateDateColumn, Entity, Index, JoinColumn, ManyToOne, OneToMany, PrimaryGeneratedColumn, Unique, UpdateDateColumn } from "typeorm";
+import { Check, Column, CreateDateColumn, Entity, Index, JoinColumn, ManyToOne, OneToMany, OneToOne, PrimaryGeneratedColumn, Unique, UpdateDateColumn } from "typeorm";
 @Entity('purchase_receipts')
 @Index(['supplier', 'receiptDate'])
 @Index(['status', 'receiptDate'])
@@ -43,12 +44,16 @@ export class PurchaseReceipt {
     amountPaid: number;
 
     @Column({ type: 'text', nullable: true })
-    note?: string;
+    note: string | null;
 
     @CreateDateColumn({ type: 'timestamptz' })
     createdAt: Date;
 
     @UpdateDateColumn({ type: 'timestamptz' })
     updatedAt: Date;
+
+    @ManyToOne(() => User, { nullable: false, onDelete: 'RESTRICT' })
+    @JoinColumn({ name: 'created_by_id' })
+    createdBy: User;
 }
 
