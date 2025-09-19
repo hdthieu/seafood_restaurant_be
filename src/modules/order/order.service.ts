@@ -390,28 +390,6 @@ export class OrdersService {
     });
   }
 
-  /** ATTACH CUSTOMER */
-  async attachCustomer(orderId: string, dto: AttachCustomerDto) {
-    const order = await this.orderRepo.findOne({ where: { id: orderId } });
-    if (!order) throw new ResponseCommon(404, false, 'ORDER_NOT_FOUND');
-
-    let customer: Customer | null = null;
-
-    if (dto.walkin) {
-      customer = await this.customersSvc.getOrCreateWalkin();
-    } else if (dto.customerId) {
-      customer = await this.customersSvc.findById(dto.customerId);
-      if (!customer) throw new ResponseCommon(404, false, 'CUSTOMER_NOT_FOUND');
-    } else if (dto.phone) {
-      customer = await this.customersSvc.upsertByPhone(dto.phone, dto.name);
-    } else {
-      throw new ResponseCommon(400, false, 'customerId, phone or walkin is required');
-    }
-
-    order.customer = customer;
-    await this.orderRepo.save(order);
-    return order;
-  }
 
   /* ======================= INVENTORY HELPERS ======================= */
 

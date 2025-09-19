@@ -97,46 +97,7 @@ export class CustomersService {
     }
   }
 
-  /**
-   * Tạo mới (nếu chưa có) theo phone, hoặc cập nhật một số field nếu đã tồn tại
-   */
-  async upsertByPhone(
-    phone: string,
-    name?: string,
-    partial?: Partial<Omit<Customer, 'id' | 'code' | 'isWalkin'>>,
-  ): Promise<Customer> {
-    if (!phone?.trim()) throw new BadRequestException('PHONE_REQUIRED');
-
-    const existed = await this.cusRepo.findOne({ where: { phone } });
-    if (existed) {
-      // chỉ gán khi client thực sự gửi (!== undefined)
-      if (name !== undefined) existed.name = name?.trim() || existed.name;
-
-      if (partial?.email !== undefined) existed.email = partial.email ?? null;
-      if (partial?.address !== undefined)
-        existed.address = partial.address ?? null;
-      if (partial?.gender !== undefined) existed.gender = partial.gender ?? null;
-      if (partial?.birthday !== undefined)
-        existed.birthday = partial.birthday
-          ? new Date(partial.birthday as any)
-          : null;
-
-      return this.cusRepo.save(existed);
-    }
-
-    const entity = this.cusRepo.create({
-      code: this.genCode(),
-      name: name?.trim() || 'Khách',
-      phone,
-      email: partial?.email ?? null,
-      address: partial?.address ?? null,
-      gender: partial?.gender ?? null,
-      birthday: partial?.birthday ? (partial.birthday as any) : null,
-      isWalkin: false,
-    });
-
-    return this.cusRepo.save(entity);
-  }
+ 
 
   async search(q: string, limit = 10) {
     if (!q?.trim()) return [];
@@ -155,36 +116,7 @@ export class CustomersService {
     return rows;
   }
 
-  async attachToOrder(params: {
-    orderId: string;
-    customerId?: string;
-    walkin?: boolean;
-  }) {
-    const order = await this.orderRepo.findOne({
-      where: { id: params.orderId },
-      relations: ['customer'],
-    });
-    if (!order) throw new NotFoundException('ORDER_NOT_FOUND');
 
-    let customer: Customer | null = null;
-    if (params.walkin) {
-      customer = await this.getOrCreateWalkin();
-    } else if (params.customerId) {
-      customer = await this.cusRepo.findOne({
-        where: { id: params.customerId },
-      });
-      if (!customer) throw new NotFoundException('CUSTOMER_NOT_FOUND');
-    } else {
-      throw new BadRequestException('customerId or walkin is required');
-    }
-
-    order.customer = customer;
-    // nếu entity Order có cột customerId:
-    (order as any).customerId = customer.id;
-
-    await this.orderRepo.save(order);
-    return { ok: true, orderId: order.id, customerId: customer.id };
-  }
 
 
 
