@@ -33,7 +33,7 @@ export class Invoice {
   @JoinColumn({ name: 'order_id' })
   order: Order;
 
-  @Column('decimal', { name: 'total_amount', precision: 12, scale: 2 })
+  @Column('numeric', { name: 'total_amount', precision: 12, scale: 2 })
   totalAmount: string;
 
   @Column('enum', { enum: InvoiceStatus, default: InvoiceStatus.UNPAID })

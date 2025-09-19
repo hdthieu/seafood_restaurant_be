@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 import { IsEnum, IsNotEmpty, IsOptional, IsString, MaxLength } from "class-validator";
-import { CategoryType } from "../entities/category.entity";
+import { CategoryType } from "src/common/enums";
 
 export class CreateCategoryDto {
 
