@@ -25,44 +25,28 @@ import {
     UserStatus,
     InventoryAction,
 } from 'src/common/enums';
+import { UnitsOfMeasure } from '@modules/units-of-measure/entities/units-of-measure.entity';
+import { UomConversion } from '@modules/uomconversion/entities/uomconversion.entity';
 
 @Injectable()
 export class SeederService {
     private readonly logger = new Logger(SeederService.name);
 
     constructor(
-        @InjectRepository(Category)
-        private readonly categoryRepo: Repository<Category>,
-
-        @InjectRepository(MenuItem)
-        private readonly menuItemRepo: Repository<MenuItem>,
-
-        @InjectRepository(InventoryItem)
-        private readonly inventoryItemRepo: Repository<InventoryItem>,
-
-        @InjectRepository(RestaurantTable)
-        private readonly tableRepo: Repository<RestaurantTable>,
-
-        @InjectRepository(User)
-        private readonly userRepo: Repository<User>,
-
-        @InjectRepository(Profile)
-        private readonly profileRepo: Repository<Profile>,
-
-        @InjectRepository(Ingredient)
-        private readonly ingredientRepo: Repository<Ingredient>,
-
-        @InjectRepository(InventoryTransaction)
-        private readonly inventoryTransactionRepo: Repository<InventoryTransaction>,
-
-        @InjectRepository(Area)
-        private readonly areaRepo: Repository<Area>,
-
-        @InjectRepository(Customer)
-        private readonly customerRepo: Repository<Customer>,
-
-        @InjectRepository(Supplier)
-        private readonly supplierRepo: Repository<Supplier>,
+        @InjectRepository(Category) private readonly categoryRepo: Repository<Category>,
+        @InjectRepository(MenuItem) private readonly menuItemRepo: Repository<MenuItem>,
+        @InjectRepository(InventoryItem) private readonly inventoryItemRepo: Repository<InventoryItem>,
+        @InjectRepository(RestaurantTable) private readonly tableRepo: Repository<RestaurantTable>,
+        @InjectRepository(User) private readonly userRepo: Repository<User>,
+        @InjectRepository(Profile) private readonly profileRepo: Repository<Profile>,
+        @InjectRepository(Ingredient) private readonly ingredientRepo: Repository<Ingredient>,
+        @InjectRepository(InventoryTransaction) private readonly inventoryTransactionRepo: Repository<InventoryTransaction>,
+        @InjectRepository(Area) private readonly areaRepo: Repository<Area>,
+        @InjectRepository(Customer) private readonly customerRepo: Repository<Customer>,
+        @InjectRepository(Supplier) private readonly supplierRepo: Repository<Supplier>,
+        @InjectRepository(UomConversion) private readonly convRepo: Repository<UomConversion>,
+        // NEW: UOM master repo
+        @InjectRepository(UnitsOfMeasure) private readonly uomMasterRepo: Repository<UnitsOfMeasure>,
     ) { }
 
     /** Gọi hàm này từ seed.main.ts */
@@ -79,7 +63,11 @@ export class SeederService {
             await this.areaRepo.save(areas);
             this.logger.log('✅ Seeded Areas');
         }
+        await this.seedUomMaster();
+        this.logger.log('✅ Seeded UOM master');
 
+        await this.seedUomConversions();
+        this.logger.log('✅ Seeded UOM conversions');
         // 1) Menu Categories
         const categoryCount = await this.categoryRepo.count();
         if (categoryCount === 0) {
@@ -94,12 +82,18 @@ export class SeederService {
         // 2) Inventory Items
         const inventoryCount = await this.inventoryItemRepo.count();
         if (inventoryCount === 0) {
+            const [kg, can] = await Promise.all([
+                this.uomMasterRepo.findOne({ where: { code: 'KG' } }),
+                this.uomMasterRepo.findOne({ where: { code: 'CAN' } }),
+            ]);
+            if (!kg || !can) throw new Error('UOM master missing KG or CAN');
+
             const inventoryItems = this.inventoryItemRepo.create([
-                { name: 'Tôm sú', unit: 'kg', quantity: 0, alertThreshold: 10 },
-                { name: 'Bia Heineken', unit: 'chai', quantity: 0, alertThreshold: 20 },
+                { name: 'Tôm sú', baseUom: kg, quantity: 0, alertThreshold: 10 },
+                { name: 'Bia Heineken', baseUom: can, quantity: 0, alertThreshold: 20 },
             ]);
             await this.inventoryItemRepo.save(inventoryItems);
-            this.logger.log('✅ Seeded Inventory Items');
+            this.logger.log('✅ Seeded Inventory Items (with baseUom)');
         }
 
         // 2a) Suppliers
@@ -336,7 +330,7 @@ export class SeederService {
         const ingredientCount = await this.ingredientRepo.count();
         if (ingredientCount === 0) {
             const menuItems = await this.menuItemRepo.find({ relations: ['category'] });
-            const inventoryItems = await this.inventoryItemRepo.find();
+            const inventoryItems = await this.inventoryItemRepo.find({ relations: ['baseUom'] });
 
             const tom = inventoryItems.find((i) => i.name.includes('Tôm'));
             const bia = inventoryItems.find((i) => i.name.includes('Bia'));
@@ -344,18 +338,8 @@ export class SeederService {
 
             if (tom && bia && tomHapBia) {
                 const ingredients = this.ingredientRepo.create([
-                    {
-                        menuItem: tomHapBia,
-                        inventoryItem: tom,
-                        quantity: 0.3,
-                        note: 'Tôm sú tươi sống',
-                    },
-                    {
-                        menuItem: tomHapBia,
-                        inventoryItem: bia,
-                        quantity: 1,
-                        note: 'Bia Heineken lon',
-                    },
+                    { menuItem: tomHapBia, inventoryItem: tom, quantity: 0.3, note: 'Tôm sú tươi sống' }, // 0.3 KG
+                    { menuItem: tomHapBia, inventoryItem: bia, quantity: 1, note: 'Bia Heineken lon' },   // 1 CAN
                 ]);
                 await this.ingredientRepo.save(ingredients);
                 this.logger.log('✅ Seeded Menu Item Ingredients');
@@ -481,4 +465,60 @@ export class SeederService {
             await this.inventoryItemRepo.save(heineken);
         }
     }
+
+    /** Seed UOM master với các mã phổ biến và một số quy cách “case” */
+    private async seedUomMaster() {
+        const uoms: UnitsOfMeasure[] = this.uomMasterRepo.create([
+            { code: 'EA', name: 'Each', dimension: 'count' },
+            { code: 'CAN', name: 'Can', dimension: 'count' },
+            { code: 'CASE12', name: 'Case x12', dimension: 'count' },
+            { code: 'CASE24', name: 'Case x24', dimension: 'count' },
+
+            { code: 'KG', name: 'Kilogram', dimension: 'mass' },
+            { code: 'G', name: 'Gram', dimension: 'mass' },
+
+            { code: 'L', name: 'Litre', dimension: 'volume' },
+            { code: 'ML', name: 'Millilitre', dimension: 'volume' },
+        ]);
+        // upsert theo code để chạy idempotent
+        for (const u of uoms) {
+            await this.uomMasterRepo.upsert(u, ['code']);
+        }
+    }
+
+    private async seedUomConversions() {
+        const get = (code: string) => this.uomMasterRepo.findOne({ where: { code } });
+
+        const [KG, G, L, ML, CAN, CASE12, CASE24, EA] = await Promise.all([
+            get('KG'), get('G'), get('L'), get('ML'), get('CAN'), get('CASE12'), get('CASE24'), get('EA'),
+        ]);
+
+        const rows: Partial<UomConversion>[] = [
+            // mass
+            { from: KG!, to: G!, factor: 1000 },
+            { from: G!, to: KG!, factor: 0.001 },
+
+            // volume
+            { from: L!, to: ML!, factor: 1000 },
+            { from: ML!, to: L!, factor: 0.001 },
+
+            // packaging (bia)
+            { from: CASE12!, to: CAN!, factor: 12 },
+            { from: CASE24!, to: CAN!, factor: 24 },
+
+            // identity (để an toàn)
+            { from: CAN!, to: CAN!, factor: 1 },
+            { from: KG!, to: KG!, factor: 1 },
+            { from: G!, to: G!, factor: 1 },
+            { from: L!, to: L!, factor: 1 },
+            { from: ML!, to: ML!, factor: 1 },
+            { from: EA!, to: EA!, factor: 1 },
+        ];
+
+        for (const r of rows) {
+            await this.convRepo.upsert(r, ['from', 'to']); // idempotent
+        }
+    }
+
+
 }

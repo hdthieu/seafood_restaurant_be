@@ -16,7 +16,6 @@ import { Supplier } from '@modules/supplier/entities/supplier.entity';
 @Entity('inventory_transactions')
 @Index(['item', 'createdAt'])
 @Index(['refType', 'refId'])
-@Index(['refItemId'])
 @Check(`"quantity" > 0`)
 export class InventoryTransaction {
     @PrimaryGeneratedColumn('uuid') id: string;
@@ -47,13 +46,9 @@ export class InventoryTransaction {
     @Column({ type: 'varchar', length: 50, nullable: true })
     refType?: string;
 
-    // Nếu mọi chứng từ của bạn đều dùng UUID, nên để uuid cho khỏe
+    // Nếu phát sinh từ 1 chứng từ (vd: phiếu nhập, xuất,...)
     @Column({ type: 'uuid', nullable: true })
     refId?: string;
-
-    // Nếu phát sinh từ 1 item trong chứng từ (vd: phiếu nhập, xuất,...)
-    @Column('uuid', { nullable: true })
-    refItemId?: string;
 
     @Column({ type: 'text', nullable: true })
     note?: string;

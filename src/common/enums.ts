@@ -91,7 +91,7 @@ export enum ItemStatus {
   CANCELLED = 'CANCELLED',
 }
 
-export enum ReceiptStatus { DRAFT = 'DRAFT', POSTED = 'POSTED', PAID = 'PAID', CANCELLED = 'CANCELLED' }
+export enum ReceiptStatus { DRAFT = 'DRAFT', POSTED = 'POSTED', PAID = 'PAID', CANCELLED = 'CANCELLED', OWING = 'OWING' }
 
 export enum DiscountType {
   AMOUNT = 'AMOUNT',   // giảm số tiền (VND)
@@ -99,3 +99,24 @@ export enum DiscountType {
 }
 
 export enum CategoryType { MENU = 'MENU', INGREDIENT = 'INGREDIENT' }
+
+
+
+
+
+export enum MoneySource {
+  CASH = 'CASH',
+  BANK = 'BANK',
+}
+
+export enum VoucherKind {
+  RECEIPT = 'RECEIPT', // Thu
+  PAYMENT = 'PAYMENT', // Chi
+}
+
+export enum PostingState {
+  DRAFT = 'DRAFT',
+  POSTED = 'POSTED',
+  CANCELLED = 'CANCELLED',
+}
+

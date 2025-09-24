@@ -1,4 +1,4 @@
-import { Controller, Post, Body, UseGuards, Req, Get, Param, Query } from '@nestjs/common';
+import { Controller, Post, Body, UseGuards, Req, Get, Param, Query, Patch } from '@nestjs/common';
 import { PurchasereceiptService } from './purchasereceipt.service';
 import { CreatePurchaseReceiptDto } from './dto/create-purchasereceipt.dto';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
@@ -17,7 +17,7 @@ export class PurchasereceiptController {
   constructor(private readonly purchasereceiptService: PurchasereceiptService) { }
 
   // this endpoint will create a purchase receipt along with its items (DRAFT status)
-  @Post('create-purchase-receipt')
+  @Post('create-purreceipt-draft')
   @Roles(UserRole.MANAGER)
   @ApiOperation({ summary: 'Create Draft Purchase Receipt' })
   async create(
@@ -47,25 +47,35 @@ export class PurchasereceiptController {
     return await this.purchasereceiptService.getList(Number(page), Number(limit));
   }
 
-  // this 
-  @Post(':id/post')
-  @Roles(UserRole.MANAGER)
-  @ApiOperation({ summary: 'Post (finalize) a DRAFT receipt -> POSTED & update stock/avgCost' })
-  async postReceipt(@Param('id') id: string) {
-    return await this.purchasereceiptService.postReceipt(id);
-  }
+  // // this endpoint will post (finalize) a DRAFT receipt -> POSTED and update stock/avgCost
+  // @Post('create-purreceipt-posted')
+  // @Roles(UserRole.MANAGER)
+  // @ApiOperation({ summary: 'Post (finalize) a DRAFT receipt -> POSTED & update stock/avgCost' })
+  // async postReceipt(@CurrentUser('id') userId: string,
+  //   @Body() dto: CreatePurchaseReceiptDto,) {
+  //   console.log('userId controller ', userId);
+  //   return await this.purchasereceiptService.createAndPost(userId, dto);
+  // }
 
-  // this endpoint will 
-  @Post(':id/cancel')
-  @Roles(UserRole.MANAGER)
-  async cancelReceipt(@Param('id') id: string) {
-    return await this.purchasereceiptService.cancelReceipt(id);
-  }
+  // // this endpoint will cancel a receopt (only DRAFT can be cancelled)
+  // @Post(':id/cancel')
+  // @Roles(UserRole.MANAGER)
+  // async cancelReceipt(@Param('id') id: string) {
+  //   return await this.purchasereceiptService.cancelReceipt(id);
+  // }
 
-  // this endpoint 
-  @Post(':id/pay')
-  @Roles(UserRole.MANAGER)
-  async payReceipt(@Param('id') id: string, @Body() dto: PayReceiptDto) {
-    return await this.purchasereceiptService.payReceipt(id, dto);
-  }
+  // // this endpoint 
+  // @Post(':id/pay')
+  // @Roles(UserRole.MANAGER)
+  // async payReceipt(@Param('id') id: string, @Body() dto: PayReceiptDto) {
+  //   return await this.purchasereceiptService.payReceipt(id, dto);
+  // }
+
+  // // this endpoint will update a DRAFT receipt
+  // @Patch(':id')
+  // @Roles(UserRole.MANAGER)
+  // async updateDraft(@Param('id') id: string, @Body() dto: CreatePurchaseReceiptDto) {
+  //   return await this.purchasereceiptService.updateDraft(id, dto);
+  // }
+
 }

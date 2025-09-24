@@ -8,6 +8,8 @@ import { Payment } from 'src/modules/payments/entities/payment.entity';
 import { InvoiceStatus, OrderStatus, PaymentMethod, PaymentStatus } from 'src/common/enums';
 import { BadRequestException } from '@nestjs/common';
 import { DeepPartial } from 'typeorm';
+import { QueryInvoicesDto } from './dto/query-invoices.dto';
+import { Brackets } from 'typeorm';
 @Injectable()
 export class InvoicesService {
   constructor(
@@ -140,9 +142,155 @@ async createFromOrder(orderId: string, dto?: { customerId?: string | null },gues
     });
   }
 
-  /** Mã hóa đơn kiểu: INV-YYYYMMDDhhmmss-ABCD */
+  // /** Mã hóa đơn kiểu: INV-YYYYMMDDhhmmss-ABCD */
+  // private async genNumber() {
+  //   const part = new Date().toISOString().replace(/\D/g, '').slice(0, 14);
+  //   return `INV-${part}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+  // }
+
+ /** Danh sách hóa đơn + tổng đã trả (CASH/VNPAY), còn thiếu */
+  async list(q: QueryInvoicesDto) {
+    const qb = this.invRepo.createQueryBuilder('i')
+      .leftJoinAndSelect('i.order', 'o')
+      .leftJoinAndSelect('o.table', 't')
+      .leftJoinAndSelect('i.customer', 'c')
+      .leftJoinAndSelect('i.payments', 'p'); // lấy để tính paid
+
+    if (q.q) {
+      const s = `%${q.q.toLowerCase()}%`;
+      qb.andWhere(new Brackets(w => {
+        w.where('LOWER(i.invoiceNumber) LIKE :s', { s })
+         .orWhere('LOWER(c.name) LIKE :s', { s })
+         .orWhere('LOWER(t.name) LIKE :s', { s });
+      }));
+    }
+    if (q.status) qb.andWhere('i.status = :st', { st: q.status });
+
+    if (q.fromDate) qb.andWhere('i.createdAt >= :from', { from: new Date(q.fromDate) });
+    if (q.toDate) {
+      const to = new Date(q.toDate); to.setHours(23,59,59,999);
+      qb.andWhere('i.createdAt <= :to', { to });
+    }
+
+    qb.orderBy('i.createdAt', 'DESC').addOrderBy('i.invoiceNumber', 'DESC');
+    const page = q.page ?? 1;
+    const limit = q.limit ?? 20;
+    qb.skip((page - 1) * limit).take(limit);
+
+    const [rows, total] = await qb.getManyAndCount();
+
+    // Tính tổng đã trả theo phương thức
+    const items = rows.map((inv) => {
+      const paidCash = (inv.payments ?? [])
+        .filter(x => x.status === 'PAID' && x.method === 'CASH')
+        .reduce((s, p) => s + Number(p.amount), 0);
+
+      const paidBank = (inv.payments ?? [])
+        .filter(x => x.status === 'PAID' && x.method === 'VNPAY')
+        .reduce((s, p) => s + Number(p.amount), 0);
+
+      const paidTotal = paidCash + paidBank;
+      const totalAmount = Number(inv.totalAmount);
+      return {
+        id: inv.id,
+        invoiceNumber: inv.invoiceNumber,
+        createdAt: inv.createdAt,
+        status: inv.status,
+        table: inv.order?.table ? { id: inv.order.table.id, name: inv.order.table.name } : null,
+        customer: inv.customer ? { id: inv.customer.id, name: inv.customer.name } : null,
+        guestCount: inv.guestCount ?? null,
+        totalAmount,
+        paidCash,
+        paidBank,
+        paidTotal,
+        remaining: Math.max(0, totalAmount - paidTotal),
+      };
+    });
+
+    return {
+      items,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
+  }
+
+  /** Chi tiết hóa đơn: items + payments */
+  async detail(id: string) {
+    const inv = await this.invRepo.findOne({
+      where: { id },
+      relations: [
+        'order',
+        'order.items',
+        'order.items.menuItem',
+        'order.table',
+        'customer',
+        'payments',
+      ],
+    });
+    if (!inv) throw new NotFoundException('INVOICE_NOT_FOUND');
+
+    const lines = (inv.order?.items ?? []).map(it => ({
+      id: it.id,
+      menuItemId: it.menuItem?.id,
+      name: it.menuItem?.name,
+      qty: it.quantity,
+      unitPrice: Number(it.price),
+      lineTotal: Number(it.price) * it.quantity,
+    }));
+
+    const paidCash = (inv.payments ?? [])
+      .filter(x => x.status === 'PAID' && x.method === 'CASH')
+      .reduce((s, p) => s + Number(p.amount), 0);
+
+    const paidBank = (inv.payments ?? [])
+      .filter(x => x.status === 'PAID' && x.method === 'VNPAY')
+      .reduce((s, p) => s + Number(p.amount), 0);
+
+    const paidTotal = paidCash + paidBank;
+    const totalAmount = Number(inv.totalAmount);
+
+    return {
+      id: inv.id,
+      invoiceNumber: inv.invoiceNumber,
+      createdAt: inv.createdAt,
+      status: inv.status,
+      table: inv.order?.table ? { id: inv.order.table.id, name: inv.order.table.name } : null,
+      customer: inv.customer ? { id: inv.customer.id, name: inv.customer.name, phone: inv.customer.phone } : null,
+      guestCount: inv.guestCount ?? null,
+      items: lines,
+      payments: (inv.payments ?? []).map(p => ({
+        id: p.id,
+        method: p.method,   // 'CASH' | 'VNPAY'
+        status: p.status,   // 'PAID' | ...
+        amount: Number(p.amount),
+        txnRef: p.txnRef,
+        createdAt: p.createdAt,
+      })),
+      totalAmount,
+      paidCash,
+      paidBank,
+      paidTotal,
+      remaining: Math.max(0, totalAmount - paidTotal),
+    };
+  }
+
+  /* ==== các method createFromOrder, addPayment, markPaid của bạn giữ nguyên ==== */
+
+  /** Mã HĐ: INV-yyyymmddhhMMss-XXXX (đã có) */
   private async genNumber() {
     const part = new Date().toISOString().replace(/\D/g, '').slice(0, 14);
     return `INV-${part}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
   }
+
+
+
+
+
+
+
+
+
+
 }
