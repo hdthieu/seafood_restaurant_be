@@ -25,9 +25,6 @@ import { PurchasereceiptModule } from './modules/purchasereceipt/purchasereceipt
 import { PurchasereceiptitemModule } from './modules/purchasereceiptitem/purchasereceiptitem.module';
 import { SuppliergroupModule } from './modules/suppliergroup/suppliergroup.module';
 import {ReportModule} from './report/report.module';
-import { ReportController } from './report/report.controller';
-import { ReportService } from './report/report.service';
-import { CashbookModule } from './cashbook/cashbook.module';
 import { UnitsOfMeasureModule } from './modules/units-of-measure/units-of-measure.module';
 import { UomconversionModule } from './modules/uomconversion/uomconversion.module';
 @Module({

@@ -15,7 +15,7 @@ import { Customer } from '../customers/entities/customers.entity';
 import { Supplier } from '@modules/supplier/entities/supplier.entity';
 import { SupplierGroup } from '@modules/suppliergroup/entities/suppliergroup.entity';
 import { UnitsOfMeasure } from '@modules/units-of-measure/entities/units-of-measure.entity';
-import { UomconversionModule } from '@modules/uomconversion/uomconversion.module';
+import { UomConversion } from '@modules/uomconversion/entities/uomconversion.entity';
 
 @Module({
   imports: [
@@ -30,7 +30,7 @@ import { UomconversionModule } from '@modules/uomconversion/uomconversion.module
       InventoryTransaction,
       Area,
       Customer,
-      Supplier, SupplierGroup, UnitsOfMeasure, UomconversionModule
+      Supplier, SupplierGroup, UnitsOfMeasure, UomConversion
     ]),
   ],
   controllers: [SeederController],

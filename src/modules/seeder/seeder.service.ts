@@ -68,15 +68,22 @@ export class SeederService {
 
         await this.seedUomConversions();
         this.logger.log('✅ Seeded UOM conversions');
-        // 1) Menu Categories
-        const categoryCount = await this.categoryRepo.count();
-        if (categoryCount === 0) {
-            const categories = this.categoryRepo.create([
+        // 1) Menu Categories (giữ nguyên)
+        if (await this.categoryRepo.count({ where: { type: CategoryType.MENU } }) === 0) {
+            await this.categoryRepo.save(this.categoryRepo.create([
                 { name: 'Đồ uống', type: CategoryType.MENU },
                 { name: 'Hải sản', type: CategoryType.MENU },
-            ]);
-            await this.categoryRepo.save(categories);
-            this.logger.log('✅ Seeded Categories');
+            ]));
+        }
+
+        // 1b) Inventory Categories (mới)
+        if (await this.categoryRepo.count({ where: { type: CategoryType.INGREDIENT } }) === 0) {
+            await this.categoryRepo.save(this.categoryRepo.create([
+                { name: 'Thịt/Cá', type: CategoryType.INGREDIENT },
+                { name: 'Rau/Củ/Quả', type: CategoryType.INGREDIENT },
+                { name: 'Gia vị', type: CategoryType.INGREDIENT },
+                { name: 'Đồ khô/Đóng gói', type: CategoryType.INGREDIENT },
+            ]));
         }
 
         // 2) Inventory Items
