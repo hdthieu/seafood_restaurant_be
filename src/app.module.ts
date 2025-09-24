@@ -27,6 +27,7 @@ import { SuppliergroupModule } from './modules/suppliergroup/suppliergroup.modul
 import {ReportModule} from './report/report.module';
 import { ReportController } from './report/report.controller';
 import { ReportService } from './report/report.service';
+import { CashbookModule } from './cashbook/cashbook.module';
 @Module({
   imports: [ConfigModule.forRoot({ isGlobal: true }),
   TypeOrmModule.forRoot({
@@ -40,7 +41,7 @@ import { ReportService } from './report/report.service';
     synchronize: true,
     autoLoadEntities: true
   }),
-    UserModule, ProfileModule, MenuitemsModule, OrdersModule, OrderitemsModule, InventoryitemsModule, InventorytransactionModule, InvoiceModule, OrderstatushistoryModule, RestauranttableModule, AuthModule, AreaModule, ConfigS3Module, IngredientModule, CategoryModule, PaymentModule, CustomersModule, SupplierModule, PurchasereceiptModule, PurchasereceiptitemModule, SuppliergroupModule, ReportModule],
+    UserModule, ProfileModule, MenuitemsModule, OrdersModule, OrderitemsModule, InventoryitemsModule, InventorytransactionModule, InvoiceModule, OrderstatushistoryModule, RestauranttableModule, AuthModule, AreaModule, ConfigS3Module, IngredientModule, CategoryModule, PaymentModule, CustomersModule, SupplierModule, PurchasereceiptModule, PurchasereceiptitemModule, SuppliergroupModule, ReportModule, CashbookModule],
   controllers: [AppController],
   providers: [AppService],
 })

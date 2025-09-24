@@ -99,3 +99,24 @@ export enum DiscountType {
 }
 
 export enum CategoryType { MENU = 'MENU', INGREDIENT = 'INGREDIENT' }
+
+
+
+
+
+export enum MoneySource {
+  CASH = 'CASH',
+  BANK = 'BANK',
+}
+
+export enum VoucherKind {
+  RECEIPT = 'RECEIPT', // Thu
+  PAYMENT = 'PAYMENT', // Chi
+}
+
+export enum PostingState {
+  DRAFT = 'DRAFT',
+  POSTED = 'POSTED',
+  CANCELLED = 'CANCELLED',
+}
+
