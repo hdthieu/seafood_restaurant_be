@@ -47,29 +47,29 @@ export class PurchasereceiptController {
     return await this.purchasereceiptService.getList(Number(page), Number(limit));
   }
 
-  // // this endpoint will post (finalize) a DRAFT receipt -> POSTED and update stock/avgCost
-  // @Post('create-purreceipt-posted')
-  // @Roles(UserRole.MANAGER)
-  // @ApiOperation({ summary: 'Post (finalize) a DRAFT receipt -> POSTED & update stock/avgCost' })
-  // async postReceipt(@CurrentUser('id') userId: string,
-  //   @Body() dto: CreatePurchaseReceiptDto,) {
-  //   console.log('userId controller ', userId);
-  //   return await this.purchasereceiptService.createAndPost(userId, dto);
-  // }
+  // this endpoint will post (finalize) a DRAFT receipt -> POSTED and update stock/avgCost
+  @Post('create-purreceipt-posted')
+  @Roles(UserRole.MANAGER)
+  @ApiOperation({ summary: 'Post (finalize) a DRAFT receipt -> POSTED & update stock/avgCost' })
+  async postReceipt(@CurrentUser('id') userId: string,
+    @Body() dto: CreatePurchaseReceiptDto,) {
+    console.log('userId controller ', userId);
+    return await this.purchasereceiptService.createAndPost(userId, dto);
+  }
 
-  // // this endpoint will cancel a receopt (only DRAFT can be cancelled)
-  // @Post(':id/cancel')
-  // @Roles(UserRole.MANAGER)
-  // async cancelReceipt(@Param('id') id: string) {
-  //   return await this.purchasereceiptService.cancelReceipt(id);
-  // }
+  // this endpoint will cancel a receopt (only DRAFT can be cancelled)
+  @Post(':id/cancel')
+  @Roles(UserRole.MANAGER)
+  async cancelReceipt(@Param('id') id: string) {
+    return await this.purchasereceiptService.cancelReceipt(id);
+  }
 
-  // // this endpoint 
-  // @Post(':id/pay')
-  // @Roles(UserRole.MANAGER)
-  // async payReceipt(@Param('id') id: string, @Body() dto: PayReceiptDto) {
-  //   return await this.purchasereceiptService.payReceipt(id, dto);
-  // }
+  // this endpoint 
+  @Post(':id/pay')
+  @Roles(UserRole.MANAGER)
+  async payReceipt(@Param('id') id: string, @Body() dto: PayReceiptDto) {
+    return await this.purchasereceiptService.payReceipt(id, dto);
+  }
 
   // // this endpoint will update a DRAFT receipt
   // @Patch(':id')
