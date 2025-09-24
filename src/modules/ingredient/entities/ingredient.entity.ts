@@ -1,7 +1,7 @@
 import { Supplier } from "@modules/supplier/entities/supplier.entity";
 import { InventoryItem } from "src/modules/inventoryitems/entities/inventoryitem.entity";
 import { MenuItem } from "src/modules/menuitems/entities/menuitem.entity";
-import { Column, Entity, JoinColumn, ManyToOne, PrimaryGeneratedColumn, Unique } from "typeorm";
+import { Check, Column, Entity, JoinColumn, ManyToOne, PrimaryGeneratedColumn, Unique } from "typeorm";
 
 @Entity('ingredients')
 @Unique(['menuItem', 'inventoryItem'])
@@ -15,8 +15,9 @@ export class Ingredient {
     @ManyToOne(() => InventoryItem)
     inventoryItem: InventoryItem;
 
-    @Column('numeric')
-    quantity: number; // Lượng nguyên liệu dùng cho 1 món (vd: 0.2kg, 50ml,...)
+    @Check(`"quantity" > 0`)
+    @Column('numeric', { precision: 12, scale: 3 })
+    quantity: number; // theo base unit của inventoryItem
 
     @Column({ type: 'text', nullable: true, default: null })
     note?: string | null;

@@ -1,5 +1,6 @@
 import { InventoryItem } from "@modules/inventoryitems/entities/inventoryitem.entity";
 import { PurchaseReceipt } from "@modules/purchasereceipt/entities/purchasereceipt.entity";
+import { UnitsOfMeasure } from "@modules/units-of-measure/entities/units-of-measure.entity";
 import { DiscountType } from "src/common/enums";
 import { Check, Column, Entity, Index, JoinColumn, ManyToOne, PrimaryGeneratedColumn, Unique } from "typeorm";
 
@@ -8,14 +9,13 @@ import { Check, Column, Entity, Index, JoinColumn, ManyToOne, PrimaryGeneratedCo
 @Check(`"unitPrice" >= 0`)
 @Check(`("discountType" <> 'PERCENT') OR ("discountValue" BETWEEN 0 AND 100)`)
 @Check(`"conversionToBase" > 0`)
-@Unique(['receipt', 'item', 'lotNumber', 'unitPrice', 'receivedUnit', 'conversionToBase'])
+@Unique(['receipt', 'lineNo'])
 export class PurchaseReceiptItem {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @ManyToOne(() => PurchaseReceipt, r => r.items, { onDelete: 'CASCADE' })
+  @ManyToOne(() => PurchaseReceipt, receipt => receipt.items, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'receipt_id' })
-  @Index()
   receipt: PurchaseReceipt;
 
   @ManyToOne(() => InventoryItem, { nullable: false, onDelete: 'RESTRICT' })
@@ -27,14 +27,16 @@ export class PurchaseReceiptItem {
   @Column('numeric', { precision: 12, scale: 3 })
   quantity: number;
 
-  // Đơn vị nhận (vd: kg, thùng). Nếu trùng base unit có thể để null.
-  @Column({ nullable: true })
-  receivedUnit?: string;
+  // tên đơn vị nhận (ví dụ: thùng, lon, kg, g, l, ml, ...)
+  @ManyToOne(() => UnitsOfMeasure)
+  @JoinColumn({ name: 'received_uom_code', referencedColumnName: 'code' })
+  receivedUom: UnitsOfMeasure;
 
   // 1 receivedUnit = conversionToBase * baseUnit
   @Column('numeric', { precision: 12, scale: 6, default: 1 })
   conversionToBase: number;
 
+  // Gía tiền theo đơn vị nhận
   @Column('numeric', { precision: 12, scale: 2 })
   unitPrice: number;
 
@@ -53,4 +55,9 @@ export class PurchaseReceiptItem {
 
   @Column({ type: 'text', nullable: true })
   note?: string;
+
+  @Column('int', { default: 1 })
+  @Check(`"lineNo" >= 1`)
+  lineNo: number;
+
 }

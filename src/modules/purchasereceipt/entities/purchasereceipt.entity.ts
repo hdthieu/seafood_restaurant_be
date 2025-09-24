@@ -55,5 +55,10 @@ export class PurchaseReceipt {
     @ManyToOne(() => User, { nullable: false, onDelete: 'RESTRICT' })
     @JoinColumn({ name: 'created_by_id' })
     createdBy: User;
+
+    // field nợ
+    @Check(`"debt" >= 0`)
+    @Column('numeric', { precision: 12, scale: 2, default: 0 })
+    debt: number;
 }
 

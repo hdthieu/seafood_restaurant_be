@@ -28,6 +28,8 @@ import {ReportModule} from './report/report.module';
 import { ReportController } from './report/report.controller';
 import { ReportService } from './report/report.service';
 import { CashbookModule } from './cashbook/cashbook.module';
+import { UnitsOfMeasureModule } from './modules/units-of-measure/units-of-measure.module';
+import { UomconversionModule } from './modules/uomconversion/uomconversion.module';
 @Module({
   imports: [ConfigModule.forRoot({ isGlobal: true }),
   TypeOrmModule.forRoot({
@@ -41,7 +43,7 @@ import { CashbookModule } from './cashbook/cashbook.module';
     synchronize: true,
     autoLoadEntities: true
   }),
-    UserModule, ProfileModule, MenuitemsModule, OrdersModule, OrderitemsModule, InventoryitemsModule, InventorytransactionModule, InvoiceModule, OrderstatushistoryModule, RestauranttableModule, AuthModule, AreaModule, ConfigS3Module, IngredientModule, CategoryModule, PaymentModule, CustomersModule, SupplierModule, PurchasereceiptModule, PurchasereceiptitemModule, SuppliergroupModule, ReportModule, CashbookModule],
+    UserModule, ProfileModule, MenuitemsModule, OrdersModule, OrderitemsModule, InventoryitemsModule, InventorytransactionModule, InvoiceModule, OrderstatushistoryModule, RestauranttableModule, AuthModule, AreaModule, ConfigS3Module, IngredientModule, CategoryModule, PaymentModule, CustomersModule, SupplierModule, PurchasereceiptModule, PurchasereceiptitemModule, SuppliergroupModule, ReportModule, UnitsOfMeasureModule, UomconversionModule],
   controllers: [AppController],
   providers: [AppService],
 })
