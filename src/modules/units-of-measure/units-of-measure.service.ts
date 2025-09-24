@@ -4,5 +4,5 @@ import { UpdateUnitsOfMeasureDto } from './dto/update-units-of-measure.dto';
 
 @Injectable()
 export class UnitsOfMeasureService {
- 
+
 }

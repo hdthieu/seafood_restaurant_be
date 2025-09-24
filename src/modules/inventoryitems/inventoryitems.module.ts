@@ -3,10 +3,12 @@ import { InventoryitemsService } from './inventoryitems.service';
 import { InventoryitemsController } from './inventoryitems.controller';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { InventoryItem } from './entities/inventoryitem.entity';
-import { CategoryModule } from '../category/category.module';
+import { UnitsOfMeasure } from '@modules/units-of-measure/entities/units-of-measure.entity';
+import { Category } from '@modules/category/entities/category.entity';
+import { Supplier } from '@modules/supplier/entities/supplier.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([InventoryItem]), CategoryModule],
+  imports: [TypeOrmModule.forFeature([InventoryItem, UnitsOfMeasure, Category, Supplier])],
   controllers: [InventoryitemsController],
   providers: [InventoryitemsService],
 })

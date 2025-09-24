@@ -5,6 +5,7 @@ import { UpdateCategoryDto } from './dto/update-category.dto';
 import { ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { QueryCategoryDto } from './dto/query-category.dto';
 import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
+import { CategoryType } from 'src/common/enums';
 
 @Controller('category')
 @ApiBearerAuth()
