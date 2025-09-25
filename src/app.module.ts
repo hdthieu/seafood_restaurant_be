@@ -24,7 +24,7 @@ import { SupplierModule } from './modules/supplier/supplier.module';
 import { PurchasereceiptModule } from './modules/purchasereceipt/purchasereceipt.module';
 import { PurchasereceiptitemModule } from './modules/purchasereceiptitem/purchasereceiptitem.module';
 import { SuppliergroupModule } from './modules/suppliergroup/suppliergroup.module';
-import {ReportModule} from './report/report.module';
+import { ReportModule } from '@modules/report/report.module';
 import { UnitsOfMeasureModule } from './modules/units-of-measure/units-of-measure.module';
 import { UomconversionModule } from './modules/uomconversion/uomconversion.module';
 @Module({

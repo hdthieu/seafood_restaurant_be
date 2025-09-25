@@ -17,4 +17,11 @@ export const configurations = {
   VNP_LOCALE: process.env.VNP_LOCALE,
   VNP_VERSION: process.env.VNP_VERSION,
   FRONTEND_URL: process.env.FRONTEND_URL,
+
+  jwt: {
+    accessSecret: process.env.JWT_ACCESS_SECRET!,
+    refreshSecret: process.env.JWT_REFRESH_SECRET!,
+    accessExpires: process.env.JWT_ACCESS_EXPIRES || '120m',
+    refreshExpires: process.env.JWT_REFRESH_EXPIRES || '30d'
+  },
 }
