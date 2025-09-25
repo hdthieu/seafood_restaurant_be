@@ -11,14 +11,8 @@ import { JwtStrategy } from './strategies/jwt.strategy';
 
 @Module({
   imports: [
-    JwtModule.registerAsync({
-      imports: [ConfigModule],
-      inject: [ConfigService],
-      useFactory: (cfg: ConfigService) => ({
-        secret: cfg.getOrThrow<string>('JWT_SECRET'),
-        signOptions: { expiresIn: '2h' },
-      }),
-    }),
+    ConfigModule.forRoot({ isGlobal: true }),
+    JwtModule.register({}),
     TypeOrmModule.forFeature([User]),
     UserModule,
   ],
