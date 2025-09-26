@@ -62,66 +62,76 @@ async createFromOrder(orderId: string, dto?: { customerId?: string | null },gues
 
 
 
-  async addPayment(
-    invoiceId: string,
-    dto: { amount: number; method?: PaymentMethod; txnRef?: string }
-  ) {
-    return this.ds.transaction(async (em) => {
-      const invRepo = em.getRepository(Invoice);
-      const payRepo = em.getRepository(Payment);
-      const oRepo = em.getRepository(Order);
+ async addPayment(
+  invoiceId: string,
+  dto: { amount: number; method?: PaymentMethod; txnRef?: string }
+) {
+  return this.ds.transaction(async (em) => {
+    const invRepo = em.getRepository(Invoice);
+    const payRepo = em.getRepository(Payment);
+    const oRepo = em.getRepository(Order);
 
-      const inv = await invRepo.findOne({ where: { id: invoiceId } });
-      if (!inv) throw new NotFoundException('INVOICE_NOT_FOUND');
-
-      const amountNum = Number(dto.amount);
-      if (!Number.isFinite(amountNum) || amountNum <= 0) {
-        throw new BadRequestException('INVALID_AMOUNT');
-      }
-
-      // Map enum bên ngoài -> union type của entity
-
-
-
-      // Tạo bản ghi payment (đã nhận tiền nên status='PAID')
-      const payment = payRepo.create({
-        invoiceId: inv.id,
-        invoice: inv,                // ManyToOne
-        amount: amountNum,           // bigint -> number
-        method: dto.method === PaymentMethod.VNPAY ? 'VNPAY' : 'CASH',    // 'CASH' | 'VNPAY'
-        status: 'PAID',              // PaymentState
-        txnRef: dto.txnRef ?? null,
-      } as Partial<Payment>);
-      await payRepo.save(payment);
-
-      // Tính tổng đã trả (chỉ tính những payment 'PAID')
-      const successPayments = await payRepo.find({
-        where: { invoiceId: inv.id, status: 'PAID' },
-      });
-      const paid = successPayments.reduce((s, p) => s + Number(p.amount), 0);
-      const total = Number(inv.totalAmount);
-
-      // Cập nhật trạng thái invoice theo enum InvoiceStatus
-      inv.status =
-        paid >= total
-          ? InvoiceStatus.PAID
-          : paid > 0
-            ? InvoiceStatus.PARTIAL
-            : InvoiceStatus.UNPAID;
-      await invRepo.save(inv);
-
-      // Nếu invoice đã PAID thì đóng order tương ứng
-      if (inv.status === InvoiceStatus.PAID && inv.order.id) {
-        const order = await oRepo.findOne({ where: { id: inv.order.id } });
-        if (order && order.status !== OrderStatus.PAID) {
-          order.status = OrderStatus.PAID;
-          await oRepo.save(order);
-        }
-      }
-
-      return { invoice: inv, payment };
+    // ✅ PHẢI load relation 'order' để có inv.order.id
+    const inv = await invRepo.findOne({
+      where: { id: invoiceId },
+      relations: ['order'],
     });
-  }
+    if (!inv) throw new NotFoundException('INVOICE_NOT_FOUND');
+
+    const amountNum = Number(dto.amount);
+    if (!Number.isFinite(amountNum) || amountNum <= 0) {
+      throw new BadRequestException('INVALID_AMOUNT');
+    }
+
+    // Tính đã trả trước khi ghi thêm
+    const successPayments = await payRepo.find({
+      where: { invoiceId: inv.id, status: 'PAID' },
+    });
+    const paid = successPayments.reduce((s, p) => s + Number(p.amount), 0);
+    const total = Number(inv.totalAmount);
+
+    // ✅ Guard: không cho trả trùng/vượt
+    if (paid >= total) throw new BadRequestException('INVOICE_ALREADY_PAID');
+    if (paid + amountNum > total) {
+      // Chọn 1 trong 2:
+      // 1) Chặn:
+      throw new BadRequestException('OVERPAY_NOT_ALLOWED');
+      // 2) Hoặc tự co lại số tiền (nếu muốn):
+      // dto.amount = total - paid;
+    }
+
+    // Tạo bản ghi payment (đã nhận tiền -> status PAID)
+    const payment = payRepo.create({
+      invoiceId: inv.id,
+      invoice: inv,
+      amount: amountNum,
+      method: dto.method === PaymentMethod.VNPAY ? 'VNPAY' : 'CASH',
+      status: 'PAID',
+      txnRef: dto.txnRef ?? null,
+    } as Partial<Payment>);
+    await payRepo.save(payment);
+
+    // Recompute paid sau khi thêm
+    const paidAfter = paid + amountNum;
+
+    // Cập nhật trạng thái invoice
+    inv.status =
+      paidAfter >= total
+        ? InvoiceStatus.PAID
+        : paidAfter > 0
+          ? InvoiceStatus.PARTIAL
+          : InvoiceStatus.UNPAID;
+    await invRepo.save(inv);
+
+    // ✅ Nếu invoice đã PAID thì đóng Order tương ứng
+    if (inv.status === InvoiceStatus.PAID && inv.order?.id) {
+      // update thẳng cho nhanh, không cần findOne lần nữa
+      await oRepo.update({ id: inv.order.id }, { status: OrderStatus.PAID });
+    }
+
+    return { invoice: inv, payment };
+  });
+}
 
   /** Force mark PAID (dùng khi reconcile cổng thanh toán/đối soát) */
   async markPaid(invoiceId: string) {
