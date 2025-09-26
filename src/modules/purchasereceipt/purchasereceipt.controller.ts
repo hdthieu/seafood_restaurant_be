@@ -1,4 +1,4 @@
-import { Controller, Post, Body, UseGuards, Req, Get, Param, Query, Patch } from '@nestjs/common';
+import { Controller, Post, Body, UseGuards, Req, Get, Param, Query, Patch, Put } from '@nestjs/common';
 import { PurchasereceiptService } from './purchasereceipt.service';
 import { CreatePurchaseReceiptDto } from './dto/create-purchasereceipt.dto';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
@@ -8,6 +8,7 @@ import { JwtAuthGuard } from '@modules/core/auth/guards/jwt-auth.guard';
 import { UserRole } from 'src/common/enums';
 import { CurrentUser } from 'src/common/decorators/user.decorator';
 import { PayReceiptDto } from './dto/pay-receipt.dto';
+import { UpdatePurchaseReceiptDto } from './dto/update-purchasereceipt.dto';
 
 @ApiTags('Purchase Receipts')
 @Controller('purchasereceipt')
@@ -71,11 +72,16 @@ export class PurchasereceiptController {
     return await this.purchasereceiptService.payReceipt(id, dto);
   }
 
-  // // this endpoint will update a DRAFT receipt
-  // @Patch(':id')
-  // @Roles(UserRole.MANAGER)
-  // async updateDraft(@Param('id') id: string, @Body() dto: CreatePurchaseReceiptDto) {
-  //   return await this.purchasereceiptService.updateDraft(id, dto);
-  // }
 
+  @Put('/update-draft-or-post/:id')
+  async updateDraftOrPost(
+    @CurrentUser('id') userId: string,
+    @Param('id') receiptId: string,
+    @Body() dto: UpdatePurchaseReceiptDto,
+    @Query('postNow') postNow: string,
+  ) {
+    const isPostNow = postNow === 'true';
+
+    return await this.purchasereceiptService.updateDraftOrPost(userId, receiptId, dto, isPostNow);
+  }
 }

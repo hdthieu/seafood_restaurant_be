@@ -2,7 +2,8 @@
 import { Body, Controller, Param, ParseUUIDPipe, Patch, Post } from '@nestjs/common';
 import { InvoicesService } from './invoice.service';
 import { PaymentMethod } from 'src/common/enums';
-
+import { Query, Get } from '@nestjs/common';
+import { QueryInvoicesDto } from './dto/query-invoices.dto';
 @Controller('invoices')
 export class InvoicesController {
   constructor(private readonly svc: InvoicesService) {}
@@ -27,4 +28,16 @@ export class InvoicesController {
   markPaid(@Param('id', new ParseUUIDPipe()) id: string) {
     return this.svc.markPaid(id);
   }
+
+  @Get()
+  list(@Query() q: QueryInvoicesDto) {
+    return this.svc.list(q);
+  }
+
+  /** ========== DETAIL (FE: GET /invoices/:id) ========== */
+  @Get(':id')
+  detail(@Param('id', new ParseUUIDPipe()) id: string) {
+    return this.svc.detail(id);
+  }
+
 }
