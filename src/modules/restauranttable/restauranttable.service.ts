@@ -7,7 +7,7 @@ import { CreateRestaurantTableDto } from './dto/create-restauranttable.dto';
 import { ResponseException } from 'src/common/common_dto/respone.dto';
 import { TableStatus } from 'src/common/enums';
 import { UpdateTableDto } from './dto/update-table.dto';
-
+import { QueryTableDto } from './dto/query-table.dto';
 @Injectable()
 export class RestaurantTablesService {
     constructor(
@@ -49,8 +49,23 @@ export class RestaurantTablesService {
     }
 
     // function for get all tables
-    async findAll(): Promise<RestaurantTable[]> {
-        return this.tableRepo.find({ relations: ['area'] });
+    async findAll({ page = 1, limit = 12, area }: QueryTableDto) {
+        const [data, total] = await this.tableRepo.findAndCount({
+            where: area ? { area: { name: area } } : {},
+            order: { name: 'ASC' },
+            skip: (page - 1) * limit,
+            take: limit,
+        });
+
+        return {
+            data,
+            meta: {
+                total,
+                page,
+                limit,
+                pages: Math.ceil(total / limit),
+            },
+        };
     }
 
     // function for get table by id

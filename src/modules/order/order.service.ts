@@ -313,46 +313,80 @@ export class OrdersService {
   /** SET QTY: cập nhật số lượng & áp kho delta; cho phép ở mọi trạng thái trừ PAID/CANCELLED */
   /** SET QTY: cập nhật số lượng & áp kho delta; nếu qty<=0 thì xóa dòng; recompute */
   async setItemQty(orderId: string, orderItemId: string, quantity: number) {
-    return this.ds.transaction(async (em) => {
-      const oRepo = em.getRepository(Order);
-      const order = await oRepo.findOne({ where: { id: orderId }, relations: ['items', 'items.menuItem'] });
-      if (!order) throw new NotFoundException('ORDER_NOT_FOUND');
+  return this.ds.transaction(async (em) => {
+    const oRepo = em.getRepository(Order);
+    const itRepo = em.getRepository(OrderItem);
 
-      const EDITABLE_STATUSES = [OrderStatus.PENDING, OrderStatus.CONFIRMED, OrderStatus.PREPARING, OrderStatus.READY, OrderStatus.SERVED];
-      if (!EDITABLE_STATUSES.includes(order.status)) {
-        throw new BadRequestException('ORDER_NOT_EDITABLE_IN_THIS_STATUS');
-      }
-
-      const itRepo = em.getRepository(OrderItem);
-      const row = order.items.find((x) => x.id === orderItemId);
-      if (!row) throw new NotFoundException('ORDER_ITEM_NOT_FOUND');
-
-      const delta = quantity - row.quantity;
-
-      if (quantity <= 0) {
-        await itRepo.delete(row.id);
-        if (row.quantity > 0) {
-          await this.restoreInventoryForDelta(em, [{ menuItemId: row.menuItem.id, quantity: row.quantity }], order.id);
-        }
-      } else {
-        row.quantity = quantity;
-        await itRepo.save(row);
-
-        if (delta !== 0) {
-          if (delta > 0) {
-            await this.consumeInventoryForDelta(em, order.id, [{ menuItemId: row.menuItem.id, quantity: delta }]);
-          } else {
-            await this.restoreInventoryForDelta(em, [{ menuItemId: row.menuItem.id, quantity: -delta }], order.id);
-          }
-        }
-      }
-
-      // recompute theo item
-      await this.orderItemsSvc.recomputeOrderStatus(em, order.id);
-
-      return oRepo.findOne({ where: { id: orderId }, relations: ['items', 'items.menuItem', 'table'] });
+    // 1) Lấy đơn + items
+    const order = await oRepo.findOne({
+      where: { id: orderId },
+      relations: ['items', 'items.menuItem'],
     });
-  }
+    if (!order) throw new NotFoundException('ORDER_NOT_FOUND');
+
+    // 2) Không cho sửa khi đơn đã PAID/CANCELLED
+    if ([OrderStatus.PAID, OrderStatus.CANCELLED].includes(order.status)) {
+      throw new BadRequestException('ORDER_NOT_EDITABLE_IN_THIS_STATUS');
+    }
+
+    // 3) Tìm dòng cần sửa
+    const row = order.items.find((x) => x.id === orderItemId);
+    if (!row) throw new NotFoundException('ORDER_ITEM_NOT_FOUND');
+
+    // 4) Chỉ cho đổi qty khi item còn "mở"
+    if (![ItemStatus.PENDING, ItemStatus.CONFIRMED].includes(row.status)) {
+      // FE sẽ fallback (remove + add dòng mới) khi nhận 400 này
+      throw new BadRequestException(`CANNOT_CHANGE_QTY_WHEN_${row.status}`);
+    }
+
+    // 5) Tính chênh lệch & áp tồn kho
+    const delta = quantity - row.quantity;
+
+    if (quantity <= 0) {
+      // Xoá dòng + hoàn kho toàn bộ số lượng của dòng
+      await itRepo.delete(row.id);
+
+      if (row.quantity > 0) {
+        await this.restoreInventoryForDelta(
+          em,
+          [{ menuItemId: row.menuItem.id, quantity: row.quantity }],
+          order.id,
+        );
+      }
+    } else {
+      // Cập nhật số lượng
+      row.quantity = quantity;
+      await itRepo.save(row);
+
+      // Áp tồn kho theo delta
+      if (delta !== 0) {
+        if (delta > 0) {
+          await this.consumeInventoryForDelta(
+            em,
+            order.id,
+            [{ menuItemId: row.menuItem.id, quantity: delta }],
+          );
+        } else {
+          await this.restoreInventoryForDelta(
+            em,
+            [{ menuItemId: row.menuItem.id, quantity: -delta }],
+            order.id,
+          );
+        }
+      }
+    }
+
+    // 6) Recompute trạng thái order dựa trên item statuses
+    await this.orderItemsSvc.recomputeOrderStatus(em, order.id);
+
+    // 7) Trả đơn cập nhật (kèm table cho FE)
+    return oRepo.findOne({
+      where: { id: orderId },
+      relations: ['items', 'items.menuItem', 'table'],
+    });
+  });
+}
+
 
 
 
