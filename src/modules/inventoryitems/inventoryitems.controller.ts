@@ -33,4 +33,12 @@ export class InventoryitemsController {
   list(@Query() query: ListInventoryItemsQueryDto) {
     return this.inventoryitemsService.listItems(query);
   }
+
+  @Get(':itemId/uoms')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Get UOMs for a specific inventory item' })
+  async getUomsForItem(@Param('itemId') itemId: string) {
+    return this.inventoryitemsService.getUomsForItem(itemId);
+  }
+
 }

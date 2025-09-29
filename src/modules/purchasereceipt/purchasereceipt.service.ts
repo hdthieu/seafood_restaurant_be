@@ -37,25 +37,58 @@ export class PurchasereceiptService {
   }
 
   /** Tạo phiếu DRAFT + items */
-  /** Tạo phiếu DRAFT + items */
   async createDraft(userId: string, dto: CreatePurchaseReceiptDto) {
+    // 1) Header
     const supplier = await this.supplierRepo.findOne({ where: { id: dto.supplierId } });
     if (!supplier) throw new ResponseCommon(404, false, 'SUPPLIER_NOT_FOUND');
 
+    // 2) Validate items cơ bản
+    if (dto.globalDiscountType === DiscountType.PERCENT && (dto.globalDiscountValue ?? 0) > 100) {
+      throw new ResponseCommon(400, false, 'GLOBAL_PERCENT_OUT_OF_RANGE');
+    }
+    dto.items.forEach((it, idx) => {
+      if (it.discountType === DiscountType.PERCENT && (it.discountValue ?? 0) > 100) {
+        throw new ResponseCommon(400, false, `LINE_PERCENT_OUT_OF_RANGE_AT_${idx + 1}`);
+      }
+      if (!it.quantity || it.quantity <= 0) {
+        throw new ResponseCommon(400, false, `INVALID_QTY_AT_${idx + 1}`);
+      }
+      if (it.unitPrice == null || it.unitPrice < 0) {
+        throw new ResponseCommon(400, false, `INVALID_PRICE_AT_${idx + 1}`);
+      }
+    });
+
+    // 3) Chặn trùng lô (cùng SP + ĐVT + lô)
+    const norm = (s?: string) => (s ?? '').trim().toUpperCase();
+    const dupKey = new Set<string>();
+    dto.items.forEach((it, idx) => {
+      const lot = norm(it.lotNumber);
+      if (!lot) return; // không nhập lô thì cho phép (tuỳ nghiệp vụ)
+      const key = [it.itemId, norm(it.receivedUomCode), lot].join('|');
+      if (dupKey.has(key)) throw new ResponseCommon(400, false, `DUPLICATE_LOT_AT_${idx + 1}`);
+      dupKey.add(key);
+    });
+
+    // 4) Tải InventoryItem theo danh sách ID duy nhất
     const ids = dto.items.map(i => i.itemId);
+    const uniqIds = Array.from(new Set(ids));
     const invItems = await this.invRepo.find({
-      where: { id: In(ids) },
+      where: { id: In(uniqIds) },
       relations: ['baseUom'],
     });
-    if (invItems.length !== ids.length) throw new ResponseCommon(404, false, 'SOME_ITEMS_NOT_FOUND');
+    if (invItems.length !== uniqIds.length) {
+      const found = new Set(invItems.map(i => i.id));
+      const missing = uniqIds.filter(id => !found.has(id));
+      throw new ResponseCommon(404, false, `SOME_ITEMS_NOT_FOUND:${missing.join(',')}`);
+    }
+    const itemMap = new Map(invItems.map(i => [i.id, i]));
 
     const code = this.buildCode();
 
+    // 5) Transaction
     return this.ds.transaction(async (em) => {
       const receiptRepo = em.getRepository(PurchaseReceipt);
       const lineRepo = em.getRepository(PurchaseReceiptItem);
-      const uomRepo = em.getRepository(UnitsOfMeasure);
-      const convRepo = em.getRepository(UomConversion);
 
       const receipt = receiptRepo.create({
         code,
@@ -72,47 +105,40 @@ export class PurchasereceiptService {
       await receiptRepo.save(receipt);
 
       let lineNo = 1;
-      const payloads: DeepPartial<PurchaseReceiptItem>[] = [];
+      const saved: PurchaseReceiptItem[] = [];
 
       for (const it of dto.items) {
-        const item = invItems.find(x => x.id === it.itemId)!;
+        const item = itemMap.get(it.itemId)!; // đã validate ở trên
 
-        // 1) xác định receivedUom
-        const receivedUom = it.receivedUomCode
-          ? await uomRepo.findOne({ where: { code: it.receivedUomCode } })
-          : item.baseUom;
-
-        if (!receivedUom) throw new ResponseCommon(400, false, 'RECEIVED_UOM_NOT_FOUND');
-
-        // (tuỳ) kiểm tra cùng dimension
-        if (
-          receivedUom.code !== item.baseUom.code &&
-          receivedUom.dimension !== item.baseUom.dimension
-        ) {
-          throw new ResponseCommon(400, false, 'UOM_DIMENSION_MISMATCH');
+        // === Tra UOM & conversion bằng helper (đồng nhất với các hàm khác) ===
+        let receivedUomCode = it.receivedUomCode ?? null;
+        let factor = 1;
+        let receivedName = '';
+        try {
+          const res = await resolveUomAndFactor(
+            em,
+            item.baseUom.code,         // base của item
+            receivedUomCode,           // UOM FE chọn (có thể null -> dùng base)
+            it.conversionToBase ?? null,
+          );
+          receivedUomCode = res.received.code;
+          receivedName = res.received.name;
+          factor = res.factor;
+        } catch (err: any) {
+          const msg = String(err?.message || err);
+          if (msg === 'BASE_UOM_NOT_FOUND') throw new ResponseCommon(400, false, `BASE_UOM_NOT_FOUND_AT_${lineNo}`);
+          if (msg === 'RECEIVED_UOM_NOT_FOUND') throw new ResponseCommon(400, false, `RECEIVED_UOM_NOT_FOUND_AT_${lineNo}`);
+          if (msg === 'UOM_DIMENSION_MISMATCH') throw new ResponseCommon(400, false, `UOM_DIMENSION_MISMATCH_AT_${lineNo}`);
+          if (msg === 'NO_CONVERSION_DEFINED') throw new ResponseCommon(400, false, `NO_CONVERSION_DEFINED_AT_${lineNo}`);
+          throw new ResponseCommon(400, false, `UOM_ERROR_AT_${lineNo}`);
         }
 
-        // 2) xác định conversionToBase
-        let factor: number;
-        if (it.conversionToBase && Number(it.conversionToBase) > 0) {
-          factor = Number(it.conversionToBase);
-        } else if (receivedUom.code === item.baseUom.code) {
-          factor = 1;
-        } else {
-          const conv = await convRepo.findOne({
-            where: { from: { code: receivedUom.code }, to: { code: item.baseUom.code } },
-            relations: ['from', 'to'],
-          });
-          if (!conv) throw new ResponseCommon(400, false, 'NO_CONVERSION_DEFINED');
-          factor = Number(conv.factor);
-        }
-
-        payloads.push({
+        const line = lineRepo.create({
           receipt: { id: receipt.id } as any,
           item: { id: item.id } as any,
           lineNo: lineNo++,
-          quantity: Number(it.quantity),                         // đảm bảo number
-          receivedUom: { code: receivedUom.code } as any,
+          quantity: Number(it.quantity),
+          receivedUom: { code: receivedUomCode } as any,
           conversionToBase: Number(factor),
           unitPrice: Number(it.unitPrice),
           discountType: it.discountType ?? DiscountType.AMOUNT,
@@ -121,23 +147,21 @@ export class PurchasereceiptService {
           expiryDate: it.expiryDate ?? undefined,
           note: it.note ?? undefined,
         });
+        await lineRepo.save(line);
+
+        // nhét name để trả response đẹp
+        (line as any).__receivedUomName = receivedName;
+        saved.push(line);
       }
 
-      const items = lineRepo.create(payloads);
-      await lineRepo.save(items);
-
-      // ===== Tính tổng (ép số an toàn) =====
-      const subTotal = items.reduce((sum, i) => {
+      // 6) Tính tổng
+      const subTotal = saved.reduce((sum, i) => {
         const qty = Number(i.quantity);
         const price = Number(i.unitPrice);
         const disc = Number(i.discountValue ?? 0);
-        // Nếu discount type = PERCENT thì giảm theo %, ngược lại theo số tiền
-        const priceAfterItem =
-          (i.discountType === DiscountType.PERCENT)
-            ? price * (1 - disc / 100)
-            : price - disc;
-        const lineTotal = Math.max(0, qty * priceAfterItem);
-        return sum + lineTotal;
+        const priceAfter =
+          i.discountType === DiscountType.PERCENT ? price * (1 - disc / 100) : price - disc;
+        return sum + Math.max(0, qty * priceAfter);
       }, 0);
 
       const gType = receipt.globalDiscountType;
@@ -145,14 +169,11 @@ export class PurchasereceiptService {
       const ship = Number(receipt.shippingFee ?? 0);
       const paid = Number(receipt.amountPaid ?? 0);
 
-      const afterGlobal =
-        (gType === DiscountType.PERCENT)
-          ? subTotal * (1 - gVal / 100)
-          : subTotal - gVal;
-
+      const afterGlobal = gType === DiscountType.PERCENT ? subTotal * (1 - gVal / 100) : subTotal - gVal;
       const grandTotal = Math.max(0, +(afterGlobal + ship).toFixed(2));
       const remaining = Math.max(0, +(grandTotal - paid).toFixed(2));
 
+      // 7) Response
       return {
         id: receipt.id,
         code: receipt.code,
@@ -160,25 +181,36 @@ export class PurchasereceiptService {
         supplier: { id: supplier.id, name: supplier.name },
         receiptDate: receipt.receiptDate,
         subTotal: +subTotal.toFixed(2),
-        globalDiscount: +(subTotal - afterGlobal).toFixed(2),
-        shippingFee: +ship.toFixed(2),
         grandTotal,
+        shippingFee: +ship.toFixed(2),
         amountPaid: +paid.toFixed(2),
         remaining,
-        items: items.map(i => ({
+        items: saved.map(i => ({
           id: i.id,
           lineNo: i.lineNo!,
           itemId: (i.item as any)?.id ?? i.item,
+          itemName: undefined, // nếu cần, join thêm
           quantity: Number(i.quantity),
           unitPrice: Number(i.unitPrice),
           discountType: i.discountType,
           discountValue: Number(i.discountValue),
           receivedUomCode: (i.receivedUom as any)?.code ?? i.receivedUom,
+          receivedUomName: (i as any).__receivedUomName ?? null,
           conversionToBase: Number(i.conversionToBase),
+          lotNumber: i.lotNumber ?? null,
+          expiryDate: i.expiryDate ?? null,
+          lineTotal: ((): number => {
+            const price = Number(i.unitPrice);
+            const disc = Number(i.discountValue ?? 0);
+            const priceAfter =
+              i.discountType === DiscountType.PERCENT ? price * (1 - disc / 100) : price - disc;
+            return Math.max(0, Number(i.quantity) * priceAfter);
+          })(),
         })),
       };
     });
   }
+
 
 
   // this function is used to get detail of a receipt by id
@@ -263,17 +295,15 @@ export class PurchasereceiptService {
   }
 
   async createAndPost(userId: string, dto: CreatePurchaseReceiptDto) {
-    // 1) Validate header + items
+    // 1) Validate header
     const supplier = await this.supplierRepo.findOne({ where: { id: dto.supplierId } });
     if (!supplier) throw new ResponseCommon(404, false, 'SUPPLIER_NOT_FOUND');
 
-    const ids = dto.items.map(i => i.itemId);
-    const invItems = await this.invRepo.find({ where: { id: In(ids) }, relations: ['baseUom'] });
-    if (invItems.length !== ids.length) throw new ResponseCommon(404, false, 'SOME_ITEMS_NOT_FOUND');
-
+    // --- VALIDATE items cơ bản ---
     if (dto.globalDiscountType === DiscountType.PERCENT && (dto.globalDiscountValue ?? 0) > 100) {
       throw new ResponseCommon(400, false, 'GLOBAL_PERCENT_OUT_OF_RANGE');
     }
+
     dto.items.forEach((it, idx) => {
       if (it.discountType === DiscountType.PERCENT && (it.discountValue ?? 0) > 100) {
         throw new ResponseCommon(400, false, `LINE_PERCENT_OUT_OF_RANGE_AT_${idx + 1}`);
@@ -286,13 +316,40 @@ export class PurchasereceiptService {
       }
     });
 
+    // --- CHẶN TRÙNG LÔ theo (itemId + receivedUomCode + lotNumber) ---
+    const norm = (s?: string) => (s ?? '').trim().toUpperCase();
+    const dupKey = new Set<string>();
+    dto.items.forEach((it, idx) => {
+      const lot = norm(it.lotNumber);
+      if (!lot) return; // không nhập lô thì cho phép trùng (tuỳ nghiệp vụ)
+      const key = [it.itemId, norm(it.receivedUomCode), lot].join('|');
+      if (dupKey.has(key)) throw new ResponseCommon(400, false, `DUPLICATE_LOT_AT_${idx + 1}`);
+      dupKey.add(key);
+    });
+
+    // --- TẢI INVENTORY ITEMS bằng danh sách ID DUY NHẤT ---
+    const ids = dto.items.map(i => i.itemId);
+    const uniqIds = Array.from(new Set(ids));
+    const invItems = await this.invRepo.find({
+      where: { id: In(uniqIds) },
+      relations: ['baseUom'],
+    });
+    if (invItems.length !== uniqIds.length) {
+      const found = new Set(invItems.map(i => i.id));
+      const missing = uniqIds.filter(id => !found.has(id));
+      throw new ResponseCommon(404, false, `SOME_ITEMS_NOT_FOUND:${missing.join(',')}`);
+    }
+    const itemMap = new Map(invItems.map(i => [i.id, i]));
+
     const code = this.buildCode();
 
+    // === TRANSACTION ===
     return this.ds.transaction(async (em) => {
       const receiptRepo = em.getRepository(PurchaseReceipt);
       const lineRepo = em.getRepository(PurchaseReceiptItem);
       const invRepo = em.getRepository(InventoryItem);
       const txRepo = em.getRepository(InventoryTransaction);
+
       // 2) Tạo receipt (POSTED, set PAID/OWING ở cuối)
       const receipt = receiptRepo.create({
         code,
@@ -314,26 +371,22 @@ export class PurchasereceiptService {
       const savedLines: PurchaseReceiptItem[] = [];
 
       for (const it of dto.items) {
-        const itemMaster = invItems.find(x => x.id === it.itemId)!; // đã validate ở trên
+        const itemMaster = itemMap.get(it.itemId)!; // đã validate
 
-        // === UOM snapshot & conversionToBase (tra từ uom_conversions, có thử đảo chiều) ===
+        // resolve UOM & factor
         let receivedUomCode = it.receivedUomCode ?? null;
         let factor = 1;
-        let received: UnitsOfMeasure;
-
         try {
           const res = await resolveUomAndFactor(
             em,
-            itemMaster.baseUom.code,            // base (đơn vị nhỏ nhất của item)
-            receivedUomCode,                    // FE chọn (CASE24/KG/L/...)
-            it.conversionToBase ?? null,        // override nếu FE gửi
+            itemMaster.baseUom.code,
+            receivedUomCode,
+            it.conversionToBase ?? null,
           );
-          received = res.received;
+          receivedUomCode = res.received.code;
           factor = res.factor;
-          receivedUomCode = received.code;
         } catch (err: any) {
           const msg = String(err?.message || err);
-          // Map lỗi helper về ResponseCommon rõ ràng
           if (msg === 'BASE_UOM_NOT_FOUND') throw new ResponseCommon(400, false, `BASE_UOM_NOT_FOUND_AT_${lineNo}`);
           if (msg === 'RECEIVED_UOM_NOT_FOUND') throw new ResponseCommon(400, false, `RECEIVED_UOM_NOT_FOUND_AT_${lineNo}`);
           if (msg === 'UOM_DIMENSION_MISMATCH') throw new ResponseCommon(400, false, `UOM_DIMENSION_MISMATCH_AT_${lineNo}`);
@@ -341,15 +394,14 @@ export class PurchasereceiptService {
           throw new ResponseCommon(400, false, `UOM_ERROR_AT_${lineNo}`);
         }
 
-        // Tạo dòng phiếu: qty theo receivedUom, đóng băng conversionToBase
         const line = lineRepo.create({
           receipt: { id: receipt.id } as any,
           item: { id: itemMaster.id } as any,
           lineNo: lineNo++,
-          quantity: it.quantity,                           // theo receivedUom
-          receivedUom: { code: receivedUomCode } as any,   // FK tới UnitsOfMeasure(code)
-          conversionToBase: factor,                        // 1 received = factor × base
-          unitPrice: it.unitPrice,                         // giá theo receivedUom
+          quantity: it.quantity,
+          receivedUom: { code: receivedUomCode } as any,
+          conversionToBase: factor,
+          unitPrice: it.unitPrice,
           discountType: it.discountType ?? DiscountType.AMOUNT,
           discountValue: it.discountValue ?? 0,
           lotNumber: it.lotNumber ?? undefined,
@@ -358,9 +410,8 @@ export class PurchasereceiptService {
         });
         await lineRepo.save(line);
 
-        // === Cập nhật tồn theo baseUom (đơn vị nhỏ nhất) ===
+        // cập nhật tồn theo base
         const baseQty = Number(line.quantity) * Number(line.conversionToBase);
-        // Giữ công thức gốc của bạn: avgCost dựa trên unitPrice/ factor (chưa trừ chiết khấu dòng)
         const unitCostBase = Number(line.unitPrice) / Number(line.conversionToBase);
 
         const inv = await invRepo.findOne({ where: { id: itemMaster.id } });
@@ -375,7 +426,6 @@ export class PurchasereceiptService {
         inv.avgCost = Number(newAvg.toFixed(2));
         await invRepo.save(inv);
 
-        // Giao dịch kho
         await txRepo.save(txRepo.create([{
           item: { id: inv.id } as any,
           quantity: baseQty,
@@ -386,7 +436,7 @@ export class PurchasereceiptService {
           afterQty: inv.quantity,
           refType: 'PURCHASE_RECEIPT',
           refId: receipt.id as any,
-          refItemId: line.id as any,                 // nếu entity có cột này
+          refItemId: line.id as any,
           note: line.note ?? null,
           performedBy: userId ? ({ id: userId } as any) : null,
         } as DeepPartial<InventoryTransaction>]));
@@ -394,7 +444,7 @@ export class PurchasereceiptService {
         savedLines.push(line);
       }
 
-      // 4) Tính tổng, snapshot nợ & set STATUS
+      // 4) Tổng & trạng thái
       const totals = calcReceiptTotals(savedLines as any, receipt);
       const grandTotal = +Number(totals.total).toFixed(2);
       const paidNow = +Number(receipt.amountPaid ?? 0).toFixed(2);
@@ -436,6 +486,7 @@ export class PurchasereceiptService {
       };
     });
   }
+
 
   // this function is used to pay a receipt
   async payReceipt(id: string, dto: PayReceiptDto) {
@@ -548,8 +599,13 @@ export class PurchasereceiptService {
       throw new ResponseCommon(400, false, 'GLOBAL_PERCENT_OUT_OF_RANGE');
     }
 
-    // 2) Validate items (nếu client gửi items để thay thế)
+    // 2) Validate items
     const itemsDto = dto.items ?? [];
+
+    // --- trùng lô theo (itemId + receivedUomCode + lotNumber) ---
+    const norm = (s?: string) => (s ?? '').trim().toUpperCase();
+    const dup = new Set<string>();
+
     itemsDto.forEach((it, idx) => {
       if (it.discountType === DiscountType.PERCENT && (it.discountValue ?? 0) > 100) {
         throw new ResponseCommon(400, false, `LINE_PERCENT_OUT_OF_RANGE_AT_${idx + 1}`);
@@ -560,16 +616,26 @@ export class PurchasereceiptService {
       if (it.unitPrice == null || it.unitPrice < 0) {
         throw new ResponseCommon(400, false, `INVALID_PRICE_AT_${idx + 1}`);
       }
+
+      const lot = norm(it.lotNumber);
+      if (!lot) return;
+      const key = [it.itemId, norm(it.receivedUomCode), lot].join('|');
+      if (dup.has(key)) throw new ResponseCommon(400, false, `DUPLICATE_LOT_AT_${idx + 1}`);
+      dup.add(key);
     });
 
-    // 3) Chuẩn bị map InventoryItem (cần baseUom cho conversion)
+    // 3) Chuẩn bị map InventoryItem bằng id duy nhất
     const ids = itemsDto.map(i => i.itemId);
-    const invItems = ids.length
-      ? await this.invRepo.find({ where: { id: In(ids) }, relations: ['baseUom'] })
+    const uniqIds = Array.from(new Set(ids));
+    const invItems = uniqIds.length
+      ? await this.invRepo.find({ where: { id: In(uniqIds) }, relations: ['baseUom'] })
       : [];
-    if (ids.length && invItems.length !== ids.length) {
-      throw new ResponseCommon(404, false, 'SOME_ITEMS_NOT_FOUND');
+    if (uniqIds.length && invItems.length !== uniqIds.length) {
+      const found = new Set(invItems.map(i => i.id));
+      const missing = uniqIds.filter(id => !found.has(id));
+      throw new ResponseCommon(404, false, `SOME_ITEMS_NOT_FOUND:${missing.join(',')}`);
     }
+    const itemMap = new Map(invItems.map(i => [i.id, i]));
 
     // 4) Transaction
     return this.ds.transaction(async (em) => {
@@ -589,18 +655,15 @@ export class PurchasereceiptService {
       // status sẽ set ở cuối
       await receiptRepo.save(existed);
 
-      // 4.2 Nếu client gửi mảng items => thay toàn bộ dòng
+      // 4.2 Replace items nếu client gửi
       let savedLines: PurchaseReceiptItem[] = [];
-      if (ids.length) {
-        // Xóa hết dòng cũ
+      if (uniqIds.length) {
         await lineRepo.delete({ receipt: { id: existed.id } as any });
 
-        // Tạo lại dòng mới
         let lineNo = 1;
         for (const it of itemsDto) {
-          const itemMaster = invItems.find(x => x.id === it.itemId)!;
+          const itemMaster = itemMap.get(it.itemId)!;
 
-          // tra UOM & conversion (có thử chiều nghịch / override)
           let receivedUomCode = it.receivedUomCode ?? null;
           let factor = 1;
           try {
@@ -639,7 +702,6 @@ export class PurchasereceiptService {
           savedLines.push(line);
         }
       } else {
-        // không gửi items => lấy lại các dòng hiện có
         savedLines = await lineRepo.find({
           where: { receipt: { id: existed.id } as any },
           relations: ['item', 'receivedUom'],
@@ -669,31 +731,36 @@ export class PurchasereceiptService {
           shippingFee: Number(existed.shippingFee),
           amountPaid: Number(existed.amountPaid),
           remaining: null, // DRAFT chưa chốt
-          items: (await lineRepo.find({ where: { receipt: { id: existed.id } as any }, relations: ['item', 'receivedUom'], order: { lineNo: 'ASC' } }))
-            .map(i => ({
-              id: i.id,
-              lineNo: i.lineNo!,
-              itemId: (i.item as any)?.id ?? i.item,
-              quantity: Number(i.quantity),
-              unitPrice: Number(i.unitPrice),
-              discountType: i.discountType,
-              discountValue: Number(i.discountValue),
-              receivedUomCode: (i.receivedUom as any)?.code ?? i.receivedUom,
-              conversionToBase: Number(i.conversionToBase),
-              lotNumber: i.lotNumber ?? null,
-              expiryDate: i.expiryDate ?? null,
-              lineTotal: calcLineTotal(i as any),
-            })),
+          items: (await lineRepo.find({
+            where: { receipt: { id: existed.id } as any },
+            relations: ['item', 'receivedUom'],
+            order: { lineNo: 'ASC' },
+          })).map(i => ({
+            id: i.id,
+            lineNo: i.lineNo!,
+            itemId: (i.item as any)?.id ?? i.item,
+            quantity: Number(i.quantity),
+            unitPrice: Number(i.unitPrice),
+            discountType: i.discountType,
+            discountValue: Number(i.discountValue),
+            receivedUomCode: (i.receivedUom as any)?.code ?? null,
+            receivedUomName: (i.receivedUom as any)?.name ?? null,
+            conversionToBase: Number(i.conversionToBase),
+            lotNumber: i.lotNumber ?? null,
+            expiryDate: i.expiryDate ?? null,
+            lineTotal: calcLineTotal(i as any),
+          })),
+
         };
       }
 
       // 4.4 Nếu POST NOW: áp dụng kho + transactions
-      // Re-load lines (đảm bảo có hết dữ liệu)
       const linesToPost = await lineRepo.find({
         where: { receipt: { id: existed.id } as any },
-        relations: ['item'],
+        relations: ['item', 'receivedUom'],
         order: { lineNo: 'ASC' },
       });
+
 
       for (const line of linesToPost) {
         const itemId = (line.item as any)?.id ?? line.item;
