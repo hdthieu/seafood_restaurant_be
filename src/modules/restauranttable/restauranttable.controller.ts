@@ -8,7 +8,8 @@ import { Roles } from 'src/common/decorators/roles.decorator';
 import { UserRole } from 'src/common/enums';
 import { RolesGuard } from '../core/auth/guards/roles.guard';
 import { UpdateTableDto } from './dto/update-table.dto';
-
+import { QueryTableDto } from './dto/query-table.dto';
+import { Query } from '@nestjs/common';
 @Controller('restauranttable')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -28,8 +29,8 @@ export class RestauranttableController {
   @Get('/get-all-tables')
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Lấy danh sách tất cả bàn [Tất cả các Roles]' })
-  async findAll(): Promise<RestaurantTable[]> {
-    return this.restauranttableService.findAll();
+  async paginate(@Query() query: QueryTableDto) {
+    return this.restauranttableService.findAll(query);
   }
 
   // this endpoint for get table by id

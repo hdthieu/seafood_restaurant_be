@@ -7,6 +7,7 @@ import { UnitsOfMeasure } from '@modules/units-of-measure/entities/units-of-meas
 import { Category } from '@modules/category/entities/category.entity';
 import { Supplier } from '@modules/supplier/entities/supplier.entity';
 import { ListInventoryItemsQueryDto } from './dto/list-inventory-items.query.dto';
+import { UomConversion } from '@modules/uomconversion/entities/uomconversion.entity';
 
 // // Gợi ý DTO (bạn có thể điều chỉnh tên/đường dẫn theo dự án của bạn)
 // export class CreateInventoryitemDto {
@@ -25,14 +26,8 @@ export class InventoryitemsService {
     @InjectRepository(InventoryItem)
     private readonly inventoryRepo: Repository<InventoryItem>,
 
-    @InjectRepository(UnitsOfMeasure)
-    private readonly uomRepo: Repository<UnitsOfMeasure>,
-
-    @InjectRepository(Category)
-    private readonly categoryRepo: Repository<Category>,
-
-    @InjectRepository(Supplier)
-    private readonly supplierRepo: Repository<Supplier>,
+    @InjectRepository(UomConversion)
+    private readonly convRepo: Repository<UomConversion>,
   ) { }
 
   private genCode(prefix = 'ITEM'): string {
@@ -158,4 +153,44 @@ export class InventoryitemsService {
     };
   }
 
+  async getUomsForItem(itemId: string): Promise<Array<{
+    code: string; name: string; conversionToBase: number; isBase: boolean; label: string;
+  }>> {
+    const item = await this.inventoryRepo.findOne({
+      where: { id: itemId },
+      relations: ['baseUom'],
+    });
+    if (!item) throw new NotFoundException('ITEM_NOT_FOUND');
+
+    const base = item.baseUom; // ví dụ: CAN
+
+    // lấy các conversion có đích là base: 1 from = factor * base
+    const conversions = await this.convRepo.find({
+      where: { to: { code: base.code } },
+      relations: ['from', 'to'],
+      order: { factor: 'ASC' },
+    });
+
+    const baseOption = {
+      code: base.code,
+      name: base.name,
+      conversionToBase: 1,
+      isBase: true,
+      label: `${base.code} (base)`,
+    };
+
+    const others = conversions
+      .filter(c => c.from.code !== base.code)
+      .filter(c => c.from.dimension === base.dimension) // chặn ml/l/kg...
+      .map(c => ({
+        code: c.from.code,
+        name: c.from.name,
+        conversionToBase: Number(c.factor),
+        isBase: false,
+        label: `${c.from.code} (x${Number(c.factor)} ${base.code})`,
+      }))
+      .sort((a, b) => a.conversionToBase - b.conversionToBase);
+
+    return [baseOption, ...others];
+  }
 }
