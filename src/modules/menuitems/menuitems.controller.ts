@@ -22,7 +22,6 @@ export class MenuitemsController {
   constructor(private readonly menuitemsService: MenuitemsService) { }
 
   @Post('/create-menuitem')
-  @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Tạo món (ảnh chỉ nhận file upload)' })
   @ApiConsumes('multipart/form-data')
   @UseInterceptors(FileInterceptor('image', {
@@ -30,7 +29,8 @@ export class MenuitemsController {
     limits: { fileSize: 5 * 1024 * 1024 },
     fileFilter: (_req, file, cb: FileFilterCallback) => {
       const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
-      if (!allowed.includes(file.mimetype)) return cb(new BadRequestException('IMAGE_TYPE_NOT_ALLOWED') as any, false);
+      if (!allowed.includes(file.mimetype)) 
+        return cb(new BadRequestException('IMAGE_TYPE_NOT_ALLOWED') as any, false);
       cb(null, true);
     },
   }))
