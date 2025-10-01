@@ -7,6 +7,7 @@ import { PaymentMethod, PaymentStatus } from 'src/common/enums';
 import { hmacSHA512, sortObject, toQueryString, nowYmdHisGMT7, addMinutesYmdHisGMT7 } from 'src/lib/vnpay';
 import { Payment } from 'src/modules/payments/entities/payment.entity';
 import { ResponseCommon, ResponseException } from 'src/common/common_dto/respone.dto';
+import * as crypto from 'crypto';
 
 type CreateVNPayParams = {
   invoiceId: string;
@@ -242,7 +243,20 @@ export class PaymentService {
     return true;
   }
 
+  //vietqr 
+    async isTxnProcessed(externalTxnId: string) {
+    if (!externalTxnId) return false;
+    const exist = await this.paymentRepo.findOne({ where: { externalTxnId } });
+    return !!exist;
+  }
 
+  verifyWebhookSignature(raw: string, signature?: string): boolean {
+    const secret = process.env.WEBHOOK_SECRET;
+    if (!secret) return true; // nếu bạn chưa bật verify
+    if (!signature) return false;
+    const h = crypto.createHmac('sha256', secret).update(raw).digest('hex');
+    return crypto.timingSafeEqual(Buffer.from(h), Buffer.from(signature));
+  }
 
 
 

@@ -8,6 +8,7 @@ import { configurations } from './common/configs';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { join } from 'path';
 import * as express from 'express';
+
 function initialSwagger(app: NestExpressApplication): void {
   const options = new DocumentBuilder()
     .setTitle('Seafood Restaurant API Document')
@@ -64,6 +65,14 @@ async function bootstrap() {
 
   app.use(bodyParser.json({ limit: '50mb' }));
   app.use(bodyParser.urlencoded({ limit: '50mb', extended: true }));
+app.use(
+  '/payments/vietqr/webhook',
+  bodyParser.json({
+    verify: (req: any, _res, buf) => {
+      req.rawBody = buf;
+    },
+  })
+);
 
   await app.listen(configurations.port);
   const appUrl = await app.getUrl();

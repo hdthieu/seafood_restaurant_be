@@ -64,7 +64,13 @@ async createFromOrder(orderId: string, dto?: { customerId?: string | null },gues
 
  async addPayment(
   invoiceId: string,
-  dto: { amount: number; method?: PaymentMethod; txnRef?: string }
+  dto: {
+    amount: number;
+    method?: PaymentMethod;     // ví dụ: PaymentMethod.VIETQR | VNPAY | CASH
+    txnRef?: string;
+    externalTxnId?: string;     // <-- thêm
+    note?: string;              // <-- thêm
+  },
 ) {
   return this.ds.transaction(async (em) => {
     const invRepo = em.getRepository(Invoice);
@@ -93,21 +99,26 @@ async createFromOrder(orderId: string, dto?: { customerId?: string | null },gues
     // ✅ Guard: không cho trả trùng/vượt
     if (paid >= total) throw new BadRequestException('INVOICE_ALREADY_PAID');
     if (paid + amountNum > total) {
-      // Chọn 1 trong 2:
-      // 1) Chặn:
+      // Chặn overpay (hoặc tự co lại số tiền nếu muốn)
       throw new BadRequestException('OVERPAY_NOT_ALLOWED');
-      // 2) Hoặc tự co lại số tiền (nếu muốn):
       // dto.amount = total - paid;
     }
+
+    // Chọn method ghi xuống (giữ nguyên enum nếu entity Payment dùng enum)
+    const method = dto.method ?? PaymentMethod.CASH;
 
     // Tạo bản ghi payment (đã nhận tiền -> status PAID)
     const payment = payRepo.create({
       invoiceId: inv.id,
       invoice: inv,
       amount: amountNum,
-      method: dto.method === PaymentMethod.VNPAY ? 'VNPAY' : 'CASH',
+      method,                   // ví dụ: PaymentMethod.VIETQR
       status: 'PAID',
       txnRef: dto.txnRef ?? null,
+
+      // ✅ dùng đúng biến dto
+      externalTxnId: dto.externalTxnId ?? null,
+      note: dto.note ?? null,
     } as Partial<Payment>);
     await payRepo.save(payment);
 
@@ -125,7 +136,6 @@ async createFromOrder(orderId: string, dto?: { customerId?: string | null },gues
 
     // ✅ Nếu invoice đã PAID thì đóng Order tương ứng
     if (inv.status === InvoiceStatus.PAID && inv.order?.id) {
-      // update thẳng cho nhanh, không cần findOne lần nữa
       await oRepo.update({ id: inv.order.id }, { status: OrderStatus.PAID });
     }
 

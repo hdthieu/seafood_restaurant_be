@@ -55,4 +55,8 @@ export class Payment {
   // yyyyMMddHHmmss GMT+7 → tối đa 14 ký tự
   @Column({ type: 'varchar', length: 14, nullable: true })
   expireAt!: string | null;
+
+  
+  @Column({ type: 'varchar', nullable: true, unique: true })
+  externalTxnId?: string;
 }

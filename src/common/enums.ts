@@ -67,6 +67,7 @@ export enum PaymentMethod {
   CASH = 'CASH',
   CARD = 'CARD',
   VNPAY = 'VNPAY',
+   VIETQR = 'VIETQR',
 }
 
 export enum PaymentStatus {
