@@ -10,6 +10,7 @@ import { BadRequestException } from '@nestjs/common';
 import { DeepPartial } from 'typeorm';
 import { QueryInvoicesDto } from './dto/query-invoices.dto';
 import { Brackets } from 'typeorm';
+
 @Injectable()
 export class InvoicesService {
   constructor(
@@ -91,7 +92,7 @@ async createFromOrder(orderId: string, dto?: { customerId?: string | null },gues
 
     // Tính đã trả trước khi ghi thêm
     const successPayments = await payRepo.find({
-      where: { invoiceId: inv.id, status: 'PAID' },
+      where: { invoiceId: inv.id, status: PaymentStatus.SUCCESS },
     });
     const paid = successPayments.reduce((s, p) => s + Number(p.amount), 0);
     const total = Number(inv.totalAmount);
@@ -113,7 +114,7 @@ async createFromOrder(orderId: string, dto?: { customerId?: string | null },gues
       invoice: inv,
       amount: amountNum,
       method,                   // ví dụ: PaymentMethod.VIETQR
-      status: 'PAID',
+    status: PaymentStatus.SUCCESS, // luôn là SUCCESS     
       txnRef: dto.txnRef ?? null,
 
       // ✅ dùng đúng biến dto
@@ -202,11 +203,11 @@ async createFromOrder(orderId: string, dto?: { customerId?: string | null },gues
     // Tính tổng đã trả theo phương thức
     const items = rows.map((inv) => {
       const paidCash = (inv.payments ?? [])
-        .filter(x => x.status === 'PAID' && x.method === 'CASH')
+        .filter(x => x.status === PaymentStatus.SUCCESS && x.method === PaymentMethod.CASH)
         .reduce((s, p) => s + Number(p.amount), 0);
 
       const paidBank = (inv.payments ?? [])
-        .filter(x => x.status === 'PAID' && x.method === 'VNPAY')
+        .filter(x => x.status === PaymentStatus.SUCCESS && x.method === PaymentMethod.VNPAY)
         .reduce((s, p) => s + Number(p.amount), 0);
 
       const paidTotal = paidCash + paidBank;
@@ -261,11 +262,11 @@ async createFromOrder(orderId: string, dto?: { customerId?: string | null },gues
     }));
 
     const paidCash = (inv.payments ?? [])
-      .filter(x => x.status === 'PAID' && x.method === 'CASH')
+      .filter(x => x.status === PaymentStatus.SUCCESS && x.method === PaymentMethod.CASH)
       .reduce((s, p) => s + Number(p.amount), 0);
 
     const paidBank = (inv.payments ?? [])
-      .filter(x => x.status === 'PAID' && x.method === 'VNPAY')
+      .filter(x => x.status === PaymentStatus.SUCCESS && x.method === PaymentMethod.VNPAY)
       .reduce((s, p) => s + Number(p.amount), 0);
 
     const paidTotal = paidCash + paidBank;

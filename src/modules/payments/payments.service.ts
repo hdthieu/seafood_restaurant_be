@@ -3,10 +3,11 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Invoice } from 'src/modules/invoice/entities/invoice.entity';
 import { InvoicesService } from 'src/modules/invoice/invoice.service';
-import { PaymentMethod, PaymentStatus } from 'src/common/enums';
 import { hmacSHA512, sortObject, toQueryString, nowYmdHisGMT7, addMinutesYmdHisGMT7 } from 'src/lib/vnpay';
 import { Payment } from 'src/modules/payments/entities/payment.entity';
 import { ResponseCommon, ResponseException } from 'src/common/common_dto/respone.dto';
+import { PaymentMethod, PaymentStatus, InvoiceStatus } from 'src/common/enums';
+
 import * as crypto from 'crypto';
 
 type CreateVNPayParams = {
@@ -83,9 +84,9 @@ export class PaymentService {
       this.paymentRepo.create({
         invoice: inv,
         amount,
-        method: 'VNPAY',
+        method: PaymentMethod.VNPAY,
         txnRef: vnp_TxnRef,
-        status: 'PENDING',
+        status: PaymentStatus.PENDING,
         expireAt: vnp_ExpireDate,
       }),
     );
@@ -158,12 +159,12 @@ export class PaymentService {
         pay.transactionNo = q.vnp_TransactionNo || null;
         pay.bankCode = q.vnp_BankCode || null;
         pay.cardType = q.vnp_CardType || null;
-        pay.status = responseCode === '00' ? 'PAID' : 'FAILED';
+          pay.status = responseCode === '00' ? PaymentStatus.SUCCESS : PaymentStatus.FAILED;
         await this.paymentRepo.save(pay);
       }
 
       // Idempotent: nếu invoice đã PAID, trả '02'
-      if ((inv as any).status === 'PAID') {
+      if ((inv as any).status === InvoiceStatus.PAID) {
         return { RspCode: '02', Message: 'Order already confirmed' };
       }
 
@@ -228,7 +229,7 @@ export class PaymentService {
     // cập nhật bản ghi payment theo txnRef nếu đã tạo lúc createVNPayUrl
     const p = await this.paymentRepo.findOne({ where: { txnRef: r.txnRef || '' } });
     if (p) {
-      p.status = 'PAID';
+      p.status = PaymentStatus.SUCCESS;
       p.responseCode = '00';
       await this.paymentRepo.save(p);
     }
@@ -249,15 +250,36 @@ export class PaymentService {
     const exist = await this.paymentRepo.findOne({ where: { externalTxnId } });
     return !!exist;
   }
-
-  verifyWebhookSignature(raw: string, signature?: string): boolean {
-    const secret = process.env.WEBHOOK_SECRET;
-    if (!secret) return true; // nếu bạn chưa bật verify
+  private get checksum() {
+    const key = process.env.PAYOS_CHECKSUM_KEY?.trim();
+    if (!key) throw new Error('Missing PAYOS_CHECKSUM_KEY');
+    return key;
+  }
+   verifySignature(rawBody: string | Buffer, signature?: string | string[]) {
     if (!signature) return false;
-    const h = crypto.createHmac('sha256', secret).update(raw).digest('hex');
-    return crypto.timingSafeEqual(Buffer.from(h), Buffer.from(signature));
+    const sig = Array.isArray(signature) ? signature[0] : signature;
+    const calc = crypto
+      .createHmac('sha256', this.checksum)
+      .update(rawBody)
+      .digest('hex');
+    // so sánh an toàn thời gian
+    try {
+      return crypto.timingSafeEqual(Buffer.from(calc), Buffer.from(sig));
+    } catch {
+      return false;
+    }
   }
 
+async findPendingPaymentByOrderCode(orderCode: number) {
+  return this.paymentRepo.findOne({ where: { externalTxnId: String(orderCode), status: PaymentStatus.PENDING } });
+}
 
+async markPaymentSuccessByOrderCode(orderCode: number, extra?: any) {
+  const pay = await this.paymentRepo.findOne({ where: { externalTxnId: String(orderCode) } });
+  if (!pay) return;
+  pay.status = PaymentStatus.SUCCESS;
+  if (extra?.transactionId) pay.externalTxnId = String(extra.transactionId); // cập nhật id chuẩn từ PayOS
+  await this.paymentRepo.save(pay);
+}
 
 }
