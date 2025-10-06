@@ -11,7 +11,7 @@ import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
 import { ProfileResponseDto } from './dto/profile-response.dto';
 import { FileFilterCallback, memoryStorage } from 'multer';
 import { FileInterceptor } from '@nestjs/platform-express';
-
+import { ParseUUIDPipe } from '@nestjs/common/pipes/parse-uuid.pipe';
 @Controller('profile')
 @ApiBearerAuth()
 export class ProfileController {
@@ -25,7 +25,13 @@ export class ProfileController {
   async me(@CurrentUser() user: User): Promise<ResponseCommon<ProfileResponseDto>> {
     return this.profileService.getMe(user.id);
   }
-
+  @Get('/get-profile/:userId')
+  @ApiOperation({ summary: 'Lấy hồ sơ theo userId' })
+  async getProfileByUserId(
+    @Param('userId', new ParseUUIDPipe()) userId: string,
+  ): Promise<ResponseCommon<ProfileResponseDto>> {
+    return this.profileService.getByUserId(userId);
+  }
   // this endpoint for update profile
   @Patch('/update-profile/:userId')
   @HttpCode(HttpStatus.OK)
