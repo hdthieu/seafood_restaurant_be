@@ -121,3 +121,21 @@ export enum PostingState {
   CANCELLED = 'CANCELLED',
 }
 
+export enum DiscountTypePromotion { PERCENT='PERCENT', AMOUNT='AMOUNT', GIFT='GIFT' }
+export enum ApplyWith    { ORDER='ORDER', CATEGORY='CATEGORY', ITEM='ITEM' }
+
+// 'HH:mm' local time
+export type TimeRange = { start: string; end: string };
+export type Target    = { type: 'CATEGORY'|'ITEM'|'TABLE'|'AREA'; id: string };
+export type Gift      = { itemId: string; quantity: number };
+
+export type PromotionRules = {
+  daysOfWeek?: number[];      // 0..6 (0 = CN)
+  timeRanges?: TimeRange[];   // nhiều khung giờ
+  birthday?: 'DAY'|'MONTH'|null; // sinh nhật cho khách
+
+  // điều kiện khi discountType=GIFT
+  gifts?: Gift[];           
+  maxGiftQty?: number | null; // giới hạn quà tặng
+  minItemQty?: number | null; // mua ≥ N món trong targets thì áp dụng
+};

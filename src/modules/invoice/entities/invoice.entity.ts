@@ -51,8 +51,18 @@ export class Invoice {
   @ManyToOne(() => Customer, { nullable: true, eager: true })
   @JoinColumn({ name: 'customer_id' })
   customer: Customer | null;
- @Column({ name: 'guest_count', type: 'int', nullable: true })
+
+  @Column({ name: 'guest_count', type: 'int', nullable: true })
   guestCount: number | null;
+
+  // Giảm của tất cả KM  (để báo cáo or thống kê và hiển thị không cần JOIN)
+  @Column('numeric', { name: 'discount_total', precision: 12, scale: 2, default: 0 })
+  discountTotal: string;
+
+  // Doanh thu thuần = totalAmount - discountTotal
+  @Column('numeric', { name: 'final_amount', precision: 12, scale: 2, default: 0 })
+  finalAmount: string;
+
   // @ManyToOne(() => User) // Thu ngân thực hiện
   // cashier: User||null;
 }
