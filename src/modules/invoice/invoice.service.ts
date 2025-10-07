@@ -67,75 +67,72 @@ async createFromOrder(orderId: string, dto?: { customerId?: string | null },gues
   invoiceId: string,
   dto: {
     amount: number;
-    method?: PaymentMethod;     // ví dụ: PaymentMethod.VIETQR | VNPAY | CASH
+    method?: PaymentMethod;
     txnRef?: string;
-    externalTxnId?: string;     // <-- thêm
-    note?: string;              // <-- thêm
+    externalTxnId?: string;
+    note?: string;
   },
 ) {
   return this.ds.transaction(async (em) => {
     const invRepo = em.getRepository(Invoice);
     const payRepo = em.getRepository(Payment);
-    const oRepo = em.getRepository(Order);
+    const oRepo   = em.getRepository(Order);
 
-    // ✅ PHẢI load relation 'order' để có inv.order.id
+    // ✅ Load relation 'order' để đóng order khi PAID
     const inv = await invRepo.findOne({
       where: { id: invoiceId },
       relations: ['order'],
     });
     if (!inv) throw new NotFoundException('INVOICE_NOT_FOUND');
 
-    const amountNum = Number(dto.amount);
+    const amountNum = Math.round(Number(dto.amount || 0));
     if (!Number.isFinite(amountNum) || amountNum <= 0) {
       throw new BadRequestException('INVALID_AMOUNT');
     }
 
-    // Tính đã trả trước khi ghi thêm
+    // Tổng đã trả trước đó
     const successPayments = await payRepo.find({
       where: { invoiceId: inv.id, status: PaymentStatus.SUCCESS },
     });
-    const paid = successPayments.reduce((s, p) => s + Number(p.amount), 0);
+    const paid  = successPayments.reduce((s, p) => s + Number(p.amount), 0);
     const total = Number(inv.totalAmount);
+    const remaining = Math.max(0, total - paid);
 
-    // ✅ Guard: không cho trả trùng/vượt
-    if (paid >= total) throw new BadRequestException('INVOICE_ALREADY_PAID');
-    if (paid + amountNum > total) {
-      // Chặn overpay (hoặc tự co lại số tiền nếu muốn)
-      throw new BadRequestException('OVERPAY_NOT_ALLOWED');
-      // dto.amount = total - paid;
+    // Nếu đã đủ tiền rồi thì chặn
+    if (remaining <= 0) {
+      throw new BadRequestException('INVOICE_ALREADY_PAID');
     }
 
-    // Chọn method ghi xuống (giữ nguyên enum nếu entity Payment dùng enum)
+    // ⭐ Co tiền về đúng phần còn thiếu (thay vì throw OVERPAY_NOT_ALLOWED)
+    const take = Math.min(amountNum, remaining);
+    if (take <= 0) {
+      throw new BadRequestException('INVALID_AMOUNT');
+    }
+
     const method = dto.method ?? PaymentMethod.CASH;
 
-    // Tạo bản ghi payment (đã nhận tiền -> status PAID)
+    // Ghi payment thành công ngay (SUCCESS)
     const payment = payRepo.create({
       invoiceId: inv.id,
       invoice: inv,
-      amount: amountNum,
-      method,                   // ví dụ: PaymentMethod.VIETQR
-    status: PaymentStatus.SUCCESS, // luôn là SUCCESS     
+      amount: take, // ⭐ chỉ ghi số tiền đã co
+      method,
+      status: PaymentStatus.SUCCESS,
       txnRef: dto.txnRef ?? null,
-
-      // ✅ dùng đúng biến dto
       externalTxnId: dto.externalTxnId ?? null,
       note: dto.note ?? null,
     } as Partial<Payment>);
     await payRepo.save(payment);
 
-    // Recompute paid sau khi thêm
-    const paidAfter = paid + amountNum;
-
     // Cập nhật trạng thái invoice
+    const paidAfter = paid + take;
     inv.status =
       paidAfter >= total
         ? InvoiceStatus.PAID
-        : paidAfter > 0
-          ? InvoiceStatus.PARTIAL
-          : InvoiceStatus.UNPAID;
+        : InvoiceStatus.PARTIAL;
     await invRepo.save(inv);
 
-    // ✅ Nếu invoice đã PAID thì đóng Order tương ứng
+    // Nếu đã PAID thì đóng Order
     if (inv.status === InvoiceStatus.PAID && inv.order?.id) {
       await oRepo.update({ id: inv.order.id }, { status: OrderStatus.PAID });
     }

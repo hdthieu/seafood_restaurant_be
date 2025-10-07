@@ -58,4 +58,7 @@ export class Payment {
   
   @Column({ type: 'varchar', nullable: true, unique: true })
   externalTxnId?: string;
+
+  @Column({ type: 'text', nullable: true })
+  note?: string;
 }

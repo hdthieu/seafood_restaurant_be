@@ -90,7 +90,7 @@ envFilePath: ['.env'], // tùy path
     synchronize: true,
      ssl: { rejectUnauthorized: false }, 
     autoLoadEntities: true,
-    logging: ['error', 'warn', 'query'],
+    // logging: ['error', 'warn', 'query'],
   }),
     UserModule, ProfileModule, MenuitemsModule, OrdersModule, OrderitemsModule, InventoryitemsModule, InventorytransactionModule, InvoiceModule, OrderstatushistoryModule, RestauranttableModule, AuthModule, AreaModule, ConfigS3Module, IngredientModule, CategoryModule, PaymentModule, CustomersModule, SupplierModule, PurchasereceiptModule, PurchasereceiptitemModule, SuppliergroupModule, ReportModule, UnitsOfMeasureModule, UomconversionModule, MenucomboitemModule],
   controllers: [AppController],

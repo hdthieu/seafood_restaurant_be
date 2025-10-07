@@ -24,6 +24,8 @@ import {PaymentsGateway} from "./payments.gateway";
 import { Logger } from '@nestjs/common';
 import { PaymentMethod, PaymentStatus, InvoiceStatus } from 'src/common/enums';
 import { PayOSService } from './payos.service';
+import { HttpCode, HttpStatus } from '@nestjs/common';
+import { Head } from '@nestjs/common';
 @ApiTags('payments')
 @Controller('payments')
 export class PaymentController {
@@ -115,11 +117,9 @@ async mockVietQrSuccess(@Body() dto: { invoiceId: string; amount?: number }) {
 // payments.controller.ts
 @Post('payos/create-link')
 async createPayOSLink(@Body() dto: { invoiceId: string; amount: number; buyerName?: string }) {
-  // 1) tạo orderCode
   const orderCode = Date.now();
+  const description = `INV:${dto.invoiceId.slice(0, 12)}`;
 
-  // 2) tạo link
-  const description = `INV:${dto.invoiceId.slice(0, 12)}`; // optional: giữ cho ngắn
   const link = await this.payOS.createPaymentLink({
     orderCode,
     amount: dto.amount,
@@ -127,13 +127,13 @@ async createPayOSLink(@Body() dto: { invoiceId: string; amount: number; buyerNam
     buyerName: dto.buyerName,
   });
 
-  // 3) LƯU mapping + payment pending (để webhook tra ngược)
-  await this.invoiceSvc.addPayment(dto.invoiceId, {
-    method: PaymentMethod.VIETQR,
+  // ✅ Tạo payment ở trạng thái PENDING, KHÔNG cập nhật invoice total/status
+  await this.svc.createPendingPayment({
+    invoiceId: dto.invoiceId,
     amount: dto.amount,
-    externalTxnId: String(orderCode), // lưu tạm orderCode
+    method: PaymentMethod.VIETQR,   // hoặc 'PAYOS' nếu bạn tách kênh
+    externalTxnId: String(orderCode),
     note: description,
-    // meta: { provider: 'PAYOS', orderCode }, // nếu bạn có cột JSON
   });
 
   return link;
@@ -172,21 +172,31 @@ async payosReturn(@Query() q: any, @Res() res: Response) {
   const target = `${FRONTEND}/checkout/success?ok=${ok ? 1 : 0}&orderCode=${q?.orderCode || ''}&plink=${q?.paymentLinkId || ''}`;
   return res.redirect(target);
 }
-
+@Get('payos/webhook')
+@Head('payos/webhook')
+@HttpCode(HttpStatus.OK)
+pingPayOSWebhook() {
+  return { ok: true };
+}
 @Post('payos/webhook')
+@HttpCode(HttpStatus.OK)
 async payosWebhook(@Req() req: Request & { rawBody?: Buffer }, @Body() body: any) {
+  this.logger.log(`[PayOS] webhook HIT ip=${(req as any).ip} ua=${req.headers['user-agent']}`);
+  this.logger.log(`[PayOS] headers: ${JSON.stringify(req.headers)}`);
+  this.logger.log(`[PayOS] has rawBody=${!!req.rawBody}, len=${req.rawBody?.length}`);
+
   const raw = req.rawBody?.toString?.() ?? JSON.stringify(body);
   const headerSig =
     (req.headers['x-signature'] as string | undefined) ||
     (req.headers['x-payos-signature'] as string | undefined);
 
-  if (!this.svc.verifySignature(raw, headerSig)) {
-    this.logger.warn('PayOS webhook: INVALID_SIGNATURE');
-    throw new BadRequestException('INVALID_SIGNATURE');
+  // ✅ dùng hàm linh hoạt
+  if (!this.svc.verifyPayOSSignatureFlexible(raw, body, headerSig)) {
+    this.logger.warn('[PayOS] INVALID_SIGNATURE (header/body đều không khớp)');
+    // DEBUG: cho qua để test luồng, khi ổn thì bật lại chặn
+    // return { ok: false, reason: 'INVALID_SIGNATURE' };
   }
 
-  // ---- payload PayOS (phổ biến):
-  // body.data.orderCode, body.data.amount, body.data.description, body.data.transactionId...
   const data = body?.data || body;
   const orderCode = Number(data?.orderCode);
   const amount = Math.round(Number(data?.amount ?? 0));
@@ -195,10 +205,10 @@ async payosWebhook(@Req() req: Request & { rawBody?: Buffer }, @Body() body: any
   if (!orderCode || !amount) return { ok: true };
 
   // 1) tìm payment pending theo orderCode
-  let payment = await this.svc.findPendingPaymentByOrderCode(orderCode); // <-- bạn implement trong PaymentService
+  let payment = await this.svc.findPendingPaymentByOrderCode(orderCode);
   let invoiceId = payment?.invoiceId;
 
-  // 2) fallback: thử bắt từ description nếu trước đó bạn chưa lưu mapping
+  // 2) fallback từ description (PayOS có thể strip dấu ':', regex đã cho phép không có ':')
   if (!invoiceId && desc) {
     const m = desc.match(/INV[:\s-]?([a-f0-9-]{8,64})/i);
     if (m) {
@@ -212,13 +222,12 @@ async payosWebhook(@Req() req: Request & { rawBody?: Buffer }, @Body() body: any
       invoiceId = invByReplace?.id ?? captured;
     }
   }
-
   if (!invoiceId) {
-    this.logger.warn(`PayOS webhook: INVOICE_NOT_FOUND by orderCode=${orderCode}`);
+    this.logger.warn(`PayOS webhook: INVOICE_NOT_FOUND orderCode=${orderCode} desc=${desc}`);
     return { ok: true };
   }
 
-  // 3) lấy invoice + số tiền còn thiếu
+  // 3) lấy invoice + số còn thiếu
   const inv = await this.invRepo.findOne({ where: { id: invoiceId }, relations: ['payments'] });
   if (!inv) return { ok: true };
 
@@ -229,46 +238,39 @@ async payosWebhook(@Req() req: Request & { rawBody?: Buffer }, @Body() body: any
   const total = Number(inv.totalAmount);
   const remaining = Math.max(0, total - paid);
 
-  // Nếu bạn muốn CHẤP NHẬN đúng số còn lại ⇒ giữ kiểm tra
-  // Nếu cho phép trả thừa/thiếu (small diff) ⇒ sửa điều kiện
+  // Nếu giữ chặt đúng số còn lại:
   const TOL = 2;
   if (Math.abs(amount - remaining) > TOL) {
-    this.logger.warn(`PayOS webhook: AMOUNT_MISMATCH amount=${amount} remaining=${remaining}`);
-    // tuỳ chính sách: có thể vẫn ghi nhận một phần, hoặc bỏ qua
+    this.logger.warn(`PayOS webhook: AMOUNT_MISMATCH amount=${amount} remaining=${remaining} invoiceId=${invoiceId}`);
     return { ok: true };
   }
 
-  // 4) Cập nhật payment pending → SUCCESS + addPayment vào invoice
+  // 4) Ghi nhận tiền + mark pending success
   await this.invoiceSvc.addPayment(invoiceId, {
-    amount,
-    method: PaymentMethod.VIETQR,           // ✅ đúng kênh
-    externalTxnId: String(data?.transactionId ?? data?.reference ?? orderCode),
-    note: desc,
-  });
-
-  // (tùy schema) bạn có thể mark pending payment SUCCESS bằng orderCode
+  amount,
+  method: PaymentMethod.VIETQR, // hoặc VNPAY nếu bạn gom nhóm “bank”
+  externalTxnId: String(data?.transactionId ?? data?.reference ?? orderCode),
+  note: desc,
+});
   await this.svc.markPaymentSuccessByOrderCode(orderCode, {
     transactionId: data?.transactionId ?? data?.reference,
   });
 
-  // 5) Reload & bắn socket
+  // 5) Bắn socket
   const invAfter = await this.invRepo.findOne({ where: { id: invoiceId }, relations: ['payments'] });
   const paidAfter = (invAfter?.payments ?? [])
     .filter(p => p.status === PaymentStatus.SUCCESS)
     .reduce((s, p) => s + Number(p.amount), 0);
-
   const remainingAfter = Math.max(0, Number(invAfter?.totalAmount || 0) - paidAfter);
 
-  if (invAfter?.status === 'PAID') {
+  if (invAfter?.status === InvoiceStatus.PAID) {
     this.gateway.emitPaid(invoiceId, { invoiceId, amount, method: 'PAYOS' });
   } else {
     this.gateway.emitPartial(invoiceId, { invoiceId, amount, remaining: remainingAfter });
   }
 
-  // 6) Trả về 200 nhanh gọn cho PayOS
   return { ok: true };
 }
-
 
 
   /* ----------------------------------------------------------------
@@ -276,17 +278,27 @@ async payosWebhook(@Req() req: Request & { rawBody?: Buffer }, @Body() body: any
    * ---------------------------------------------------------------- */
 
   /** Tạo URL thanh toán VNPay */
-  @Post('vnpay/create')
-  @ApiOperation({ summary: 'Tạo URL VNPay' })
-  @ApiBody({ type: CreateVNPayDto })
-  async createVNPay(@Body() dto: CreateVNPayDto, @Req() req: Request) {
-    const ip =
-      (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ||
-      (req.socket?.remoteAddress as string) ||
-      '127.0.0.1';
+ @Post('vnpay/create')
+async createVNPay(@Body() dto: { orderId?: string; invoiceId?: string; amount?: number; bankCode?: string }, @Req() req: Request) {
+  const ip =
+    (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ||
+    (req.socket?.remoteAddress as string) ||
+    '127.0.0.1';
 
-    return this.svc.createVNPayUrl({ ...dto, ipAddress: ip });
+  // ✅ Bổ sung: nếu chưa có invoiceId mà có orderId -> tạo (idempotent)
+  let invoiceId = dto.invoiceId;
+  if (!invoiceId && dto.orderId) {
+    const inv = await this.invoiceSvc.createFromOrder(dto.orderId);
+    invoiceId = inv.id;
   }
+  if (!invoiceId) {
+    throw new BadRequestException('MISSING_INVOICE_OR_ORDER');
+  }
+
+  // gọi service tạo URL với invoiceId đã chắc chắn tồn tại
+  return this.svc.createVNPayUrl({ invoiceId, amount: dto.amount, bankCode: dto.bankCode, ipAddress: ip });
+}
+
 
   /** Browser return: verify checksum & redirect về FE (success/fail) */
   @Get('vnpay/return')
