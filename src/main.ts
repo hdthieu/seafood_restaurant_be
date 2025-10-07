@@ -8,6 +8,8 @@ import { configurations } from './common/configs';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { join } from 'path';
 import * as express from 'express';
+import { setDefaultResultOrder } from 'dns';
+setDefaultResultOrder('ipv4first');
 function initialSwagger(app: NestExpressApplication): void {
   const options = new DocumentBuilder()
     .setTitle('Seafood Restaurant API Document')
@@ -24,7 +26,9 @@ function initialSwagger(app: NestExpressApplication): void {
 
 async function bootstrap() {
   console.log('🚀 Starting NestJS application...');
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+  rawBody: true,   // <-- Nest sẽ gắn req.rawBody sẵn 
+});
   app.enableCors({
     origin: [
       'http://localhost:3000',
@@ -62,8 +66,9 @@ async function bootstrap() {
   );
   app.useGlobalInterceptors(new LoggingInterceptor());
 
-  app.use(bodyParser.json({ limit: '50mb' }));
-  app.use(bodyParser.urlencoded({ limit: '50mb', extended: true }));
+app.use(express.json({ limit: '2mb' }));
+app.use(express.urlencoded({ extended: true, limit: '2mb' }));
+
 
   await app.listen(configurations.port);
   const appUrl = await app.getUrl();

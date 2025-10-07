@@ -28,8 +28,57 @@ import { ReportModule } from '@modules/report/report.module';
 import { UnitsOfMeasureModule } from './modules/units-of-measure/units-of-measure.module';
 import { UomconversionModule } from './modules/uomconversion/uomconversion.module';
 import { MenucomboitemModule } from './modules/menucomboitem/menucomboitem.module';
+import * as Joi from 'joi';
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true }),
+  imports: [ConfigModule.forRoot({ isGlobal: true,
+
+
+envFilePath: ['.env'], // tùy path
+      validationSchema: Joi.object({
+        NODE_ENV: Joi.string().valid('development','production','test').default('development'),
+        APP_PORT: Joi.number().default(8000),
+
+        // --- PayOS ---
+        PAYOS_CLIENT_ID: Joi.string().required(),
+        PAYOS_API_KEY: Joi.string().required(),
+        PAYOS_CHECKSUM_KEY: Joi.string().required(),
+        PAYOS_RETURN_URL: Joi.string().uri().required(),
+        PAYOS_CANCEL_URL: Joi.string().uri().required(),
+
+        // --- VietQR (img.vietqr.io) ---
+        VIETQR_BANK_BIN: Joi.string().required(),
+        VIETQR_ACCOUNT_NO: Joi.string().required(),
+        VIETQR_ACCOUNT_NAME: Joi.string().optional(),
+
+        // --- Webhook HMAC cho “casso/payos-like” (nếu dùng) ---
+        WEBHOOK_SECRET: Joi.string().optional(),
+
+        // --- VNPay (nếu vẫn dùng) ---
+        VNP_TMN_CODE: Joi.string().optional(),
+        VNP_HASH_SECRET: Joi.string().optional(),
+        VNP_URL: Joi.string().uri().optional(),
+        VNP_RETURN_URL: Joi.string().uri().optional(),
+        VNP_LOCALE: Joi.string().optional(),
+        VNP_VERSION: Joi.string().optional(),
+
+        // --- JWT ---
+        JWT_ACCESS_SECRET: Joi.string().required(),
+        JWT_REFRESH_SECRET: Joi.string().required(),
+        JWT_ACCESS_EXPIRES: Joi.string().default('120m'),
+        JWT_REFRESH_EXPIRES: Joi.string().default('30d'),
+
+        FRONTEND_URL: Joi.string().uri().optional(),
+        TZ: Joi.string().optional(),
+      }),
+    }),
+
+
+
+
+
+
+
+
   TypeOrmModule.forRoot({
     type: 'postgres',
     host: process.env.DB_HOST as string,
@@ -39,7 +88,9 @@ import { MenucomboitemModule } from './modules/menucomboitem/menucomboitem.modul
     database: process.env.DB_DATABASE as string,
     // entities: [__dirname + '/**/*.entity{.ts,.js}'],
     synchronize: true,
-    autoLoadEntities: true
+     ssl: { rejectUnauthorized: false }, 
+    autoLoadEntities: true,
+    // logging: ['error', 'warn', 'query'],
   }),
     UserModule, ProfileModule, MenuitemsModule, OrdersModule, OrderitemsModule, InventoryitemsModule, InventorytransactionModule, InvoiceModule, OrderstatushistoryModule, RestauranttableModule, AuthModule, AreaModule, ConfigS3Module, IngredientModule, CategoryModule, PaymentModule, CustomersModule, SupplierModule, PurchasereceiptModule, PurchasereceiptitemModule, SuppliergroupModule, ReportModule, UnitsOfMeasureModule, UomconversionModule, MenucomboitemModule],
   controllers: [AppController],

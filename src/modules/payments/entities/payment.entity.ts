@@ -5,8 +5,7 @@ import {
 } from 'typeorm';
 import { Invoice } from 'src/modules/invoice/entities/invoice.entity';
 
-export type PaymentChannel = 'CASH' | 'VNPAY';
-export type PaymentState   = 'PENDING' | 'PAID' | 'FAILED' | 'EXPIRED';
+import { PaymentMethod, PaymentStatus } from 'src/common/enums';
 
 @Entity('payments')
 export class Payment {
@@ -27,7 +26,7 @@ export class Payment {
 
   // union type → bắt buộc khai báo type rõ ràng
   @Column({ type: 'varchar', length: 20 })
-  method!: PaymentChannel; // 'CASH' | 'VNPAY'
+  method!: PaymentMethod; // 'CASH' | 'VNPAY'
 
   // ---- VNPay fields (tất cả chỉ rõ type) ----
   @Column({ type: 'varchar', length: 64, nullable: true })
@@ -35,7 +34,7 @@ export class Payment {
   txnRef!: string | null; // vnp_TxnRef
 
   @Column({ type: 'varchar', length: 16, default: 'PENDING' })
-  status!: PaymentState;   // 'PENDING' | 'PAID' | 'FAILED' | 'EXPIRED'
+  status!: PaymentStatus;   // 'PENDING' | 'PAID' | 'FAILED' | 'EXPIRED'
 
   @Column({ type: 'varchar', length: 32, nullable: true })
   bankCode!: string | null;
@@ -55,4 +54,11 @@ export class Payment {
   // yyyyMMddHHmmss GMT+7 → tối đa 14 ký tự
   @Column({ type: 'varchar', length: 14, nullable: true })
   expireAt!: string | null;
+
+  
+  @Column({ type: 'varchar', nullable: true, unique: true })
+  externalTxnId?: string;
+
+  @Column({ type: 'text', nullable: true })
+  note?: string;
 }

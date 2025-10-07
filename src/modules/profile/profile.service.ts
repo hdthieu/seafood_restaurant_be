@@ -99,5 +99,14 @@ export class ProfileService {
     // Trả về profile đầy đủ (nếu cần relations khác thì thêm vào)
     return saved;
   }
+  async getByUserId(userId: string): Promise<ResponseCommon<ProfileResponseDto>> {
+    const profile = await this.profileRepository.findOne({
+      where: { user: { id: userId } },
+      relations: { user: true },
+    });
+    if (!profile) return new ResponseCommon(404, false, 'PROFILE_NOT_FOUND');
 
+    const data = plainToInstance(ProfileResponseDto, profile, { excludeExtraneousValues: true });
+    return new ResponseCommon(200, true, 'OK', data);
+  }
 }
