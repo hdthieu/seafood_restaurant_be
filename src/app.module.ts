@@ -29,6 +29,7 @@ import { UnitsOfMeasureModule } from './modules/units-of-measure/units-of-measur
 import { UomconversionModule } from './modules/uomconversion/uomconversion.module';
 import { MenucomboitemModule } from './modules/menucomboitem/menucomboitem.module';
 import * as Joi from 'joi';
+import { PromotionsModule } from './modules/promotions/promotions.module';
 @Module({
   imports: [ConfigModule.forRoot({ isGlobal: true,
 
@@ -72,13 +73,6 @@ envFilePath: ['.env'], // tùy path
       }),
     }),
 
-
-
-
-
-
-
-
   TypeOrmModule.forRoot({
     type: 'postgres',
     host: process.env.DB_HOST as string,
@@ -92,7 +86,7 @@ envFilePath: ['.env'], // tùy path
     autoLoadEntities: true,
     // logging: ['error', 'warn', 'query'],
   }),
-    UserModule, ProfileModule, MenuitemsModule, OrdersModule, OrderitemsModule, InventoryitemsModule, InventorytransactionModule, InvoiceModule, OrderstatushistoryModule, RestauranttableModule, AuthModule, AreaModule, ConfigS3Module, IngredientModule, CategoryModule, PaymentModule, CustomersModule, SupplierModule, PurchasereceiptModule, PurchasereceiptitemModule, SuppliergroupModule, ReportModule, UnitsOfMeasureModule, UomconversionModule, MenucomboitemModule],
+    UserModule, ProfileModule, MenuitemsModule, OrdersModule, OrderitemsModule, InventoryitemsModule, InventorytransactionModule, InvoiceModule, OrderstatushistoryModule, RestauranttableModule, AuthModule, AreaModule, ConfigS3Module, IngredientModule, CategoryModule, PaymentModule, CustomersModule, SupplierModule, PurchasereceiptModule, PurchasereceiptitemModule, SuppliergroupModule, ReportModule, UnitsOfMeasureModule, UomconversionModule, MenucomboitemModule, PromotionsModule],
   controllers: [AppController],
   providers: [AppService],
 })
