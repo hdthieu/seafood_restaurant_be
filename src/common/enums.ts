@@ -121,3 +121,12 @@ export enum PostingState {
   CANCELLED = 'CANCELLED',
 }
 
+// Chấm công
+export enum AttendanceMethod { MANUAL = 'MANUAL', SELF = 'SELF' }
+export enum AttendanceStatus {
+  ON_TIME   = 'ON_TIME',          // Đúng giờ
+  LATE      = 'LATE',             // Đi muộn / về sớm (có mặt)
+  MISSING   = 'MISSING',          // Chấm thiếu in/out
+  ABSENT    = 'ABSENT',           // Nghỉ không phép
+  LEAVE     = 'LEAVE',            // Nghỉ có phép
+}

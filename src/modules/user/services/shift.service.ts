@@ -2,9 +2,9 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Shift } from './entities/shift.entity';
-import { CreateShiftDto } from './dto/create-shift.dto';
-import { UpdateShiftDto } from './dto/update-shift.dto';
+import { Shift } from '../entities/shift.entity';
+import { CreateShiftDto } from '../dto/create-shift.dto';
+import { UpdateShiftDto } from '../dto/update-shift.dto';
 import { ResponseCommon } from 'src/common/common_dto/respone.dto';
 
 function toMinutes(hhmm: string) {

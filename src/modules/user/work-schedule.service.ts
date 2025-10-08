@@ -21,7 +21,27 @@ export class WorkScheduleService {
     @InjectRepository(User) private readonly userRepo: Repository<User>,
     @InjectRepository(Shift) private readonly shiftRepo: Repository<Shift>,
   ) {}
+  /** Lấy các ca của 1 user trong 1 ngày (YYYY-MM-DD) */
+  async listByDate(userId: string, date?: string) {
+    const d = date ?? new Date().toISOString().slice(0, 10); // YYYY-MM-DD
 
+    const rows = await this.repo.find({
+      where: { user: { id: userId }, date: d },
+      relations: { shift: true },
+      order: { date: 'ASC' },
+    });
+
+    // Chuẩn hoá về DTO gọn cho mobile
+    return rows.map(r => ({
+      scheduleId: r.id,                 // id của lịch (quan trọng để chấm công)
+      shiftId: r.shift.id,
+      name: r.shift.name,               // ví dụ: "Ca sáng"
+      date: r.date,                     // "YYYY-MM-DD"
+      start: r.shift.startTime,         // "HH:mm"
+      end: r.shift.endTime,             // "HH:mm"
+      note: r.note ?? undefined,
+    }));
+  }
   /** kiểm tra chồng lấn trong cùng ngày của 1 user */
   private async validateOverlap(userId: string, date: string, shift: Shift, ignoreId?: string) {
     const sameDay = await this.repo.find({
