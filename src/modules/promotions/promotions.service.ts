@@ -3,73 +3,238 @@ import { CreatePromotionDto } from './dto/create-promotion.dto';
 import { UpdatePromotionDto } from './dto/update-promotion.dto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Promotion } from './entities/promotion.entity';
-import { Repository } from 'typeorm';
+import { DataSource, DeepPartial, In, Repository } from 'typeorm';
 import { ResponseCommon } from 'src/common/common_dto/respone.dto';
-import { ApplyWith, DiscountTypePromotion } from 'src/common/enums';
+import { ApplyWith, AudienceScope, DiscountTypePromotion } from 'src/common/enums';
+import { Category } from '@modules/category/entities/category.entity';
+import { MenuItem } from '@modules/menuitems/entities/menuitem.entity';
 
 @Injectable()
 export class PromotionsService {
-  constructor(@InjectRepository(Promotion)
-  private readonly repo: Repository<Promotion>) { }
+  constructor(
+    @InjectRepository(Promotion)
+    private readonly promoRepo: Repository<Promotion>,
 
-  private validateBusiness(dto: CreatePromotionDto) {
-    // 1) validate ngày
-    const startAt = new Date(dto.startAt);
-    const endAt = dto.endAt ? new Date(dto.endAt) : null;
-    if (Number.isNaN(startAt.getTime())) throw new ResponseCommon(400, false, 'startAt is invalid ISO date', null);
-    if (endAt && Number.isNaN(endAt.getTime())) throw new ResponseCommon(400, false, 'endAt is invalid ISO date', null);
-    if (endAt && endAt < startAt) throw new ResponseCommon(400, false, 'endAt must be greater than or equal to startAt', null);
+    @InjectRepository(Category)
+    private readonly catRepo: Repository<Category>,
 
-    // 2) validate % giảm
-    if (dto.discountTypePromotion === DiscountTypePromotion.PERCENT) {
-      if (dto.discountValue <= 0 || dto.discountValue > 100) {
-        throw new ResponseCommon(400, false, 'discountValue (PERCENT) must be > 0 and <= 100', null);
+    @InjectRepository(MenuItem)
+    private readonly itemRepo: Repository<MenuItem>,
+
+    private readonly ds: DataSource
+  ) { }
+
+  private async resolveRelations(dto: CreatePromotionDto | UpdatePromotionDto) {
+    let categories: Category[] | undefined;
+    let items: MenuItem[] | undefined;
+
+    if (dto.applyWith === ApplyWith.CATEGORY) {
+      if (!dto.categoryIds?.length) {
+        throw new ResponseCommon(400, false, 'CATEGORY scope requires categoryIds');
       }
-    } else {
-      // AMOUNT
-      if (dto.discountValue <= 0) {
-        throw new ResponseCommon(400, false, 'discountValue (AMOUNT) must be > 0', null);
-      }
-    }
-
-    // 3) validate targets theo applyWith
-    if (dto.applyWith !== ApplyWith.ORDER) {
-      if (!dto.targets || !Array.isArray(dto.targets) || dto.targets.length === 0) {
-        throw new ResponseCommon(400, false, 'targets must be provided when applyWith is not ORDER', null);
+      categories = await this.catRepo.find({ where: { id: In(dto.categoryIds) } });
+      if (categories.length !== dto.categoryIds.length) {
+        throw new ResponseCommon(400, false, 'Some categoryIds not found');
       }
     }
 
-    // 4) min order
-    if (dto.minOrderAmount < 0) {
-      throw new ResponseCommon(400, false, 'minOrderAmount must be >= 0', null);
+    if (dto.applyWith === ApplyWith.ITEM) {
+      if (!dto.itemIds?.length) {
+        throw new ResponseCommon(400, false, 'ITEM scope requires itemIds');
+      }
+      items = await this.itemRepo.find({ where: { id: In(dto.itemIds) } });
+      if (items.length !== dto.itemIds.length) {
+        throw new ResponseCommon(400, false, 'Some itemIds not found');
+      }
     }
 
-    return { startAt, endAt };
+    return { categories, items };
   }
 
-  async create(dto: CreatePromotionDto) {
-    const { startAt, endAt } = this.validateBusiness(dto);
+  private businessValidate(dto: CreatePromotionDto | UpdatePromotionDto) {
+    if (dto.endAt && new Date(dto.endAt) < new Date(dto.startAt)) {
+      throw new ResponseCommon(400, false, 'END_AT_MUST_BE_GREATER_THAN_START_AT');
+    }
+    if (dto.discountTypePromotion === DiscountTypePromotion.PERCENT) {
+      if (dto.discountValue < 0 || dto.discountValue > 100) {
+        throw new ResponseCommon(400, false, 'DISCOUNT_VALUE_MUST_BE_BETWEEN_0_AND_100');
+      }
+      if (dto.maxDiscountAmount != null && dto.maxDiscountAmount < 0) {
+        throw new ResponseCommon(400, false, 'MAX_DISCOUNT_AMOUNT_NEGATIVE');
+      }
+    } else {
+      if (dto.discountValue < 0) {
+        throw new ResponseCommon(400, false, 'DISCOUNT_VALUE_MUST_BE_POSITIVE');
+      }
+    }
 
-    // (tuỳ chọn) chống trùng tên trong cùng khung giờ hoạt động
-    const exists = await this.repo.findOne({ where: { name: dto.name.trim(), isActive: true } });
-    if (exists) throw new ResponseCommon(400, false, 'name is exists', null);
+    // KHÔNG còn codeRequired
+    if (!dto.promotionCode) {
+      throw new ResponseCommon(400, false, 'PROMOTION_CODE_REQUIRED');
+    }
+    if (!/^KM-.+$/i.test(dto.promotionCode)) {
+      throw new ResponseCommon(400, false, 'PROMOTION_CODE_MUST_START_WITH_KM');
+    }
+  }
 
-    const entity = this.repo.create({
-      name: dto.name.trim(),
-      discountTypePromotion: dto.discountTypePromotion,
-      discountValue: dto.discountValue,
-      maxDiscountAmount: dto.maxDiscountAmount ?? null,
-      minOrderAmount: dto.minOrderAmount,
-      startAt,
-      endAt,
-      applyWith: dto.applyWith,
-      targets: dto.targets ?? null,
-      rules: dto.rules ?? null,
-      isActive: dto.isActive ?? true,
-      stackable: dto.stackable ?? false,
-      description: dto.description ?? null,
+  private applyWithValidate(dto: { applyWith: ApplyWith; categoryIds?: string[]; itemIds?: string[] }) {
+    if (dto.applyWith === ApplyWith.CATEGORY && !(dto.categoryIds?.length)) {
+      throw new ResponseCommon(400, false, 'CATEGORY_IDS_REQUIRED_WHEN_APPLY_WITH_CATEGORY');
+    }
+    if (dto.applyWith === ApplyWith.ITEM && !(dto.itemIds?.length)) {
+      throw new ResponseCommon(400, false, 'ITEM_IDS_REQUIRED_WHEN_APPLY_WITH_ITEM');
+    }
+  }
+
+  async createPromotion(dto: CreatePromotionDto) {
+    this.businessValidate(dto);
+    this.applyWithValidate(dto);
+
+    // chuẩn hoá mã (ví dụ upper case)
+    const normalizedCode = dto.promotionCode.trim().toUpperCase();
+
+    // check trùng
+    const existed = await this.promoRepo.findOne({ where: { promotionCode: normalizedCode } });
+    if (existed) {
+      return new ResponseCommon(400, false, 'PROMOTION_CODE_ALREADY_EXISTS');
+    }
+
+    try {
+      const result = await this.ds.transaction(async (tm) => {
+        const { categories, items } = await this.resolveRelations(dto);
+
+        const entity = this.promoRepo.create({
+          name: dto.name,
+          discountTypePromotion: dto.discountTypePromotion,
+          discountValue: dto.discountValue,
+          maxDiscountAmount: dto.maxDiscountAmount ?? null,
+          minOrderAmount: dto.minOrderAmount,
+          startAt: new Date(dto.startAt),
+          endAt: dto.endAt ? new Date(dto.endAt) : null,
+          applyWith: dto.applyWith,
+          audienceRules: dto.audienceRules ?? null,
+          promotionCode: normalizedCode,
+          isActive: false,
+          ...(categories ? { categories } : {}),
+          ...(items ? { items } : {}),
+        });
+
+        const saved = await tm.getRepository(Promotion).save(entity);
+        return saved;
+      });
+
+      return new ResponseCommon(201, true, 'CREATE_PROMOTION_SUCCESS', result);
+    } catch (e) {
+      throw e;
+    }
+  }
+
+  async findAllPromotions(qry: { page?: number; limit?: number }) {
+    const { page = 1, limit = 10 } = qry;
+
+    const [promos, total] = await this.promoRepo.findAndCount({
+      order: { createdAt: 'DESC' },
+      relations: ['categories', 'items'],
+      skip: (page - 1) * limit,
+      take: Math.min(Number(limit) || 20, 100),
     });
 
-    return await this.repo.save(entity);
+    return new ResponseCommon(200, true, 'GET_PROMOTIONS_SUCCESS', {
+      items: promos,
+      total,
+      page: Number(page),
+      limit: Number(limit),
+    });
+  }
+  async findPromotionById(id: string) {
+    try {
+      const promotion = await this.promoRepo.findOne({
+        where: { id },
+        relations: ['categories', 'items'],
+      });
+
+      if (!promotion) {
+        return new ResponseCommon(404, false, 'PROMOTION_NOT_FOUND');
+      }
+
+      return new ResponseCommon(200, true, 'GET_PROMOTION_SUCCESS', promotion);
+    } catch (error) {
+      throw new ResponseCommon(500, false, 'INTERNAL_SERVER_ERROR', null, error.message);
+    }
+  }
+
+  async updatePromotion(id: string, dto: UpdatePromotionDto) {
+    // Kiểm tra xem khuyến mãi có tồn tại không
+    const promotion = await this.promoRepo.findOne({ where: { id } });
+    if (!promotion) {
+      return new ResponseCommon(404, false, 'PROMOTION_NOT_FOUND');
+    }
+
+    // Kiểm tra tính hợp lệ của dữ liệu
+    this.businessValidate(dto);
+    this.applyWithValidate(dto);
+
+    // Chuẩn hóa mã khuyến mãi
+    const normalizedCode = dto.promotionCode.trim().toUpperCase();
+
+    // Kiểm tra trùng mã khuyến mãi (nếu mã mới khác mã cũ)
+    if (normalizedCode !== promotion.promotionCode) {
+      const existed = await this.promoRepo.findOne({ where: { promotionCode: normalizedCode } });
+      if (existed) {
+        return new ResponseCommon(400, false, 'PROMOTION_CODE_ALREADY_EXISTS');
+      }
+    }
+
+    try {
+      const result = await this.ds.transaction(async (tm) => {
+        const { categories, items } = await this.resolveRelations(dto);
+
+        // Cập nhật thông tin khuyến mãi
+        const updated = this.promoRepo.merge(promotion, {
+          name: dto.name,
+          discountTypePromotion: dto.discountTypePromotion,
+          discountValue: dto.discountValue,
+          maxDiscountAmount: dto.maxDiscountAmount ?? null,
+          minOrderAmount: dto.minOrderAmount,
+          startAt: new Date(dto.startAt),
+          endAt: dto.endAt ? new Date(dto.endAt) : null,
+          applyWith: dto.applyWith,
+          audienceRules: dto.audienceRules ?? null,
+          promotionCode: normalizedCode,
+          ...(categories ? { categories } : {}),
+          ...(items ? { items } : {}),
+        });
+
+        const saved = await tm.getRepository(Promotion).save(updated);
+        return saved;
+      });
+
+      return new ResponseCommon(200, true, 'UPDATE_PROMOTION_SUCCESS', result);
+    } catch (e) {
+      throw e;
+    }
+  }
+
+  async activatePromotion(id: string, isActive: boolean) {
+    // Kiểm tra xem khuyến mãi có tồn tại không
+    const promotion = await this.promoRepo.findOne({ where: { id } });
+    if (!promotion) {
+      return new ResponseCommon(404, false, 'PROMOTION_NOT_FOUND');
+    }
+
+    // Cập nhật trạng thái kích hoạt
+    promotion.isActive = isActive;
+
+    try {
+      const updated = await this.promoRepo.save(promotion);
+      return new ResponseCommon(
+        200,
+        true,
+        isActive ? 'PROMOTION_ACTIVATED_SUCCESS' : 'PROMOTION_DEACTIVATED_SUCCESS',
+        updated,
+      );
+    } catch (e) {
+      throw new ResponseCommon(500, false, 'INTERNAL_SERVER_ERROR', null, e.message);
+    }
   }
 }

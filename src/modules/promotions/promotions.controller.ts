@@ -1,12 +1,12 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards } from '@nestjs/common';
+import { Controller, Post, Body, UseGuards, Query, Get, Param, Patch } from '@nestjs/common';
 import { PromotionsService } from './promotions.service';
 import { CreatePromotionDto } from './dto/create-promotion.dto';
-import { UpdatePromotionDto } from './dto/update-promotion.dto';
 import { ApiBearerAuth, ApiBody, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@modules/core/auth/guards/jwt-auth.guard';
 import { RolesGuard } from '@modules/core/auth/guards/roles.guard';
 import { Roles } from 'src/common/decorators/roles.decorator';
 import { UserRole } from 'src/common/enums';
+import { UpdatePromotionDto } from './dto/update-promotion.dto';
 
 @Controller('promotions')
 @ApiTags('Promotions')
@@ -16,10 +16,37 @@ export class PromotionsController {
   constructor(private readonly service: PromotionsService) { }
 
   @Post('create')
-  @ApiOperation({ summary: 'Create promotion' })
-  @ApiBody({ type: CreatePromotionDto })
+  @ApiOperation({ summary: 'Create new promotion' })
   @Roles(UserRole.MANAGER)
-  create(@Body() dto: CreatePromotionDto) {
-    return this.service.create(dto);
+  async create(@Body() dto: CreatePromotionDto) {
+    return await this.service.createPromotion(dto);
+  }
+
+  @Get('list-all')
+  @ApiOperation({ summary: 'Get all promotions with pagination' })
+  @Roles(UserRole.MANAGER, UserRole.CASHIER, UserRole.WAITER, UserRole.KITCHEN)
+  async findAll(@Query() query: { page?: number; limit?: number }) {
+    return this.service.findAllPromotions(query);
+  }
+
+  @Get(':id')
+  @ApiOperation({ summary: 'Get promotion details by ID' })
+  @Roles(UserRole.MANAGER, UserRole.CASHIER, UserRole.WAITER, UserRole.KITCHEN)
+  findById(@Param('id') id: string) {
+    return this.service.findPromotionById(id);
+  }
+
+  @Patch(':id/update')
+  @ApiOperation({ summary: 'Update promotion by ID' })
+  @Roles(UserRole.MANAGER)
+  updatePromotion(@Param('id') id: string, @Body() dto: UpdatePromotionDto) {
+    return this.service.updatePromotion(id, dto);
+  }
+
+  @Patch(':id/activate')
+  @ApiOperation({ summary: 'Activate or deactivate promotion by ID' })
+  @Roles(UserRole.MANAGER)
+  activatePromotion(@Param('id') id: string, @Body('isActive') isActive: boolean) {
+    return this.service.activatePromotion(id, isActive);
   }
 }
