@@ -23,7 +23,13 @@ export class WorkScheduleService {
   ) {}
   /** Lấy các ca của 1 user trong 1 ngày (YYYY-MM-DD) */
   async listByDate(userId: string, date?: string) {
-    const d = date ?? new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+   function ymdLocal(now = new Date()) {
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+const d = date ?? ymdLocal();
 
     const rows = await this.repo.find({
       where: { user: { id: userId }, date: d },
