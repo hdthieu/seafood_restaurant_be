@@ -139,3 +139,25 @@ export type PromotionRules = {
   maxGiftQty?: number | null; // giới hạn quà tặng
   minItemQty?: number | null; // mua ≥ N món trong targets thì áp dụng
 };
+export enum AttendanceMethod { MANUAL = 'MANUAL', SELF = 'SELF' }
+export enum AttendanceStatus {
+  ON_TIME   = 'ON_TIME',          // Đúng giờ
+  LATE      = 'LATE',             // Đi muộn / về sớm (có mặt)
+  MISSING   = 'MISSING',          // Chấm thiếu in/out
+  ABSENT    = 'ABSENT',           // Nghỉ không phép
+  LEAVE     = 'LEAVE',            // Nghỉ có phép
+}
+
+
+// chấm công bằng mặt 
+export type LivenessStep = 'LEFT' | 'RIGHT' | 'BLINK';
+export type EnrollChallenge = { id: string; steps: LivenessStep[]; exp: number };
+
+export const POSE_THRESH = {
+  YAW_LEFT: -8,     // quay trái: yaw <= -8°
+  YAW_RIGHT: 8,     // quay phải: yaw >= 8°
+  PITCH_MIN: -10,   // optional
+  PITCH_MAX:  10,
+};
+
+export const EYES_CONF_MIN = 70; // % tin cậy tối thiểu khi đọc EyesOpen

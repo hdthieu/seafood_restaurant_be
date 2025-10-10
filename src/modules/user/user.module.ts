@@ -25,11 +25,13 @@ import { AttendanceController } from './attendance.controller';
 import { MobileAttendanceController } from './mobile-attendance.controller';
 import { RulesController } from './controllers/rules.controller';
 // (nếu có) import { BranchController } from './controllers/branch.controller';
+import { FaceModule } from '@modules/face/face.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([
       User, Profile, Shift, WorkSchedule, Attendance, GeoRule, NetRule, Branch,
+      FaceModule,  // ← THÊM VÀO ĐÂY
     ]),
   ],
   controllers: [
