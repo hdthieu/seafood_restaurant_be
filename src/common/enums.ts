@@ -67,7 +67,7 @@ export enum PaymentMethod {
   CASH = 'CASH',
   CARD = 'CARD',
   VNPAY = 'VNPAY',
-   VIETQR = 'VIETQR',
+  VIETQR = 'VIETQR',
 }
 
 export enum PaymentStatus {
@@ -121,21 +121,36 @@ export enum PostingState {
   CANCELLED = 'CANCELLED',
 }
 
-export enum DiscountTypePromotion { PERCENT='PERCENT', AMOUNT='AMOUNT', GIFT='GIFT' }
-export enum ApplyWith    { ORDER='ORDER', CATEGORY='CATEGORY', ITEM='ITEM' }
+export enum DiscountTypePromotion { PERCENT = 'PERCENT', AMOUNT = 'AMOUNT', GIFT = 'GIFT' }
+export enum ApplyWith { ORDER = 'ORDER', CATEGORY = 'CATEGORY', ITEM = 'ITEM' }
+export enum AudienceScope {
+  ALL = 'ALL',
+  POINTS = 'POINTS',
+  BIRTHDAY = 'BIRTHDAY',
+  COMPANY = 'COMPANY',
+  NEW = 'NEW',
+}
 
-// 'HH:mm' local time
-export type TimeRange = { start: string; end: string };
-export type Target    = { type: 'CATEGORY'|'ITEM'|'TABLE'|'AREA'; id: string };
-export type Gift      = { itemId: string; quantity: number };
+export enum AttendanceMethod { MANUAL = 'MANUAL', SELF = 'SELF' }
+export enum AttendanceStatus {
+  ON_TIME   = 'ON_TIME',          // Đúng giờ
+  LATE      = 'LATE',             // Đi muộn / về sớm (có mặt)
+  MISSING   = 'MISSING',          // Chấm thiếu in/out
+  ABSENT    = 'ABSENT',           // Nghỉ không phép
+  LEAVE     = 'LEAVE',            // Nghỉ có phép
+}
 
-export type PromotionRules = {
-  daysOfWeek?: number[];      // 0..6 (0 = CN)
-  timeRanges?: TimeRange[];   // nhiều khung giờ
-  birthday?: 'DAY'|'MONTH'|null; // sinh nhật cho khách
 
-  // điều kiện khi discountType=GIFT
-  gifts?: Gift[];           
-  maxGiftQty?: number | null; // giới hạn quà tặng
-  minItemQty?: number | null; // mua ≥ N món trong targets thì áp dụng
+// chấm công bằng mặt 
+export type LivenessStep = 'LEFT' | 'RIGHT' | 'BLINK';
+export type EnrollChallenge = { id: string; steps: LivenessStep[]; exp: number };
+
+export const POSE_THRESH = {
+  YAW_LEFT: -8,     // quay trái: yaw <= -8°
+  YAW_RIGHT: 8,     // quay phải: yaw >= 8°
+  PITCH_MIN: -10,   // optional
+  PITCH_MAX:  10,
 };
+
+export const EYES_CONF_MIN = 70; // % tin cậy tối thiểu khi đọc EyesOpen
+

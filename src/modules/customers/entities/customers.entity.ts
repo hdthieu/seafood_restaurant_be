@@ -61,4 +61,19 @@ export class Customer {
 
   @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' })
   updatedAt: Date;
+
+  // tổng số lần ghé
+  @Column({ type: 'int', default: 0 })
+  visitCount: number;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  firstVisitedAt: Date | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  lastVisitedAt: Date | null;
+
+  @Column({ type: 'int', default: 0 })
+  pointsBalance: number;
+
+
 }

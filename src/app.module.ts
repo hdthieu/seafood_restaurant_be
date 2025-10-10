@@ -30,6 +30,7 @@ import { UomconversionModule } from './modules/uomconversion/uomconversion.modul
 import { MenucomboitemModule } from './modules/menucomboitem/menucomboitem.module';
 import * as Joi from 'joi';
 import { PromotionsModule } from './modules/promotions/promotions.module';
+import { FaceModule } from './modules/face/face.module';
 @Module({
   imports: [ConfigModule.forRoot({ isGlobal: true,
 
@@ -67,6 +68,9 @@ envFilePath: ['.env'], // tùy path
         JWT_REFRESH_SECRET: Joi.string().required(),
         JWT_ACCESS_EXPIRES: Joi.string().default('120m'),
         JWT_REFRESH_EXPIRES: Joi.string().default('30d'),
+ REKOG_COLLECTION_ID: Joi.string().required(),
+
+
 
         FRONTEND_URL: Joi.string().uri().optional(),
         TZ: Joi.string().optional(),
@@ -86,7 +90,7 @@ envFilePath: ['.env'], // tùy path
     autoLoadEntities: true,
     // logging: ['error', 'warn', 'query'],
   }),
-    UserModule, ProfileModule, MenuitemsModule, OrdersModule, OrderitemsModule, InventoryitemsModule, InventorytransactionModule, InvoiceModule, OrderstatushistoryModule, RestauranttableModule, AuthModule, AreaModule, ConfigS3Module, IngredientModule, CategoryModule, PaymentModule, CustomersModule, SupplierModule, PurchasereceiptModule, PurchasereceiptitemModule, SuppliergroupModule, ReportModule, UnitsOfMeasureModule, UomconversionModule, MenucomboitemModule, PromotionsModule],
+    UserModule, ProfileModule, MenuitemsModule, OrdersModule, OrderitemsModule, InventoryitemsModule, InventorytransactionModule, InvoiceModule, OrderstatushistoryModule, RestauranttableModule, AuthModule, AreaModule, ConfigS3Module, IngredientModule, CategoryModule, PaymentModule, CustomersModule, SupplierModule, PurchasereceiptModule, PurchasereceiptitemModule, SuppliergroupModule, ReportModule, UnitsOfMeasureModule, UomconversionModule, MenucomboitemModule, PromotionsModule, FaceModule],
   controllers: [AppController],
   providers: [AppService],
 })

@@ -9,18 +9,31 @@ export class Shift {
   @Column({ length: 120 })
   name: string;
 
-  // Lưu HH:mm cho đơn giản (khỏi map timezone phức tạp)
   @Column({ type: 'varchar', length: 5 })
-  startTime: string; // "08:00"
+  startTime: string;  // "08:00"
 
   @Column({ type: 'varchar', length: 5 })
-  endTime: string;   // "17:00"
+  endTime: string;    // "17:00"
+
+  // ------ KHUNG CHẤM CÔNG (tùy chọn) ------
+  // Nếu null sẽ auto-suy ra từ start/end với offset mặc định
+  @Column({ type: 'varchar', length: 5, nullable: true })
+  checkInOpen?: string | null;   // ví dụ "07:45"
+
+  @Column({ type: 'varchar', length: 5, nullable: true })
+  checkInClose?: string | null;  // ví dụ "08:30"
+
+  @Column({ type: 'varchar', length: 5, nullable: true })
+  checkOutOpen?: string | null;  // ví dụ "11:30"
+
+  @Column({ type: 'varchar', length: 5, nullable: true })
+  checkOutClose?: string | null; // ví dụ "12:30"
 
   @Column({ default: true })
   isActive: boolean;
 
   @Column({ type: 'varchar', length: 10, nullable: true })
-  color?: string; // ví dụ "#22c55e"
+  color?: string; // "#22c55e"
 
   @CreateDateColumn()
   createdAt: Date;

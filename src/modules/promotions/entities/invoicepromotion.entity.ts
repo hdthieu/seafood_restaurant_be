@@ -1,7 +1,11 @@
+import {
+    Check, CreateDateColumn, Entity, Index, JoinColumn, ManyToOne,
+    PrimaryGeneratedColumn, Unique, Column
+} from 'typeorm';
 import { Invoice } from '@modules/invoice/entities/invoice.entity';
-import { ApplyWith } from 'src/common/enums';
-import { Entity, PrimaryGeneratedColumn, ManyToOne, JoinColumn, Column, Unique, Index, CreateDateColumn, Check } from 'typeorm';
 import { Promotion } from './promotion.entity';
+import { ApplyWith } from 'src/common/enums';
+import { AudienceRules } from './promotion.entity';
 
 @Entity('invoice_promotions')
 @Unique(['invoice', 'promotion'])
@@ -21,20 +25,29 @@ export class InvoicePromotion {
     @JoinColumn({ name: 'promotion_id' })
     promotion: Promotion;
 
-    // Phạm vi áp dụng tại thời điểm áp (snapshot) – giúp group nhanh mà không JOIN
+    // Phạm vi áp dụng tại thời điểm áp (không phụ thuộc thay đổi sau đó của KM) 
     @Column({ type: 'enum', enum: ApplyWith })
     applyWith: ApplyWith;                         // ORDER | CATEGORY | ITEM
 
+    // Nền tính giảm giá của chương trình khuyến mãi
     @Column('numeric', { precision: 12, scale: 2, default: 0 })
-    calculationBase: number; // Nền tính giảm giá của chương trình khuyến mãi
+    calculationBase: number;
 
-    // Số tiền giảm giá thực tế được áp dụng từ chương trình khuyến mãi
+    // Số tiền giảm giá thực tế
     @Column('numeric', { precision: 12, scale: 2, default: 0 })
     discountAmount: number;
 
-    // Số quà tặng (nếu KM là GIFT)
+    // Số quà tặng (nếu KM là GIFT) - để mở rộng
     @Column({ type: 'int', default: 0 })
     giftsCount: number;
+
+    // Nếu KM yêu cầu mã, lưu mã đã dùng để audit
+    @Column({ type: 'varchar', length: 32, nullable: true })
+    codeUsed: string | null;
+
+    // điều kiện đối tượng khớp thời điểm áp dụng KM
+    @Column({ type: 'jsonb', nullable: true })
+    audienceMatched: Partial<AudienceRules> | null;
 
     @CreateDateColumn({ type: 'timestamptz' })
     createdAt: Date;

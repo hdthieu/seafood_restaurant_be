@@ -1,75 +1,72 @@
+// src/modules/promotions/dto/create-promotion.dto.ts
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsDateString, IsEnum, IsNumber, IsOptional, IsString, MaxLength, Min } from 'class-validator';
+import { Type } from 'class-transformer';
+import { IsBoolean, IsDateString, IsEnum, IsNotEmpty, IsNumber, IsOptional, IsPositive, IsString, Max, Min, ValidateNested, ArrayUnique, IsUUID, IsArray, Matches } from 'class-validator';
 import { ApplyWith, DiscountTypePromotion } from 'src/common/enums';
-import { PromotionRulesDto } from './rules.dto';
-import { PromotionTargetDto } from './target.dto';
+import { AudienceRulesDto } from './audience-rules.dto';
+
 export class CreatePromotionDto {
-    @ApiProperty({ example: 'Happy Hour -20% toàn bill (trần 50k)' })
+    @ApiProperty({ maxLength: 128 })
     @IsString()
-    @MaxLength(128)
-    name!: string;
+    @IsNotEmpty()
+    name: string;
 
-    @ApiProperty({ enum: DiscountTypePromotion, example: DiscountTypePromotion.PERCENT })
+    @ApiProperty({ enum: DiscountTypePromotion })
     @IsEnum(DiscountTypePromotion)
-    discountTypePromotion!: DiscountTypePromotion;
+    discountTypePromotion: DiscountTypePromotion;
 
-    @ApiProperty({ example: 20, description: 'Nếu PERCENT → 20 nghĩa là 20%; nếu AMOUNT → số tiền' })
+    @ApiProperty({ description: 'Giá trị giảm: % hoặc số tiền', example: 20 })
     @IsNumber()
     @Min(0)
-    discountValue!: number;
+    discountValue: number;
 
-    @ApiPropertyOptional({ example: 50000, description: 'Trần giảm tối đa; null nếu không giới hạn' })
+    @ApiPropertyOptional({ description: 'Giảm tối đa (nullable)', example: 50000 })
     @IsOptional()
     @IsNumber()
     @Min(0)
     maxDiscountAmount?: number | null;
 
-    @ApiProperty({ example: 0 })
+    @ApiProperty({ description: 'Điều kiện hóa đơn tối thiểu', example: 100000 })
     @IsNumber()
     @Min(0)
-    minOrderAmount!: number;
+    minOrderAmount: number;
 
-    @ApiProperty({ example: '2025-10-01T15:00:00.000Z' })
+    @ApiProperty({ type: String, format: 'date-time' })
     @IsDateString()
-    startAt!: string;
+    startAt: string;
 
-    @ApiPropertyOptional({ example: '2025-12-31T16:59:59.000Z' })
+    @ApiPropertyOptional({ type: String, format: 'date-time' })
     @IsOptional()
     @IsDateString()
     endAt?: string | null;
 
-    @ApiProperty({ enum: ApplyWith, example: ApplyWith.ORDER })
+    @ApiProperty({ enum: ApplyWith })
     @IsEnum(ApplyWith)
-    applyWith!: ApplyWith;
+    applyWith: ApplyWith;
 
-    @ApiPropertyOptional({
-        type: () => [PromotionTargetDto],
-        example: [{ type: 'CATEGORY', id: 'uuid-category-nuong' }],
-        description: 'Khi applyWith = CATEGORY/ITEM/TABLE/AREA',
-    })
+    @ApiPropertyOptional({ type: AudienceRulesDto })
     @IsOptional()
-    targets?: PromotionTargetDto[] | null;
+    @ValidateNested()
+    @Type(() => AudienceRulesDto)
+    audienceRules?: AudienceRulesDto | null;
 
-    @ApiPropertyOptional({
-        type: () => PromotionRulesDto,
-        example: { birthdayOnly: false, daysOfWeek: [5, 6], timeWindows: [{ start: '15:00', end: '17:00' }] },
-    })
-    @IsOptional()
-    rules?: PromotionRulesDto | null;
-
-
-    @ApiPropertyOptional({ example: true })
-    @IsOptional()
-    @IsBoolean()
-    isActive?: boolean;
-
-    @ApiPropertyOptional({ example: false, description: 'Có cho phép cộng dồn với KM khác hay không' })
-    @IsOptional()
-    @IsBoolean()
-    stackable?: boolean;
-
-    @ApiPropertyOptional({ example: 'Áp dụng trong khung giờ 15:00–17:00' })
-    @IsOptional()
+    @ApiProperty({ description: 'Mã KM, phải bắt đầu bằng KM-', example: 'KM-LAU50' })
     @IsString()
-    description?: string | null;
+    @IsNotEmpty()
+    @Matches(/^KM-.+$/i, { message: 'promotionCode must start with "KM-"' })
+    promotionCode: string;
+
+    @ApiPropertyOptional({ type: [String], format: 'uuid', description: 'Category IDs áp dụng' })
+    @IsOptional()
+    @IsArray()
+    @ArrayUnique()
+    @IsUUID('4', { each: true })
+    categoryIds?: string[];
+
+    @ApiPropertyOptional({ type: [String], format: 'uuid', description: 'Item IDs áp dụng' })
+    @IsOptional()
+    @IsArray()
+    @ArrayUnique()
+    @IsUUID('4', { each: true })
+    itemIds?: string[];
 }
