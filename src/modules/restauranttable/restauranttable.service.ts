@@ -8,6 +8,12 @@ import { ResponseException } from 'src/common/common_dto/respone.dto';
 import { TableStatus } from 'src/common/enums';
 import { UpdateTableDto } from './dto/update-table.dto';
 import { QueryTableDto } from './dto/query-table.dto';
+import { Paginated } from 'src/common/common_dto/paginated';
+import { ResponseCommon } from 'src/common/common_dto/respone.dto';
+import { DataSource } from 'typeorm';
+import { Invoice } from '../invoice/entities/invoice.entity';
+import { TableTransactionsQueryDto } from './dto/table-transactions.dto';
+import { TableTransactionsResp } from './dto/table-transactions.resp';
 @Injectable()
 export class RestaurantTablesService {
     constructor(
@@ -15,6 +21,11 @@ export class RestaurantTablesService {
         private readonly tableRepo: Repository<RestaurantTable>,
         @InjectRepository(Area)
         private readonly areaRepo: Repository<Area>,
+        private readonly ds: DataSource,
+       @InjectRepository
+        (Invoice)
+        private readonly invoiceRepo: Repository<Invoice>,
+
     ) { }
 
     async create(createDto: CreateRestaurantTableDto): Promise<RestaurantTable> {
@@ -48,25 +59,58 @@ export class RestaurantTablesService {
         return this.tableRepo.save(newTable);
     }
 
-    // function for get all tables
-    async findAll({ page = 1, limit = 12, area }: QueryTableDto) {
-        const [data, total] = await this.tableRepo.findAndCount({
-            where: area ? { area: { name: area } } : {},
-            order: { name: 'ASC' },
-            skip: (page - 1) * limit,
-            take: limit,
-        });
+    // lấy danh sách bàn
+      async findAll({ page = 1, limit = 12, area, search,status }: QueryTableDto) {
+    try {
+      const qb = this.tableRepo
+        .createQueryBuilder("t")
+        .leftJoin("t.area", "a")
+        .addSelect(["a.id", "a.name"])
+        .orderBy("t.name", "ASC")
+        .skip((page - 1) * limit)
+        .take(limit);
 
-        return {
-            data,
-            meta: {
-                total,
-                page,
-                limit,
-                pages: Math.ceil(total / limit),
-            },
-        };
+      const isPostgres =
+        (this.tableRepo.manager.connection.options as any).type === "postgres";
+
+      if (area && area.trim() !== "") {
+        qb.andWhere(isPostgres ? "a.name ILIKE :area" : "a.name LIKE :area", {
+          area: `%${area}%`,
+        });
+      }
+
+      if (search && search.trim() !== "") {
+        qb.andWhere(isPostgres ? "t.name ILIKE :search" : "t.name LIKE :search", {
+          search: `%${search}%`,
+        });
+      }
+if (status) {
+    qb.andWhere("t.status = :status", { status }); // ACTIVE / INACTIVE
+  }
+      const [rows, total] = await qb.getManyAndCount();
+
+      const data: Paginated<RestaurantTable> = {
+        items: rows,
+        meta: {
+          total,
+          page,
+          limit,
+          pages: Math.ceil(total / limit) || 0,
+        },
+      };
+
+      return new ResponseCommon<Paginated<RestaurantTable>>(
+        200,
+        true,
+        "Lấy danh sách bàn thành công",
+        data,
+      );
+    } catch (error) {
+      throw new ResponseException(error, 500, "Không thể lấy danh sách bàn");
     }
+  }
+
+
 
     // function for get table by id
     async getInfoTable(id: string): Promise<RestaurantTable> {
@@ -94,5 +138,74 @@ export class RestaurantTablesService {
         await this.tableRepo.remove(table);
         return { message: 'Xóa bàn thành công' };
     }
+
+
+async getTableTransactions(
+  tableId: string,
+  q: TableTransactionsQueryDto,
+): Promise<TableTransactionsResp> {
+  const { page = 1, limit = 10, status } = q;
+
+  const baseQb = this.ds.getRepository(Invoice)
+    .createQueryBuilder('inv')
+    .leftJoin('inv.order', 'ord')
+    .leftJoin('ord.table', 'tbl')
+    .leftJoin('inv.cashier', 'cashier')
+    .leftJoin('ord.createdBy', 'orderedBy')
+    .where('tbl.id = :tableId', { tableId });
+
+  if (status) baseQb.andWhere('inv.status = :status', { status });
+
+  const qb = this.ds.getRepository(Invoice)
+  .createQueryBuilder('inv')
+  .leftJoin('inv.order', 'ord')
+  .leftJoin('ord.table', 'tbl')
+  .leftJoin('inv.cashier', 'cashier')
+  .leftJoin('ord.createdBy', 'orderedBy')
+  .leftJoin('orderedBy.profile', 'orderedByProfile') 
+
+qb
+  .select([
+    'inv.id AS "invoiceId"',
+    'inv.invoice_number AS "invoiceNumber"',
+    'inv.created_at AS "createdAt"',
+    'inv.total_amount AS "totalAmount"',
+    'inv.status AS "status"',
+  ])
+  .addSelect('cashier.id', 'cashierId')
+  .addSelect('cashier.username', 'cashierName')         
+  .addSelect('orderedBy.id', 'orderedById')
+  .addSelect('orderedByProfile.fullName', 'orderedByName') 
+  .where('tbl.id = :tableId', { tableId })
+  .orderBy('inv.created_at', 'DESC')
+  .offset((page - 1) * limit)
+  .limit(limit);
+
+
+  const [rows, totalRow] = await Promise.all([
+    qb.getRawMany<{
+      invoiceId: string; invoiceNumber: string; createdAt: Date; totalAmount: string; status: string;
+      cashierId: string | null; cashierName: string | null;
+      orderedById: string | null; orderedByName: string | null;
+    }>(),
+    baseQb.clone().select('COUNT(*)', 'cnt').getRawOne(),
+  ]);
+
+  const total = Number(totalRow?.cnt ?? 0);
+
+  return {
+    items: rows.map(r => ({
+      invoiceId: r.invoiceId,
+      invoiceNumber: r.invoiceNumber,
+      createdAt: r.createdAt.toISOString(),
+      totalAmount: r.totalAmount,
+      status: r.status,
+      cashier:   { id: r.cashierId,   name: r.cashierName ?? null },
+      orderedBy: { id: r.orderedById, name: r.orderedByName ?? null },
+    })),
+    meta: { total, page, limit, pages: Math.max(1, Math.ceil(total / limit)) },
+  };
+}
+
 
 }

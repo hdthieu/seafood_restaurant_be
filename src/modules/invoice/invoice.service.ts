@@ -23,7 +23,7 @@ export class InvoicesService {
   /** Tạo invoice từ order (idempotent) */
 
 
-async createFromOrder(orderId: string, dto?: { customerId?: string | null },guestCount?: number,) {
+async createFromOrder(orderId: string, body: { customerId?: string | null; guestCount?: number } = {}, userId?: string) {
   return this.ds.transaction(async (em) => {
     const oRepo = em.getRepository(Order);
     const invRepo = em.getRepository(Invoice);
@@ -37,8 +37,8 @@ async createFromOrder(orderId: string, dto?: { customerId?: string | null },gues
     const existed = await invRepo.findOne({ where: { order: { id: orderId } } });
     if (existed) {
       // cho phép cập nhật customer nếu gọi lại
-      if (typeof dto?.customerId !== 'undefined') {
-        existed.customer = dto.customerId ? ({ id: dto.customerId } as any) : null;
+      if (typeof body.customerId !== 'undefined') {
+        existed.customer = body.customerId ? ({ id: body.customerId } as any) : null;
         await invRepo.save(existed);
       }
       return existed;
@@ -46,17 +46,18 @@ async createFromOrder(orderId: string, dto?: { customerId?: string | null },gues
 
     const total = order.items.reduce((s, it) => s + Number(it.price) * it.quantity, 0);
 
-    // 👉 Dùng DeepPartial, chỉ cast chỗ quan hệ
+    // Dùng DeepPartial, chỉ cast chỗ quan hệ
     const payload: DeepPartial<Invoice> = {
       invoiceNumber: await this.genNumber(),
       order: { id: orderId } as any,
-        guestCount: typeof guestCount === 'number' ? guestCount : null,
-      customer: dto?.customerId ? ({ id: dto.customerId } as any) : null,
+      guestCount: typeof body.guestCount === 'number' ? body.guestCount : null,
+      customer: body.customerId ? ({ id: body.customerId } as any) : null,
       totalAmount: total.toFixed(2),
       status: InvoiceStatus.UNPAID,
-    };
+      cashier: { id: userId } as any,
 
-    const inv = invRepo.create(payload); // trả về Invoice (không phải Invoice[])
+    };
+    const inv = invRepo.create(payload); 
     return invRepo.save(inv);
   });
 }

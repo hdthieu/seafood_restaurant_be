@@ -10,11 +10,16 @@ import { RolesGuard } from '../core/auth/guards/roles.guard';
 import { UpdateTableDto } from './dto/update-table.dto';
 import { QueryTableDto } from './dto/query-table.dto';
 import { Query } from '@nestjs/common';
+import { ResponseCommon } from 'src/common/common_dto/respone.dto';
+import { TableTransactionsQueryDto } from './dto/table-transactions.dto';
+
 @Controller('restauranttable')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class RestauranttableController {
-  constructor(private readonly restauranttableService: RestaurantTablesService) { }
+  constructor(private readonly restauranttableService: RestaurantTablesService,
+    private readonly svc: RestaurantTablesService,
+  ) { }
 
   // this endpoint for get all tables
   @Post('/create-table')
@@ -55,5 +60,16 @@ export class RestauranttableController {
   @Roles(UserRole.MANAGER)
   async delete(@Param('id') id: string): Promise<{ message: string }> {
     return this.restauranttableService.deleteTable(id);
+  }
+
+
+   @Get(':tableId/transactions')
+  @ApiOperation({ summary: 'Lịch sử giao dịch của bàn (phân trang, không lọc ngày)' })
+  async getTransactions(
+    @Param('tableId') tableId: string,
+    @Query() q: TableTransactionsQueryDto,
+  ) {
+    const data = await this.svc.getTableTransactions(tableId, q);
+    return new ResponseCommon(200, true, 'OK', data);
   }
 }

@@ -6,7 +6,6 @@ import { Column, CreateDateColumn, Entity, ManyToOne, OneToMany, PrimaryGenerate
 import { Invoice } from "src/modules/invoice/entities/invoice.entity";
 import { OneToOne } from "typeorm";
 import { JoinColumn } from "typeorm";
-import { Customer } from "src/modules/customers/entities/customers.entity";
 @Entity('orders')
 export class Order {
     @PrimaryGeneratedColumn('uuid')
@@ -36,7 +35,7 @@ export class Order {
     @OneToOne(() => Invoice, (inv) => inv.order)
     invoice?: Invoice;
 
-    @ManyToOne(() => Customer, { nullable: true, eager: true })
-    @JoinColumn({ name: 'customer_id' })
-    customer?: Customer | null;
+    // @ManyToOne(() => Customer, { nullable: true, eager: true })
+    // @JoinColumn({ name: 'customer_id' })
+    // customer?: Customer | null;
 }

@@ -17,26 +17,23 @@ import { OrderStatusHistory } from 'src/modules/orderstatushistory/entities/orde
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status';
 import { AddItemsDto } from 'src/modules/orderitems/dto/create-orderitem.dto';
-
 import { MenuItem } from '../menuitems/entities/menuitem.entity';
 import { Ingredient } from '../ingredient/entities/ingredient.entity';
 import { InventoryItem } from '../inventoryitems/entities/inventoryitem.entity';
 import { InventoryTransaction } from '../inventorytransaction/entities/inventorytransaction.entity';
-
 import { RestaurantTable } from '../restauranttable/entities/restauranttable.entity';
 import { CancelOrderDto } from './dto/cancel-order.dto';
-
 import { Invoice } from 'src/modules/invoice/entities/invoice.entity';
 import { InvoiceStatus, InventoryAction, OrderStatus } from 'src/common/enums';
-
-import { AttachCustomerDto } from 'src/modules/customers/dtos/attach-customers.dto';
 import { Customer } from 'src/modules/customers/entities/customers.entity';
 import { CustomersService } from 'src/modules/customers/customers.service';
 import { ItemStatus } from "src/common/enums"
 import { forwardRef } from '@nestjs/common';
 import { OrderItemsService } from 'src/modules/orderitems/orderitems.service';
 import { Inject } from "@nestjs/common";
-import { ResponseCommon } from 'src/common/common_dto/respone.dto';
+import { UseGuards } from '@nestjs/common';
+import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
+import { ApiBearerAuth } from '@nestjs/swagger';
 const ALLOWED_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   [OrderStatus.PENDING]: [OrderStatus.CONFIRMED, OrderStatus.CANCELLED],
   [OrderStatus.CONFIRMED]: [OrderStatus.PREPARING, OrderStatus.CANCELLED],
@@ -58,25 +55,18 @@ const EDITABLE_STATUSES: OrderStatus[] = [
 
 
 @Injectable()
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard)
 export class OrdersService {
   constructor(
     private readonly ds: DataSource,
     @InjectRepository(Order) private readonly orderRepo: Repository<Order>,
-    @InjectRepository(OrderItem) private readonly itemRepo: Repository<OrderItem>,
-    @InjectRepository(OrderStatusHistory) private readonly histRepo: Repository<OrderStatusHistory>,
-    @InjectRepository(MenuItem) private readonly menuRepo: Repository<MenuItem>,
-    @InjectRepository(Ingredient) private readonly ingredientRepo: Repository<Ingredient>,
-    @InjectRepository(InventoryItem) private readonly invRepo: Repository<InventoryItem>,
-    @InjectRepository(InventoryTransaction) private readonly invTxRepo: Repository<InventoryTransaction>,
-    @InjectRepository(RestaurantTable) private readonly tableRepo: Repository<RestaurantTable>,
-    @InjectRepository(Customer) private readonly customers: Repository<Customer>,
     @Inject(forwardRef(() => OrderItemsService))
     private readonly orderItemsSvc: OrderItemsService,
-    private readonly customersSvc: CustomersService,
   ) { }
 
   /** CREATE: tạo đơn PENDING, tạo item PENDING, trừ kho ngay, ghi history, recompute */
-  async create(dto: CreateOrderDto) {
+  async create(dto: CreateOrderDto, userId: string) {
     return this.ds.transaction(async (em) => {
       const table = await em.getRepository(RestaurantTable).findOneBy({ id: dto.tableId });
       if (!table) throw new NotFoundException('TABLE_NOT_FOUND');
@@ -93,6 +83,7 @@ export class OrdersService {
           table,
           status: OrderStatus.PENDING,
           orderType: dto.orderType ?? undefined,
+          createdBy: { id: userId } as any,
         }),
       );
 
