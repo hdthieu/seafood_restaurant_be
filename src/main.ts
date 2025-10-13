@@ -27,8 +27,8 @@ function initialSwagger(app: NestExpressApplication): void {
 async function bootstrap() {
   console.log('🚀 Starting NestJS application...');
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
-  rawBody: true,   // <-- Nest sẽ gắn req.rawBody sẵn 
-});
+    rawBody: true,   // <-- Nest sẽ gắn req.rawBody sẵn 
+  });
   app.enableCors({
     origin: [
       'http://localhost:3000',
@@ -59,15 +59,15 @@ async function bootstrap() {
   app.useGlobalPipes(
     new ValidationPipe({
       transform: true,
-      transformOptions: {
-        enableImplicitConversion: true,
-      },
+      // transformOptions: {
+      //   enableImplicitConversion: true,
+      // },
     })
   );
   app.useGlobalInterceptors(new LoggingInterceptor());
 
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+  app.use(express.json({ limit: '10mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 
   await app.listen(configurations.port);

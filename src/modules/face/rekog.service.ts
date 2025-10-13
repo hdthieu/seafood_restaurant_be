@@ -5,23 +5,29 @@ import {
   DescribeCollectionCommand,
   IndexFacesCommand,
   SearchFacesByImageCommand,
-    ListFacesCommand,        // <—
-  DeleteFacesCommand,      // <—
-  DetectFacesCommand, 
+  ListFacesCommand,
+  DeleteFacesCommand,
+  DetectFacesCommand,
 } from '@aws-sdk/client-rekognition';
 import { STSClient, GetCallerIdentityCommand } from '@aws-sdk/client-sts';
+
+/** Kiểu thống nhất cho EyesOpen */
+export type EyesOpenAttr = { value: boolean; conf: number };
+
 type FaceAttrsOk = {
   ok: true;
   pose: { yaw: number; pitch: number; roll: number };
-  eyesOpen: { left: boolean; conf: number };
+  eyesOpen?: EyesOpenAttr; // có thể undefined nếu Rekognition không trả
   quality?: { brightness?: number; sharpness?: number };
 };
 
 type FaceAttrsErr =
   | { ok: false; reason: 'NO_FACE' }
-  | { ok: false; reason: 'IMAGE_TOO_LARGE' };
+  | { ok: false; reason: 'IMAGE_TOO_LARGE' }
+  | { ok: false; reason: 'IMAGE_BAD' };
 
 export type FaceAttrs = FaceAttrsOk | FaceAttrsErr;
+
 @Injectable()
 export class RekogService {
   private readonly logger = new Logger(RekogService.name);
@@ -36,7 +42,7 @@ export class RekogService {
 
   private readonly client = new RekognitionClient({
     region: this.region,
-    // nếu đang dùng ENV chuẩn (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_SESSION_TOKEN)
+    // Nếu đang dùng ENV chuẩn (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_SESSION_TOKEN)
     // thì không cần truyền credentials ở đây.
   });
 
@@ -44,11 +50,11 @@ export class RekogService {
 
   constructor() {
     // Log cấu hình “an toàn”
+    this.logger.log(`Init Rekog: region=${this.region}, collection=${this.collectionId || '(empty)'}`);
     this.logger.log(
-      `Init Rekog: region=${this.region}, collection=${this.collectionId || '(empty)'}`,
-    );
-    this.logger.log(
-      `ENV: AKID(*${this.accessKeyLast4 || '????'}), SECRET(*${this.secretKeyLast4 || '????'}), TOKEN=${this.sessionTokenSet}`,
+      `ENV: AKID(*${this.accessKeyLast4 || '????'}), SECRET(*${this.secretKeyLast4 || '????'}), TOKEN=${
+        this.sessionTokenSet
+      }`,
     );
 
     if (!this.collectionId) {
@@ -58,7 +64,6 @@ export class RekogService {
 
   /** Dùng để gọi nhanh kiểm tra cấu hình */
   async health() {
-    // 1) Ai đang ký request?
     try {
       const who = await this.sts.send(new GetCallerIdentityCommand({}));
       this.logger.log(`STS: Account=${who.Account}, Arn=${who.Arn}`);
@@ -66,11 +71,8 @@ export class RekogService {
       this.logger.error('STS GetCallerIdentity FAILED', this.prettyErr(e));
     }
 
-    // 2) Collection có tồn tại/đúng region không?
     try {
-      const d = await this.client.send(
-        new DescribeCollectionCommand({ CollectionId: this.collectionId }),
-      );
+      const d = await this.client.send(new DescribeCollectionCommand({ CollectionId: this.collectionId }));
       this.logger.log(
         `DescribeCollection OK: FaceModel=${d.FaceModelVersion}, Faces=${d.FaceCount}, ARN=${d.CollectionARN}`,
       );
@@ -84,7 +86,6 @@ export class RekogService {
   /* ---------- Internal helpers ---------- */
 
   private prettyErr(e: any) {
-    // gom các field hay gặp để đọc log dễ
     return JSON.stringify(
       {
         name: e?.name,
@@ -101,9 +102,7 @@ export class RekogService {
 
   private async ensureCollection() {
     try {
-      await this.client.send(
-        new DescribeCollectionCommand({ CollectionId: this.collectionId }),
-      );
+      await this.client.send(new DescribeCollectionCommand({ CollectionId: this.collectionId }));
     } catch (e: any) {
       if (e?.name === 'ResourceNotFoundException') {
         this.logger.error(
@@ -126,7 +125,8 @@ export class RekogService {
   /** Enroll: thêm ảnh làm mẫu cho user (nên gọi 3–5 ảnh) */
   async enroll(userId: string, imageBase64: string) {
     await this.ensureCollection();
-    const img = Buffer.from(imageBase64, 'base64');
+    const b64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
+    const img = Buffer.from(b64, 'base64');
 
     const r = await this.client.send(
       new IndexFacesCommand({
@@ -139,9 +139,7 @@ export class RekogService {
     );
 
     const ok = (r.FaceRecords?.length ?? 0) > 0;
-    this.logger.log(
-      `Enroll user=${userId} → faces=${r.FaceRecords?.length ?? 0}`,
-    );
+    this.logger.log(`Enroll user=${userId} → faces=${r.FaceRecords?.length ?? 0}`);
 
     return {
       ok,
@@ -154,55 +152,57 @@ export class RekogService {
 
   /** Verify: so khớp selfie hiện tại với mẫu đã enroll của userId */
   async verify(userId: string, imageBase64: string, threshold = 90) {
-  await this.ensureCollection();
+    await this.ensureCollection();
 
-  // vệ sinh b64 (loại bỏ data URL prefix nếu có)
-  const b64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
-  const buf = Buffer.from(b64, 'base64');
+    const b64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
+    const buf = Buffer.from(b64, 'base64');
 
-  try {
-    const r = await this.client.send(new SearchFacesByImageCommand({
-      CollectionId: this.collectionId,
-      Image: { Bytes: buf },
-      FaceMatchThreshold: threshold,
-      MaxFaces: 5,
-    }));
+    try {
+      const r = await this.client.send(
+        new SearchFacesByImageCommand({
+          CollectionId: this.collectionId,
+          Image: { Bytes: buf },
+          FaceMatchThreshold: threshold,
+          MaxFaces: 5,
+        }),
+      );
 
-    const matches = (r.FaceMatches ?? []).map(m => ({
-      similarity: m.Similarity ?? 0,
-      externalId: m.Face?.ExternalImageId,
-      faceId: m.Face?.FaceId,
-    }));
+      const matches = (r.FaceMatches ?? []).map((m) => ({
+        similarity: m.Similarity ?? 0,
+        externalId: m.Face?.ExternalImageId,
+        faceId: m.Face?.FaceId,
+      }));
 
-    const top = matches.sort((a,b)=>b.similarity-a.similarity)[0];
-    const ok = !!top && top.externalId === userId && top.similarity >= threshold;
+      const top = matches.sort((a, b) => b.similarity - a.similarity)[0];
+      const ok = !!top && top.externalId === userId && top.similarity >= threshold;
 
-    return { ok, top, matches, reason: ok ? 'PASS' : 'NO_MATCH' as const };
-  } catch (e: any) {
-    if (e?.name === 'InvalidParameterException'
-        && /no faces in the image/i.test(e?.message ?? '')) {
-      // Ảnh hợp lệ nhưng không chứa khuôn mặt
-      return { ok: false, top: undefined, matches: [], reason: 'NO_FACE' as const };
+      return { ok, top, matches, reason: ok ? 'PASS' : ('NO_MATCH' as const) };
+    } catch (e: any) {
+      if (e?.name === 'InvalidParameterException' && /no faces in the image/i.test(e?.message ?? '')) {
+        return { ok: false, top: undefined, matches: [], reason: 'NO_FACE' as const };
+      }
+      if (e?.name === 'ImageTooLargeException') {
+        return { ok: false, reason: 'IMAGE_TOO_LARGE' as const };
+      }
+      this.logger.error('SearchFacesByImage failed', e);
+      throw e;
     }
-    if (e?.name === 'ImageTooLargeException') {
-      return { ok: false, reason: 'IMAGE_TOO_LARGE' as const };
-    }
-    this.logger.error('SearchFacesByImage failed', e);
-    throw e; // để global filter trả 500 nếu là lỗi khác
   }
-}
- /** Đếm số mẫu hiện có của user (lọc theo ExternalImageId) */
+
+  /** Đếm số mẫu hiện có của user (lọc theo ExternalImageId) */
   async enrollStatus(userId: string) {
     await this.ensureCollection();
     let nextToken: string | undefined;
     let count = 0;
     do {
-      const r = await this.client.send(new ListFacesCommand({
-        CollectionId: this.collectionId,
-        NextToken: nextToken,
-        MaxResults: 1000,
-      }));
-      count += (r.Faces ?? []).filter(f => f.ExternalImageId === userId).length;
+      const r = await this.client.send(
+        new ListFacesCommand({
+          CollectionId: this.collectionId,
+          NextToken: nextToken,
+          MaxResults: 1000,
+        }),
+      );
+      count += (r.Faces ?? []).filter((f) => f.ExternalImageId === userId).length;
       nextToken = r.NextToken;
     } while (nextToken);
     return { count };
@@ -214,55 +214,69 @@ export class RekogService {
     let nextToken: string | undefined;
     const ids: string[] = [];
     do {
-      const r = await this.client.send(new ListFacesCommand({
-        CollectionId: this.collectionId,
-        NextToken: nextToken,
-        MaxResults: 1000,
-      }));
-      for (const f of (r.Faces ?? [])) {
+      const r = await this.client.send(
+        new ListFacesCommand({
+          CollectionId: this.collectionId,
+          NextToken: nextToken,
+          MaxResults: 1000,
+        }),
+      );
+      for (const f of r.Faces ?? []) {
         if (f.ExternalImageId === userId && f.FaceId) ids.push(f.FaceId);
       }
       nextToken = r.NextToken;
     } while (nextToken);
+
     if (ids.length === 0) return { deleted: 0 };
-    const d = await this.client.send(new DeleteFacesCommand({
-      CollectionId: this.collectionId,
-      FaceIds: ids,
-    }));
+
+    const d = await this.client.send(
+      new DeleteFacesCommand({
+        CollectionId: this.collectionId,
+        FaceIds: ids,
+      }),
+    );
     return { deleted: d?.DeletedFaces?.length ?? 0 };
   }
 
-  /** Liveness “nhẹ”: đọc pose/eyes để chống ảnh tĩnh (fallback khi chưa dùng Liveness SDK) */
-  
+  /** Đọc pose/eyes/quality (dùng cho liveness nhẹ) */
   async detectAttrs(imageBase64: string): Promise<FaceAttrs> {
-  await this.ensureCollection();
-  const b64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
-  const buf = Buffer.from(b64, 'base64');
+    await this.ensureCollection();
 
-  const r = await this.client.send(new DetectFacesCommand({
-    Image: { Bytes: buf },
-    Attributes: ['ALL'],
-  }));
+    const b64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
+    const buf = Buffer.from(b64, 'base64');
 
-  const f = (r.FaceDetails ?? [])[0];
-  if (!f) return { ok: false, reason: 'NO_FACE' };
+    try {
+      const r = await this.client.send(
+        new DetectFacesCommand({
+          Image: { Bytes: buf },
+          Attributes: ['ALL'],
+        }),
+      );
 
-  const q = f.Quality; // <-- Quality nằm ở đây
-  return {
-    ok: true,
-    pose: {
-      yaw: f.Pose?.Yaw ?? 0,
-      pitch: f.Pose?.Pitch ?? 0,
-      roll: f.Pose?.Roll ?? 0,
-    },
-    eyesOpen: {
-      left: f.EyesOpen?.Value ?? false,
-      conf: f.EyesOpen?.Confidence ?? 0,
-    },
-    quality: {
-      brightness: q?.Brightness,  // <-- Đúng chỗ
-      sharpness: q?.Sharpness,    // <-- Đúng chỗ
-    },
-  };
+      const f = r.FaceDetails?.[0];
+      if (!f) return { ok: false, reason: 'NO_FACE' };
+
+      const eyesOpen =
+        typeof f.EyesOpen?.Value === 'boolean'
+          ? { value: !!f.EyesOpen.Value, conf: f.EyesOpen.Confidence ?? 0 }
+          : undefined;
+
+      return {
+        ok: true,
+        pose: {
+          yaw: f.Pose?.Yaw ?? 0,
+          pitch: f.Pose?.Pitch ?? 0,
+          roll: f.Pose?.Roll ?? 0,
+        },
+        eyesOpen,
+        quality: {
+          brightness: f.Quality?.Brightness,
+          sharpness: f.Quality?.Sharpness,
+        },
+      };
+    } catch (e) {
+      this.logger.error('DetectFaces failed', e as any);
+      return { ok: false, reason: 'IMAGE_BAD' };
+    }
   }
 }

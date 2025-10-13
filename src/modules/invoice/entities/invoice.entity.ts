@@ -63,6 +63,8 @@ export class Invoice {
   @Column('numeric', { name: 'final_amount', precision: 12, scale: 2, default: 0 })
   finalAmount: string;
 
-  // @ManyToOne(() => User) // Thu ngân thực hiện
-  // cashier: User||null;
+  // Thu ngân thực hiện
+  @ManyToOne(() => User, { eager: true, nullable: true })  
+@JoinColumn({ name: 'cashier_id' })                       
+cashier: User | null;
 }

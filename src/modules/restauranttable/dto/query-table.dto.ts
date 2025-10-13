@@ -1,7 +1,7 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsInt, IsOptional, Min, Max, IsString, IsEnum } from 'class-validator';
-
+import { TableStatus } from 'src/common/enums';
 export class QueryTableDto {
   @ApiPropertyOptional({ type: Number, example: 1, description: 'Trang hiện tại' })
   @IsOptional()
@@ -27,9 +27,7 @@ export class QueryTableDto {
   @IsOptional()
   @IsString()
   search?: string;
-
-//   @ApiPropertyOptional({ enum: ['using', 'empty', 'all'], example: 'using' })
-//   @IsOptional()
-//   @IsEnum(['using', 'empty', 'all'])
-//   status?: 'using' | 'empty' | 'all';
+  @IsOptional()
+  @IsEnum(TableStatus, { message: "status must be ACTIVE or INACTIVE" })
+  status?: TableStatus; 
 }

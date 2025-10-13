@@ -17,18 +17,22 @@ import { UpdateOrderStatusDto } from './dto/update-order-status';
 import { AddItemsDto } from '../orderitems/dto/create-orderitem.dto'; // <-- DTO có batchId?
 import { SetQtyDto } from './dto/set-item-qty.dto';
 import { CancelOrderDto } from './dto/cancel-order.dto';
-
+import { CurrentUser } from 'src/common/decorators/user.decorator';
+import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
+import { UseGuards } from '@nestjs/common';
 @ApiTags('orders')
 @ApiBearerAuth()
-// @UseGuards(AuthGuard)
+@UseGuards(JwtAuthGuard)
 @Controller('orders')
 export class OrdersController {
   constructor(private readonly ordersService: OrdersService) {}
 
   @Post()
   @ApiOperation({ summary: 'Tạo đơn (PENDING) + tạo items PENDING + trừ kho' })
-  create(@Body() dto: CreateOrderDto) {
-    return this.ordersService.create(dto);
+  create(@Body() dto: CreateOrderDto,
+    @CurrentUser() user:any 
+  ) {
+    return this.ordersService.create(dto, user.id);
   }
 
   @Get()

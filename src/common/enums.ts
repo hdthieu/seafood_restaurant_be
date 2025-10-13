@@ -154,3 +154,12 @@ export const POSE_THRESH = {
 
 export const EYES_CONF_MIN = 70; // % tin cậy tối thiểu khi đọc EyesOpen
 
+export type FaceAttrs =
+  | {
+      ok: true;
+      pose: { yaw: number; pitch: number; roll?: number };
+      // đơn giản hoá mắt:
+      eyesOpen?: boolean;   // true/false theo Rekognition.EyesOpen.Value
+      eyesConf?: number;    // Rekognition.EyesOpen.Confidence
+    }
+  | { ok: false; reason: 'NO_FACE' | 'IMAGE_BAD' };

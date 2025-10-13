@@ -1,7 +1,7 @@
 // src/modules/promotions/dto/create-promotion.dto.ts
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsBoolean, IsDateString, IsEnum, IsNotEmpty, IsNumber, IsOptional, IsPositive, IsString, Max, Min, ValidateNested, ArrayUnique, IsUUID, IsArray, Matches } from 'class-validator';
+import { IsBoolean, IsDateString, IsEnum, IsNotEmpty, IsNumber, IsOptional, IsPositive, IsString, Max, Min, ValidateNested, ArrayUnique, IsUUID, IsArray, Matches, MaxLength } from 'class-validator';
 import { ApplyWith, DiscountTypePromotion } from 'src/common/enums';
 import { AudienceRulesDto } from './audience-rules.dto';
 
@@ -69,4 +69,10 @@ export class CreatePromotionDto {
     @ArrayUnique()
     @IsUUID('4', { each: true })
     itemIds?: string[];
+
+    @ApiPropertyOptional({ description: 'Mô tả khuyến mãi', maxLength: 256 })
+    @IsOptional()
+    @IsString()
+    @MaxLength(256)
+    description?: string;
 }

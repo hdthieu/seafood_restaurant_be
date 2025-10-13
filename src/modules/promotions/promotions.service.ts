@@ -1,27 +1,21 @@
-import { Injectable } from '@nestjs/common';
+import { HttpStatus, Injectable } from '@nestjs/common';
 import { CreatePromotionDto } from './dto/create-promotion.dto';
 import { UpdatePromotionDto } from './dto/update-promotion.dto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Promotion } from './entities/promotion.entity';
-import { DataSource, DeepPartial, In, Repository } from 'typeorm';
-import { ResponseCommon } from 'src/common/common_dto/respone.dto';
+import { Brackets, DataSource, DeepPartial, In, Repository } from 'typeorm';
+import { ResponseCommon, ResponseException } from 'src/common/common_dto/respone.dto';
 import { ApplyWith, AudienceScope, DiscountTypePromotion } from 'src/common/enums';
 import { Category } from '@modules/category/entities/category.entity';
 import { MenuItem } from '@modules/menuitems/entities/menuitem.entity';
-
+import { ListPromotionsDto, PromotionStatusFilter } from './dto/list-promotions.dto';
 @Injectable()
 export class PromotionsService {
   constructor(
-    @InjectRepository(Promotion)
-    private readonly promoRepo: Repository<Promotion>,
-
-    @InjectRepository(Category)
-    private readonly catRepo: Repository<Category>,
-
-    @InjectRepository(MenuItem)
-    private readonly itemRepo: Repository<MenuItem>,
-
-    private readonly ds: DataSource
+    @InjectRepository(Promotion) private readonly promoRepo: Repository<Promotion>,
+    @InjectRepository(Category) private readonly catRepo: Repository<Category>,
+    @InjectRepository(MenuItem) private readonly itemRepo: Repository<MenuItem>,
+    private readonly ds: DataSource,
   ) { }
 
   private async resolveRelations(dto: CreatePromotionDto | UpdatePromotionDto) {
@@ -30,21 +24,29 @@ export class PromotionsService {
 
     if (dto.applyWith === ApplyWith.CATEGORY) {
       if (!dto.categoryIds?.length) {
-        throw new ResponseCommon(400, false, 'CATEGORY scope requires categoryIds');
+        throw new ResponseException(
+          null,
+          HttpStatus.BAD_REQUEST,
+          'CATEGORY_IDS_REQUIRED_WHEN_APPLY_WITH_CATEGORY',
+        );
       }
       categories = await this.catRepo.find({ where: { id: In(dto.categoryIds) } });
       if (categories.length !== dto.categoryIds.length) {
-        throw new ResponseCommon(400, false, 'Some categoryIds not found');
+        throw new ResponseException(null, HttpStatus.BAD_REQUEST, 'SOME_CATEGORY_IDS_NOT_FOUND');
       }
     }
 
     if (dto.applyWith === ApplyWith.ITEM) {
       if (!dto.itemIds?.length) {
-        throw new ResponseCommon(400, false, 'ITEM scope requires itemIds');
+        throw new ResponseException(
+          null,
+          HttpStatus.BAD_REQUEST,
+          'ITEM_IDS_REQUIRED_WHEN_APPLY_WITH_ITEM',
+        );
       }
       items = await this.itemRepo.find({ where: { id: In(dto.itemIds) } });
       if (items.length !== dto.itemIds.length) {
-        throw new ResponseCommon(400, false, 'Some itemIds not found');
+        throw new ResponseException(null, HttpStatus.BAD_REQUEST, 'SOME_ITEM_IDS_NOT_FOUND');
       }
     }
 
@@ -53,36 +55,46 @@ export class PromotionsService {
 
   private businessValidate(dto: CreatePromotionDto | UpdatePromotionDto) {
     if (dto.endAt && new Date(dto.endAt) < new Date(dto.startAt)) {
-      throw new ResponseCommon(400, false, 'END_AT_MUST_BE_GREATER_THAN_START_AT');
+      throw new ResponseException(null, HttpStatus.BAD_REQUEST, 'END_AT_MUST_BE_GREATER_THAN_START_AT');
     }
+
     if (dto.discountTypePromotion === DiscountTypePromotion.PERCENT) {
       if (dto.discountValue < 0 || dto.discountValue > 100) {
-        throw new ResponseCommon(400, false, 'DISCOUNT_VALUE_MUST_BE_BETWEEN_0_AND_100');
+        throw new ResponseException(null, HttpStatus.BAD_REQUEST, 'DISCOUNT_VALUE_MUST_BE_BETWEEN_0_AND_100');
       }
       if (dto.maxDiscountAmount != null && dto.maxDiscountAmount < 0) {
-        throw new ResponseCommon(400, false, 'MAX_DISCOUNT_AMOUNT_NEGATIVE');
+        throw new ResponseException(null, HttpStatus.BAD_REQUEST, 'MAX_DISCOUNT_AMOUNT_NEGATIVE');
       }
     } else {
       if (dto.discountValue < 0) {
-        throw new ResponseCommon(400, false, 'DISCOUNT_VALUE_MUST_BE_POSITIVE');
+        throw new ResponseException(null, HttpStatus.BAD_REQUEST, 'DISCOUNT_VALUE_MUST_BE_POSITIVE');
       }
     }
 
-    // KHÔNG còn codeRequired
     if (!dto.promotionCode) {
-      throw new ResponseCommon(400, false, 'PROMOTION_CODE_REQUIRED');
+      throw new ResponseException(null, HttpStatus.BAD_REQUEST, 'PROMOTION_CODE_REQUIRED');
     }
     if (!/^KM-.+$/i.test(dto.promotionCode)) {
-      throw new ResponseCommon(400, false, 'PROMOTION_CODE_MUST_START_WITH_KM');
+      throw new ResponseException(null, HttpStatus.BAD_REQUEST, 'PROMOTION_CODE_MUST_START_WITH_KM');
     }
   }
 
   private applyWithValidate(dto: { applyWith: ApplyWith; categoryIds?: string[]; itemIds?: string[] }) {
-    if (dto.applyWith === ApplyWith.CATEGORY && !(dto.categoryIds?.length)) {
-      throw new ResponseCommon(400, false, 'CATEGORY_IDS_REQUIRED_WHEN_APPLY_WITH_CATEGORY');
+    const hasCats = !!dto.categoryIds?.length;
+    const hasItems = !!dto.itemIds?.length;
+
+    if (hasCats && hasItems) {
+      throw new ResponseException(null, HttpStatus.BAD_REQUEST, 'ONLY_ONE_OF_CATEGORY_IDS_OR_ITEM_IDS_ALLOWED');
     }
-    if (dto.applyWith === ApplyWith.ITEM && !(dto.itemIds?.length)) {
-      throw new ResponseCommon(400, false, 'ITEM_IDS_REQUIRED_WHEN_APPLY_WITH_ITEM');
+
+    if (dto.applyWith === ApplyWith.CATEGORY) {
+      if (!hasCats) throw new ResponseException(null, HttpStatus.BAD_REQUEST, 'CATEGORY_IDS_REQUIRED_WHEN_APPLY_WITH_CATEGORY');
+    } else if (dto.applyWith === ApplyWith.ITEM) {
+      if (!hasItems) throw new ResponseException(null, HttpStatus.BAD_REQUEST, 'ITEM_IDS_REQUIRED_WHEN_APPLY_WITH_ITEM');
+    } else {
+      if (hasCats || hasItems) {
+        throw new ResponseException(null, HttpStatus.BAD_REQUEST, 'IDS_NOT_ALLOWED_WHEN_APPLY_WITH_ORDER');
+      }
     }
   }
 
@@ -90,151 +102,195 @@ export class PromotionsService {
     this.businessValidate(dto);
     this.applyWithValidate(dto);
 
-    // chuẩn hoá mã (ví dụ upper case)
     const normalizedCode = dto.promotionCode.trim().toUpperCase();
-
-    // check trùng
+    // tuỳ nghiệp vụ: có thể không filter isDeleted để tránh reuse code
     const existed = await this.promoRepo.findOne({ where: { promotionCode: normalizedCode } });
-    if (existed) {
-      return new ResponseCommon(400, false, 'PROMOTION_CODE_ALREADY_EXISTS');
-    }
+    if (existed) throw new ResponseException(null, HttpStatus.BAD_REQUEST, 'PROMOTION_CODE_ALREADY_EXISTS');
 
-    try {
-      const result = await this.ds.transaction(async (tm) => {
-        const { categories, items } = await this.resolveRelations(dto);
+    const result = await this.ds.transaction(async (tm) => {
+      const { categories, items } = await this.resolveRelations(dto);
 
-        const entity = this.promoRepo.create({
-          name: dto.name,
-          discountTypePromotion: dto.discountTypePromotion,
-          discountValue: dto.discountValue,
-          maxDiscountAmount: dto.maxDiscountAmount ?? null,
-          minOrderAmount: dto.minOrderAmount,
-          startAt: new Date(dto.startAt),
-          endAt: dto.endAt ? new Date(dto.endAt) : null,
-          applyWith: dto.applyWith,
-          audienceRules: dto.audienceRules ?? null,
-          promotionCode: normalizedCode,
-          isActive: false,
-          ...(categories ? { categories } : {}),
-          ...(items ? { items } : {}),
-        });
-
-        const saved = await tm.getRepository(Promotion).save(entity);
-        return saved;
+      const entity = this.promoRepo.create({
+        name: dto.name.trim(),
+        discountTypePromotion: dto.discountTypePromotion,
+        discountValue: dto.discountValue,
+        maxDiscountAmount: dto.maxDiscountAmount ?? null,
+        minOrderAmount: dto.minOrderAmount,
+        startAt: new Date(dto.startAt),
+        endAt: dto.endAt ? new Date(dto.endAt) : null,
+        applyWith: dto.applyWith,
+        audienceRules: dto.audienceRules ?? null,
+        promotionCode: normalizedCode,
+        description: dto.description?.trim() || null,
+        isActive: false,
+        isDeleted: false,
+        ...(categories ? { categories } : {}),
+        ...(items ? { items } : {}),
       });
 
-      return new ResponseCommon(201, true, 'CREATE_PROMOTION_SUCCESS', result);
-    } catch (e) {
-      throw e;
-    }
+      const saved = await tm.getRepository(Promotion).save(entity);
+      return saved;
+    });
+
+    return { message: 'CREATE_PROMOTION_SUCCESS', data: result };
   }
 
-  async findAllPromotions(qry: { page?: number; limit?: number }) {
-    const { page = 1, limit = 10 } = qry;
+  async findAllPromotions(q: ListPromotionsDto) {
+    const {
+      page = 1,
+      limit = 10,
+      includeDeleted = false,
+      search, q: q2,
+      isActive,                    // boolean | undefined
+      sortBy = 'createdAt',
+      sortDir = 'DESC',
+    } = q;
 
-    const [promos, total] = await this.promoRepo.findAndCount({
-      order: { createdAt: 'DESC' },
+    const keyword = (search ?? q2)?.trim();
+
+    const qb = this.promoRepo.createQueryBuilder('p')
+      .leftJoinAndSelect('p.categories', 'c')
+      .leftJoinAndSelect('p.items', 'i');
+
+    if (!includeDeleted) qb.andWhere('p.isDeleted = false');
+
+    if (keyword) {
+      const kw = `%${keyword.toLowerCase()}%`;
+      qb.andWhere('(LOWER(p.name) LIKE :kw OR LOWER(p.promotionCode) LIKE :kw)', { kw });
+    }
+
+    if (typeof isActive === 'boolean') {
+      qb.andWhere('p.isActive = :ia', { ia: isActive });
+    }
+
+    qb.orderBy(`p.${sortBy}`, sortDir as 'ASC' | 'DESC')
+      .skip((page - 1) * limit)
+      .take(Math.min(limit, 100));
+
+    const [items, total] = await qb.getManyAndCount();
+    return { message: 'GET_PROMOTIONS_SUCCESS', data: { items, total, page: +page, limit: +limit } };
+  }
+
+
+  async findPromotionById(id: string, includeDeleted = false) {
+    const promotion = await this.promoRepo.findOne({
+      where: includeDeleted ? { id } : { id, isDeleted: false },
       relations: ['categories', 'items'],
-      skip: (page - 1) * limit,
-      take: Math.min(Number(limit) || 20, 100),
     });
+    if (!promotion) throw new ResponseException(null, HttpStatus.NOT_FOUND, 'PROMOTION_NOT_FOUND');
 
-    return new ResponseCommon(200, true, 'GET_PROMOTIONS_SUCCESS', {
-      items: promos,
-      total,
-      page: Number(page),
-      limit: Number(limit),
-    });
+    return { message: 'GET_PROMOTION_SUCCESS', data: promotion };
   }
-  async findPromotionById(id: string) {
-    try {
-      const promotion = await this.promoRepo.findOne({
-        where: { id },
-        relations: ['categories', 'items'],
-      });
 
-      if (!promotion) {
-        return new ResponseCommon(404, false, 'PROMOTION_NOT_FOUND');
-      }
-
-      return new ResponseCommon(200, true, 'GET_PROMOTION_SUCCESS', promotion);
-    } catch (error) {
-      throw new ResponseCommon(500, false, 'INTERNAL_SERVER_ERROR', null, error.message);
-    }
-  }
 
   async updatePromotion(id: string, dto: UpdatePromotionDto) {
-    // Kiểm tra xem khuyến mãi có tồn tại không
-    const promotion = await this.promoRepo.findOne({ where: { id } });
-    if (!promotion) {
-      return new ResponseCommon(404, false, 'PROMOTION_NOT_FOUND');
-    }
+    const promotion = await this.promoRepo.findOne({ where: { id }, relations: ['categories', 'items'] });
+    if (!promotion) throw new ResponseException(null, HttpStatus.NOT_FOUND, 'PROMOTION_NOT_FOUND');
 
-    // Kiểm tra tính hợp lệ của dữ liệu
     this.businessValidate(dto);
     this.applyWithValidate(dto);
 
-    // Chuẩn hóa mã khuyến mãi
     const normalizedCode = dto.promotionCode.trim().toUpperCase();
-
-    // Kiểm tra trùng mã khuyến mãi (nếu mã mới khác mã cũ)
     if (normalizedCode !== promotion.promotionCode) {
       const existed = await this.promoRepo.findOne({ where: { promotionCode: normalizedCode } });
-      if (existed) {
-        return new ResponseCommon(400, false, 'PROMOTION_CODE_ALREADY_EXISTS');
-      }
+      if (existed) throw new ResponseException(null, HttpStatus.BAD_REQUEST, 'PROMOTION_CODE_ALREADY_EXISTS');
     }
 
-    try {
-      const result = await this.ds.transaction(async (tm) => {
-        const { categories, items } = await this.resolveRelations(dto);
+    const result = await this.ds.transaction(async (tm) => {
+      const { categories, items } = await this.resolveRelations(dto);
 
-        // Cập nhật thông tin khuyến mãi
-        const updated = this.promoRepo.merge(promotion, {
-          name: dto.name,
-          discountTypePromotion: dto.discountTypePromotion,
-          discountValue: dto.discountValue,
-          maxDiscountAmount: dto.maxDiscountAmount ?? null,
-          minOrderAmount: dto.minOrderAmount,
-          startAt: new Date(dto.startAt),
-          endAt: dto.endAt ? new Date(dto.endAt) : null,
-          applyWith: dto.applyWith,
-          audienceRules: dto.audienceRules ?? null,
-          promotionCode: normalizedCode,
-          ...(categories ? { categories } : {}),
-          ...(items ? { items } : {}),
-        });
-
-        const saved = await tm.getRepository(Promotion).save(updated);
-        return saved;
+      // 1) update các field cơ bản
+      const merged = this.promoRepo.merge(promotion, {
+        name: dto.name.trim(),
+        discountTypePromotion: dto.discountTypePromotion,
+        discountValue: dto.discountValue,
+        maxDiscountAmount: dto.maxDiscountAmount ?? null,
+        minOrderAmount: dto.minOrderAmount ?? null,
+        startAt: new Date(dto.startAt),
+        endAt: dto.endAt ? new Date(dto.endAt) : null,
+        applyWith: dto.applyWith,
+        audienceRules: dto.audienceRules ?? null,
+        promotionCode: normalizedCode,
+        description: dto.description?.trim() || null,
       });
+      await tm.getRepository(Promotion).save(merged);
 
-      return new ResponseCommon(200, true, 'UPDATE_PROMOTION_SUCCESS', result);
-    } catch (e) {
-      throw e;
-    }
+      // 2) set lại quan hệ ManyToMany bằng save({ id, ... })
+      if (dto.applyWith === ApplyWith.CATEGORY) {
+        await tm.getRepository(Promotion).save({
+          id,
+          categories: categories ?? [],
+          items: [],                // clear items
+        });
+      } else if (dto.applyWith === ApplyWith.ITEM) {
+        await tm.getRepository(Promotion).save({
+          id,
+          categories: [],
+          items: items ?? [],
+        });
+      } else {
+        await tm.getRepository(Promotion).save({
+          id,
+          categories: [],
+          items: [],
+        });
+      }
+      // 3) trả lại entity đã load đầy đủ relations
+      const saved = await tm.getRepository(Promotion).findOne({
+        where: { id },
+        relations: ['categories', 'items'],
+      });
+      return saved!;
+    });
+
+
+    return { message: 'UPDATE_PROMOTION_SUCCESS', data: result };
   }
 
   async activatePromotion(id: string, isActive: boolean) {
-    // Kiểm tra xem khuyến mãi có tồn tại không
-    const promotion = await this.promoRepo.findOne({ where: { id } });
-    if (!promotion) {
-      return new ResponseCommon(404, false, 'PROMOTION_NOT_FOUND');
+    const promotion = await this.promoRepo.findOne({ where: { id, isDeleted: false } });
+    if (!promotion) throw new ResponseException(null, HttpStatus.NOT_FOUND, 'PROMOTION_NOT_FOUND');
+
+    if (isActive) {
+      const now = new Date();
+      if (promotion.startAt && now < promotion.startAt) {
+        throw new ResponseException(null, HttpStatus.BAD_REQUEST, 'PROMOTION_NOT_STARTED_YET');
+      }
+      if (promotion.endAt && now > promotion.endAt) {
+        throw new ResponseException(null, HttpStatus.BAD_REQUEST, 'PROMOTION_ALREADY_EXPIRED');
+      }
     }
 
-    // Cập nhật trạng thái kích hoạt
     promotion.isActive = isActive;
+    const updated = await this.promoRepo.save(promotion);
 
-    try {
-      const updated = await this.promoRepo.save(promotion);
-      return new ResponseCommon(
-        200,
-        true,
-        isActive ? 'PROMOTION_ACTIVATED_SUCCESS' : 'PROMOTION_DEACTIVATED_SUCCESS',
-        updated,
-      );
-    } catch (e) {
-      throw new ResponseCommon(500, false, 'INTERNAL_SERVER_ERROR', null, e.message);
+    return {
+      message: isActive ? 'PROMOTION_ACTIVATED_SUCCESS' : 'PROMOTION_DEACTIVATED_SUCCESS',
+      data: updated,
+    };
+  }
+
+  async softDeletePromotion(id: string) {
+    const promotion = await this.promoRepo.findOne({ where: { id, isDeleted: false } });
+    if (!promotion) throw new ResponseException(null, HttpStatus.NOT_FOUND, 'PROMOTION_NOT_FOUND');
+
+    if (promotion.isActive) {
+      throw new ResponseException(null, HttpStatus.BAD_REQUEST, 'PROMOTION_MUST_BE_DEACTIVATED_BEFORE_DELETE');
     }
+
+    promotion.isDeleted = true;
+    await this.promoRepo.save(promotion);
+
+    return { message: 'DELETE_PROMOTION_SUCCESS', data: null };
+  }
+
+  async restorePromotion(id: string) {
+    const promotion = await this.promoRepo.findOne({ where: { id, isDeleted: true } });
+    if (!promotion) throw new ResponseException(null, HttpStatus.NOT_FOUND, 'PROMOTION_NOT_FOUND_OR_NOT_DELETED');
+
+    promotion.isDeleted = false;
+    await this.promoRepo.save(promotion);
+
+    return { message: 'RESTORE_PROMOTION_SUCCESS', data: promotion };
   }
 }
