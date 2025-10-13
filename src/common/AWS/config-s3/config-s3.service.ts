@@ -10,7 +10,7 @@ export class ConfigS3Service {
     private readonly region: string;
 
     constructor() {
-        this.region = process.env.AWS_REGION!;
+        this.region = process.env.S3_REGION!;
         this.bucket = process.env.AWS_BUCKET_NAME!;
 
         this.s3 = new S3Client({

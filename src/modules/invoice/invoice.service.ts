@@ -23,7 +23,11 @@ export class InvoicesService {
   /** Tạo invoice từ order (idempotent) */
 
 
-async createFromOrder(orderId: string, body: { customerId?: string | null; guestCount?: number } = {}, userId?: string) {
+async createFromOrder(
+  orderId: string,
+  body: { customerId?: string | null; guestCount?: number } = {},
+  userId?: string,
+) {
   return this.ds.transaction(async (em) => {
     const oRepo = em.getRepository(Order);
     const invRepo = em.getRepository(Invoice);
@@ -34,19 +38,29 @@ async createFromOrder(orderId: string, body: { customerId?: string | null; guest
     });
     if (!order) throw new NotFoundException('ORDER_NOT_FOUND');
 
+    // ĐÃ CÓ INVOICE: cập nhật customer và cashier nếu đang thiếu
     const existed = await invRepo.findOne({ where: { order: { id: orderId } } });
     if (existed) {
-      // cho phép cập nhật customer nếu gọi lại
+      let touched = false;
+
       if (typeof body.customerId !== 'undefined') {
         existed.customer = body.customerId ? ({ id: body.customerId } as any) : null;
-        await invRepo.save(existed);
+        touched = true;
       }
+
+      // nếu trước đây cashier chưa được set thì set luôn bây giờ
+      if (!existed.cashier && userId) {
+        existed.cashier = { id: userId } as any;
+        touched = true;
+      }
+
+      if (touched) await invRepo.save(existed);
       return existed;
     }
 
+    // TẠO INVOICE MỚI: gán cashier ngay khi tạo
     const total = order.items.reduce((s, it) => s + Number(it.price) * it.quantity, 0);
 
-    // Dùng DeepPartial, chỉ cast chỗ quan hệ
     const payload: DeepPartial<Invoice> = {
       invoiceNumber: await this.genNumber(),
       order: { id: orderId } as any,
@@ -54,10 +68,10 @@ async createFromOrder(orderId: string, body: { customerId?: string | null; guest
       customer: body.customerId ? ({ id: body.customerId } as any) : null,
       totalAmount: total.toFixed(2),
       status: InvoiceStatus.UNPAID,
-      cashier: { id: userId } as any,
-
+      cashier: userId ? ({ id: userId } as any) : null, // <- đảm bảo set nếu có id
     };
-    const inv = invRepo.create(payload); 
+
+    const inv = invRepo.create(payload);
     return invRepo.save(inv);
   });
 }

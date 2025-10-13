@@ -64,7 +64,7 @@ export class Invoice {
   finalAmount: string;
 
   // Thu ngân thực hiện
-  @ManyToOne(() => User, { eager: true, nullable: true })   // tạm cho phép null để sync qua
-@JoinColumn({ name: 'cashier_id' })                        // đặt tên cột đúng ý
+  @ManyToOne(() => User, { eager: true, nullable: true })  
+@JoinColumn({ name: 'cashier_id' })                       
 cashier: User | null;
 }

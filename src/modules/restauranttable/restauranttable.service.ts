@@ -146,65 +146,77 @@ async getTableTransactions(
 ): Promise<TableTransactionsResp> {
   const { page = 1, limit = 10, status } = q;
 
+  // base for count
   const baseQb = this.ds.getRepository(Invoice)
     .createQueryBuilder('inv')
     .leftJoin('inv.order', 'ord')
     .leftJoin('ord.table', 'tbl')
     .leftJoin('inv.cashier', 'cashier')
-    .leftJoin('ord.createdBy', 'orderedBy')
+    .leftJoin('ord.createdBy', 'ob')
     .where('tbl.id = :tableId', { tableId });
 
   if (status) baseQb.andWhere('inv.status = :status', { status });
 
-  const qb = this.ds.getRepository(Invoice)
-  .createQueryBuilder('inv')
-  .leftJoin('inv.order', 'ord')
-  .leftJoin('ord.table', 'tbl')
-  .leftJoin('inv.cashier', 'cashier')
-  .leftJoin('ord.createdBy', 'orderedBy')
-  .leftJoin('orderedBy.profile', 'orderedByProfile') 
-
-qb
-  .select([
-    'inv.id AS "invoiceId"',
-    'inv.invoice_number AS "invoiceNumber"',
-    'inv.created_at AS "createdAt"',
-    'inv.total_amount AS "totalAmount"',
-    'inv.status AS "status"',
-  ])
-  .addSelect('cashier.id', 'cashierId')
-  .addSelect('cashier.username', 'cashierName')         
-  .addSelect('orderedBy.id', 'orderedById')
-  .addSelect('orderedByProfile.fullName', 'orderedByName') 
-  .where('tbl.id = :tableId', { tableId })
-  .orderBy('inv.created_at', 'DESC')
-  .offset((page - 1) * limit)
-  .limit(limit);
-
+  // data query
+  const qb = baseQb.clone()
+    .leftJoin('cashier.profile', 'cashierProf')
+    .leftJoin('ob.profile', 'obProf')
+    .select([
+      'inv.id AS "invoiceId"',
+      'inv.invoice_number AS "invoiceNumber"',
+      'inv.created_at AS "createdAt"',
+      'inv.total_amount AS "totalAmount"',
+      'inv.status AS "status"',
+    ])
+    .addSelect('cashier.id', 'cashierId')
+    .addSelect(
+      `COALESCE(cashierProf.full_name, cashier.username, cashier.email)`,
+      'cashierName',
+    )
+    .addSelect('ob.id', 'orderedById')
+    .addSelect(
+      `COALESCE(obProf.full_name, ob.username, ob.email)`,
+      'orderedByName',
+    )
+    .orderBy('inv.created_at', 'DESC')
+    .offset((page - 1) * limit)
+    .limit(limit);
 
   const [rows, totalRow] = await Promise.all([
     qb.getRawMany<{
-      invoiceId: string; invoiceNumber: string; createdAt: Date; totalAmount: string; status: string;
-      cashierId: string | null; cashierName: string | null;
-      orderedById: string | null; orderedByName: string | null;
+      invoiceId: string;
+      invoiceNumber: string;
+      createdAt: Date | string;
+      totalAmount: string;
+      status: string;
+      cashierId: string | null;
+      cashierName: string | null;
+      orderedById: string | null;
+      orderedByName: string | null;
     }>(),
-    baseQb.clone().select('COUNT(*)', 'cnt').getRawOne(),
+    baseQb.clone().select('COUNT(*)', 'cnt').getRawOne<{ cnt: string }>(),
   ]);
 
   const total = Number(totalRow?.cnt ?? 0);
 
-  return {
-    items: rows.map(r => ({
-      invoiceId: r.invoiceId,
-      invoiceNumber: r.invoiceNumber,
-      createdAt: r.createdAt.toISOString(),
-      totalAmount: r.totalAmount,
-      status: r.status,
-      cashier:   { id: r.cashierId,   name: r.cashierName ?? null },
-      orderedBy: { id: r.orderedById, name: r.orderedByName ?? null },
-    })),
-    meta: { total, page, limit, pages: Math.max(1, Math.ceil(total / limit)) },
-  };
+return {
+  items: rows.map((r) => ({
+    invoiceId: r.invoiceId,
+    invoiceNumber: r.invoiceNumber,
+    createdAt: new Date(r.createdAt as any).toISOString(),
+    totalAmount: r.totalAmount,
+    status: r.status,
+    cashier: {
+      id: r.cashierId ?? null,
+      name: r.cashierName ?? null,
+    },
+    orderedBy: {
+      id: r.orderedById ?? null,
+      name: r.orderedByName ?? null,
+    },
+  })),
+  meta: { total, page, limit, pages: Math.max(1, Math.ceil(total / limit)) },
+};
 }
 
 

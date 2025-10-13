@@ -15,6 +15,8 @@ import type { Express } from 'express';
 import { MenuitemsService } from './menuitems.service';
 import { CreateMenuItemDto } from './dto/create-menuitem.dto';
 import { GetMenuItemsDto } from './dto/list-menuitem.dto';
+import { UpdateMenuItemDto } from './dto/update-menuitem.dto';
+import { ParseBoolPipe, Patch } from '@nestjs/common';
 
 @Controller('menuitems')
 @ApiBearerAuth()
@@ -86,4 +88,29 @@ export class MenuitemsController {
   async getDetail(@Param('id', new ParseUUIDPipe()) id: string) {
     return this.menuitemsService.getDetail(id);
   }
+
+
+
+@Patch(':id')
+@ApiOperation({ summary: 'Cập nhật món (ảnh tùy chọn)' })
+@ApiConsumes('multipart/form-data')
+@UseInterceptors(FileInterceptor('image', {
+  storage: memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (_req, file, cb: FileFilterCallback) => {
+    const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    if (file && !allowed.includes(file.mimetype))
+      return cb(new BadRequestException('IMAGE_TYPE_NOT_ALLOWED') as any, false);
+    cb(null, true);
+  },
+}))
+async update(
+  @Param('id', new ParseUUIDPipe()) id: string,
+  @UploadedFile() file: Express.Multer.File | undefined,
+  @Body() body: UpdateMenuItemDto,
+) {
+  return this.menuitemsService.updateMenuItem(id, body, file);
+}
+
+
 }
