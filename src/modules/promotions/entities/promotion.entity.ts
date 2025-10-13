@@ -95,4 +95,7 @@ export class Promotion {
     inverseJoinColumn: { name: 'item_id', referencedColumnName: 'id' },
   })
   items?: MenuItem[]
+
+  @Column({ default: false })
+  isDeleted: boolean;
 }
