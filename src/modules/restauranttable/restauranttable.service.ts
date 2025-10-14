@@ -8,7 +8,7 @@ import { ResponseException } from 'src/common/common_dto/respone.dto';
 import { TableStatus } from 'src/common/enums';
 import { UpdateTableDto } from './dto/update-table.dto';
 import { QueryTableDto } from './dto/query-table.dto';
-import { Paginated } from 'src/common/common_dto/paginated';
+import { PageMeta } from 'src/common/common_dto/paginated';
 import { ResponseCommon } from 'src/common/common_dto/respone.dto';
 import { DataSource } from 'typeorm';
 import { Invoice } from '../invoice/entities/invoice.entity';
@@ -60,56 +60,57 @@ export class RestaurantTablesService {
     }
 
     // lấy danh sách bàn
-      async findAll({ page = 1, limit = 12, area, search,status }: QueryTableDto) {
-    try {
-      const qb = this.tableRepo
-        .createQueryBuilder("t")
-        .leftJoin("t.area", "a")
-        .addSelect(["a.id", "a.name"])
-        .orderBy("t.name", "ASC")
-        .skip((page - 1) * limit)
-        .take(limit);
+      async findAll({ page = 1, limit = 12, area, search, status }: QueryTableDto) {
+  try {
+    // ép kiểu & clamp đề phòng query string
+    page  = Math.max(1, Math.floor(Number(page)));
+    limit = Math.max(1, Math.floor(Number(limit)));
 
-      const isPostgres =
-        (this.tableRepo.manager.connection.options as any).type === "postgres";
+    const qb = this.tableRepo
+      .createQueryBuilder('t')
+      .leftJoin('t.area', 'a')
+      .addSelect(['a.id', 'a.name'])
+      .orderBy('t.name', 'ASC')
+      .skip((page - 1) * limit)
+      .take(limit);
 
-      if (area && area.trim() !== "") {
-        qb.andWhere(isPostgres ? "a.name ILIKE :area" : "a.name LIKE :area", {
-          area: `%${area}%`,
-        });
-      }
+    const isPostgres =
+      (this.tableRepo.manager.connection.options as any).type === 'postgres';
 
-      if (search && search.trim() !== "") {
-        qb.andWhere(isPostgres ? "t.name ILIKE :search" : "t.name LIKE :search", {
-          search: `%${search}%`,
-        });
-      }
-if (status) {
-    qb.andWhere("t.status = :status", { status }); // ACTIVE / INACTIVE
-  }
-      const [rows, total] = await qb.getManyAndCount();
-
-      const data: Paginated<RestaurantTable> = {
-        items: rows,
-        meta: {
-          total,
-          page,
-          limit,
-          pages: Math.ceil(total / limit) || 0,
-        },
-      };
-
-      return new ResponseCommon<Paginated<RestaurantTable>>(
-        200,
-        true,
-        "Lấy danh sách bàn thành công",
-        data,
-      );
-    } catch (error) {
-      throw new ResponseException(error, 500, "Không thể lấy danh sách bàn");
+    if (area?.trim()) {
+      qb.andWhere(isPostgres ? 'a.name ILIKE :area' : 'a.name LIKE :area', { area: `%${area}%` });
     }
-  }
 
+    if (search?.trim()) {
+      qb.andWhere(isPostgres ? 't.name ILIKE :search' : 't.name LIKE :search', { search: `%${search}%` });
+    }
+
+    // đừng dùng if (status) vì 'INACTIVE' cũng truthy/falsey mơ hồ
+    if (typeof status !== 'undefined' && status !== null) {
+      qb.andWhere('t.status = :status', { status }); // ACTIVE / INACTIVE
+    }
+
+    const [rows, total] = await qb.getManyAndCount();
+
+    const meta: PageMeta = {
+      total,
+      page,
+      limit,
+      pages: Math.ceil(total / limit) || 0,
+    };
+
+    // ✅ data là mảng, meta nằm riêng trong envelope
+    return new ResponseCommon<RestaurantTable[], PageMeta>(
+      200,
+      true,
+      'Lấy danh sách bàn thành công',
+      rows,
+      meta,
+    );
+  } catch (error) {
+    throw new ResponseException(error, 500, 'Không thể lấy danh sách bàn');
+  }
+}
 
 
     // function for get table by id

@@ -1,12 +1,13 @@
 import { HttpException, HttpStatus } from "@nestjs/common";
 
 // src/common/common_dto/respone.dto.ts
-export class ResponseCommon<T> {
+export class ResponseCommon<T, M = any> {
   constructor(
     public code: number,
     public success: boolean,
     public message: string,
     public data: T | null = null,
+     public meta?: M,  
     public errorMessage?: any,
   ) { }
 }
