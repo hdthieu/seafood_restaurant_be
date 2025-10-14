@@ -4,10 +4,11 @@ import { UpdateSupplierDto } from './dto/update-supplier.dto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Supplier } from './entities/supplier.entity';
 import { Repository } from 'typeorm';
-import { ResponseCommon } from 'src/common/common_dto/respone.dto';
+import { ResponseCommon, ResponseException } from 'src/common/common_dto/respone.dto';
 import { SupplierStatus } from 'src/common/enums';
 import { QuerySupplierDto } from './dto/query-supplier.dto';
 import { SupplierGroup } from '@modules/suppliergroup/entities/suppliergroup.entity';
+import { PageMeta } from 'src/common/common_dto/paginated';
 
 @Injectable()
 export class SupplierService {
@@ -76,41 +77,66 @@ export class SupplierService {
    * Hỗ trợ: q (code/name/phone/email/taxCode/address), status, groupId, city, page/limit
    */
   async findAll(qry: QuerySupplierDto) {
-    const {
-      q,
-      status,
-      supplierGroupId,
-      city,
-      page = 1,
-      limit = 20,
-      withGroup, // optional: load relation
-    } = qry;
+    try {
+      let {
+        q,
+        status,
+        supplierGroupId,
+        city,
+        page = 1,
+        limit = 20,
+        withGroup, // optional: load relation
+      } = qry;
 
-    // Dùng QueryBuilder để tránh OR tách nhiều lượt query
-    const qb = this.supplierRepo.createQueryBuilder('s');
+      // chuẩn hóa page/limit
+      page = Math.max(1, Number(page || 1));
+      limit = Math.min(100, Math.max(1, Number(limit || 20)));
 
-    if (q) {
-      qb.andWhere(
-        `(s.code ILIKE :q OR s.name ILIKE :q OR s.phone ILIKE :q OR s.email ILIKE :q OR s.taxCode ILIKE :q OR s.address ILIKE :q)`,
-        { q: `%${q}%` },
+      const qb = this.supplierRepo.createQueryBuilder('s');
+
+      // search
+      const keyword = q?.trim();
+      if (keyword) {
+        qb.andWhere(
+          `(s.code ILIKE :q OR s.name ILIKE :q OR s.phone ILIKE :q OR s.email ILIKE :q OR s.taxCode ILIKE :q OR s.address ILIKE :q)`,
+          { q: `%${keyword}%` },
+        );
+      }
+
+      // filters
+      if (status) qb.andWhere('s.status = :status', { status });
+      if (supplierGroupId) qb.andWhere('s.supplierGroupId = :groupId', { groupId: supplierGroupId });
+
+      const cityKw = city?.trim();
+      if (cityKw) qb.andWhere('s.city ILIKE :city', { city: `%${cityKw}%` });
+
+      if (withGroup) {
+        qb.leftJoinAndSelect('s.supplierGroup', 'g');
+      }
+
+      qb.orderBy('s.createdAt', 'DESC')
+        .skip((page - 1) * limit)
+        .take(limit);
+
+      const [items, total] = await qb.getManyAndCount();
+
+      return new ResponseCommon<typeof items, PageMeta>(
+        200,
+        true,
+        'Lấy danh sách nhà cung cấp thành công',
+        items,
+        {
+          total,
+          page,
+          limit,
+          pages: Math.ceil(total / limit) || 0,
+        },
       );
+    } catch (error) {
+      throw new ResponseException(error, 500, 'Không thể lấy danh sách nhà cung cấp');
     }
-
-    if (status) qb.andWhere('s.status = :status', { status });
-    if (supplierGroupId) qb.andWhere('s.supplierGroupId = :groupId', { supplierGroupId });
-    if (city) qb.andWhere('s.city ILIKE :city', { city: `%${city}%` });
-
-    if (withGroup) {
-      qb.leftJoinAndSelect('s.supplierGroup', 'g');
-    }
-
-    qb.orderBy('s.createdAt', 'DESC')
-      .skip((page - 1) * limit)
-      .take(Math.min(Number(limit) || 20, 100));
-
-    const [items, total] = await qb.getManyAndCount();
-    return { items, total, page: Number(page), limit: Number(limit) };
   }
+
 
   async findOne(id: string, opts?: { withGroup?: boolean }) {
     const sup = await this.supplierRepo.findOne({

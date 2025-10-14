@@ -5,7 +5,3 @@ export type PageMeta = {
   pages: number;
 };
 
-export type Paginated<T> = {
-  items: T[];
-  meta: PageMeta;
-};

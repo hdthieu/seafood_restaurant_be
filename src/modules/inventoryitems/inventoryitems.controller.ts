@@ -5,6 +5,7 @@ import { UpdateInventoryitemDto } from './dto/update-inventoryitem.dto';
 import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
 import { ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { ListInventoryItemsQueryDto } from './dto/list-inventory-items.query.dto';
+import { ListIngredientsDto } from './dto/list-ingredients.dto';
 
 @Controller('inventoryitems')
 @ApiBearerAuth()
@@ -22,8 +23,8 @@ export class InventoryitemsController {
   @Get('/list-ingredients')
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Get List Ingredients' })
-  async getAll() {
-    return this.inventoryitemsService.findAll();
+  async getAll(@Query() dto: ListIngredientsDto) {
+    return this.inventoryitemsService.findAll(dto);
   }
 
   // this endpoint will update inventory item details by its ID

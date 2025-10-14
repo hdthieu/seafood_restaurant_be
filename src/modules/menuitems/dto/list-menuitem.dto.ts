@@ -40,11 +40,3 @@ export class GetMenuItemsDto {
   @IsOptional() @IsIn(['ASC', 'DESC'])
   order?: 'ASC' | 'DESC' = 'ASC';
 }
-
-// (tuỳ chọn) Meta phân trang
-export class PageMeta {
-  page: number;
-  limit: number;
-  total: number;
-  totalPages: number;
-}

@@ -136,39 +136,65 @@ export class PromotionsService {
   }
 
   async findAllPromotions(q: ListPromotionsDto) {
-    const {
-      page = 1,
-      limit = 10,
-      includeDeleted = false,
-      search, q: q2,
-      isActive,                    // boolean | undefined
-      sortBy = 'createdAt',
-      sortDir = 'DESC',
-    } = q;
+    try {
+      let {
+        page = 1,
+        limit = 10,
+        includeDeleted = false,
+        search, q: q2,
+        isActive,
+        sortBy = 'createdAt',
+        sortDir = 'DESC',
+      } = q;
 
-    const keyword = (search ?? q2)?.trim();
+      // Chuẩn hóa page/limit
+      page = Math.max(1, Number(page || 1));
+      limit = Math.min(100, Math.max(1, Number(limit || 10)));
 
-    const qb = this.promoRepo.createQueryBuilder('p')
-      .leftJoinAndSelect('p.categories', 'c')
-      .leftJoinAndSelect('p.items', 'i');
+      // Whitelist sortBy để tránh SQL injection field name
+      const SORTABLE_FIELDS = new Set(['createdAt', 'updatedAt', 'startAt', 'endAt', 'name', 'promotionCode', 'isActive']);
+      if (!SORTABLE_FIELDS.has(sortBy)) sortBy = 'createdAt';
+      sortDir = (String(sortDir).toUpperCase() === 'ASC' ? 'ASC' : 'DESC');
 
-    if (!includeDeleted) qb.andWhere('p.isDeleted = false');
+      const keyword = (search ?? q2)?.trim();
 
-    if (keyword) {
-      const kw = `%${keyword.toLowerCase()}%`;
-      qb.andWhere('(LOWER(p.name) LIKE :kw OR LOWER(p.promotionCode) LIKE :kw)', { kw });
+      const qb = this.promoRepo
+        .createQueryBuilder('p')
+        .leftJoinAndSelect('p.categories', 'c')
+        .leftJoinAndSelect('p.items', 'i');
+
+      if (!includeDeleted) qb.andWhere('p.isDeleted = false');
+
+      if (keyword) {
+        const kw = `%${keyword.toLowerCase()}%`;
+        qb.andWhere('(LOWER(p.name) LIKE :kw OR LOWER(p.promotionCode) LIKE :kw)', { kw });
+      }
+
+      if (typeof isActive === 'boolean') {
+        qb.andWhere('p.isActive = :ia', { ia: isActive });
+      }
+
+      qb.orderBy(`p.${sortBy}`, sortDir as 'ASC' | 'DESC')
+        .skip((page - 1) * limit)
+        .take(limit);
+
+      const [items, total] = await qb.getManyAndCount();
+
+      return new ResponseCommon(
+        200,
+        true,
+        'Lấy danh sách khuyến mãi thành công',
+        items,
+        {
+          total,
+          page,
+          limit,
+          pages: Math.ceil(total / limit) || 0,
+        }
+      );
+    } catch (error) {
+      throw new ResponseException(error, 500, 'Không thể lấy danh sách khuyến mãi');
     }
-
-    if (typeof isActive === 'boolean') {
-      qb.andWhere('p.isActive = :ia', { ia: isActive });
-    }
-
-    qb.orderBy(`p.${sortBy}`, sortDir as 'ASC' | 'DESC')
-      .skip((page - 1) * limit)
-      .take(Math.min(limit, 100));
-
-    const [items, total] = await qb.getManyAndCount();
-    return { message: 'GET_PROMOTIONS_SUCCESS', data: { items, total, page: +page, limit: +limit } };
   }
 
 
