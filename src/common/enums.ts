@@ -133,11 +133,11 @@ export enum AudienceScope {
 
 export enum AttendanceMethod { MANUAL = 'MANUAL', SELF = 'SELF' }
 export enum AttendanceStatus {
-  ON_TIME   = 'ON_TIME',          // Đúng giờ
-  LATE      = 'LATE',             // Đi muộn / về sớm (có mặt)
-  MISSING   = 'MISSING',          // Chấm thiếu in/out
-  ABSENT    = 'ABSENT',           // Nghỉ không phép
-  LEAVE     = 'LEAVE',            // Nghỉ có phép
+  ON_TIME = 'ON_TIME',          // Đúng giờ
+  LATE = 'LATE',             // Đi muộn / về sớm (có mặt)
+  MISSING = 'MISSING',          // Chấm thiếu in/out
+  ABSENT = 'ABSENT',           // Nghỉ không phép
+  LEAVE = 'LEAVE',            // Nghỉ có phép
 }
 
 
@@ -149,17 +149,27 @@ export const POSE_THRESH = {
   YAW_LEFT: -8,     // quay trái: yaw <= -8°
   YAW_RIGHT: 8,     // quay phải: yaw >= 8°
   PITCH_MIN: -10,   // optional
-  PITCH_MAX:  10,
+  PITCH_MAX: 10,
 };
 
 export const EYES_CONF_MIN = 70; // % tin cậy tối thiểu khi đọc EyesOpen
 
 export type FaceAttrs =
   | {
-      ok: true;
-      pose: { yaw: number; pitch: number; roll?: number };
-      // đơn giản hoá mắt:
-      eyesOpen?: boolean;   // true/false theo Rekognition.EyesOpen.Value
-      eyesConf?: number;    // Rekognition.EyesOpen.Confidence
-    }
+    ok: true;
+    pose: { yaw: number; pitch: number; roll?: number };
+    // đơn giản hoá mắt:
+    eyesOpen?: boolean;   // true/false theo Rekognition.EyesOpen.Value
+    eyesConf?: number;    // Rekognition.EyesOpen.Confidence
+  }
   | { ok: false; reason: 'NO_FACE' | 'IMAGE_BAD' };
+
+
+
+export enum StockFilter {
+  ALL = 'ALL',                // Tất cả
+  BELOW_THRESHOLD = 'BELOW',  // Dưới định mức tồn (quantity < alertThreshold)
+  OVER_THRESHOLD = 'OVER',    // Vượt định mức tồn (quantity > alertThreshold)
+  IN_STOCK = 'IN_STOCK',      // Còn hàng (quantity > 0)
+  OUT_OF_STOCK = 'OUT_OF_STOCK', // Hết hàng (quantity = 0)
+}

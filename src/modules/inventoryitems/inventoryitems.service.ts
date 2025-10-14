@@ -12,16 +12,6 @@ import { ResponseCommon, ResponseException } from 'src/common/common_dto/respone
 import { PageMeta } from 'src/common/common_dto/paginated';
 import { ListIngredientsDto } from './dto/list-ingredients.dto';
 
-// // Gợi ý DTO (bạn có thể điều chỉnh tên/đường dẫn theo dự án của bạn)
-// export class CreateInventoryitemDto {
-//   name: string;
-//   baseUomCode: string;         // 'KG' | 'CAN' | ...
-//   code?: string;               // optional, nếu không gửi sẽ tự tạo
-//   categoryId?: string;         // optional
-//   supplierIds?: string[];      // optional
-//   alertThreshold?: number;     // optional
-//   description?: string | null; // optional
-// }
 
 @Injectable()
 export class InventoryitemsService {
@@ -33,50 +23,6 @@ export class InventoryitemsService {
     private readonly convRepo: Repository<UomConversion>,
   ) { }
 
-  private genCode(prefix = 'ITEM'): string {
-    const d = new Date();
-    const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
-    const rnd = Math.random().toString(36).slice(2, 6).toUpperCase();
-    return `${prefix}-${ymd}-${rnd}`;
-  }
-
-  // /** Tạo mới 1 nguyên liệu/hàng hóa (quantity/avgCost luôn = 0 khi khởi tạo) */
-  // async create(dto: CreateInventoryitemDto): Promise<InventoryItem> {
-  //   if (!dto.name?.trim()) throw new BadRequestException('NAME_REQUIRED');
-  //   if (!dto.baseUomCode) throw new BadRequestException('BASE_UOM_CODE_REQUIRED');
-
-  //   const baseUom = await this.uomRepo.findOne({ where: { code: dto.baseUomCode } });
-  //   if (!baseUom) throw new BadRequestException('BASE_UOM_NOT_FOUND');
-
-  //   let category: Category | undefined;
-  //   if (dto.categoryId) {
-  //     category = await this.categoryRepo.findOne({ where: { id: dto.categoryId } });
-  //     if (!category) throw new BadRequestException('CATEGORY_NOT_FOUND');
-  //   }
-
-  //   let suppliers: Supplier[] = [];
-  //   if (dto.supplierIds?.length) {
-  //     suppliers = await this.supplierRepo.find({ where: { id: In(dto.supplierIds) } });
-  //     if (suppliers.length !== dto.supplierIds.length) {
-  //       throw new BadRequestException('SOME_SUPPLIERS_NOT_FOUND');
-  //     }
-  //   }
-
-  //   const item = this.inventoryRepo.create({
-  //     code: dto.code?.trim() || this.genCode('IT'),
-  //     name: dto.name.trim(),
-  //     baseUom,
-  //     category: category ?? undefined,
-  //     suppliers,
-  //     description: dto.description ?? null,
-  //     alertThreshold: dto.alertThreshold ?? 0,
-  //     // các field tồn kho KHÔNG cho FE set khi tạo
-  //     quantity: 0,
-  //     avgCost: 0,
-  //   });
-
-  //   return this.inventoryRepo.save(item);
-  // }
 
   /** Danh sách tất cả item kèm baseUom/category/suppliers (đủ để FE hiển thị combobox đẹp) */
   async findAll(
@@ -101,7 +47,6 @@ export class InventoryitemsService {
       const page = Math.max(1, dto.page ?? 1);
       const limit = Math.max(1, Math.min(100, dto.limit ?? 10));
       const skip = (page - 1) * limit;
-      const q = (dto.q ?? '').trim().toLowerCase();
 
       const qb = this.inventoryRepo.createQueryBuilder('i')
         .leftJoinAndSelect('i.baseUom', 'u')
@@ -110,13 +55,35 @@ export class InventoryitemsService {
         .orderBy('i.createdAt', 'DESC')
         .skip(skip)
         .take(limit)
-        .distinct(true); // tránh trùng do N-N
+        .distinct(true);
 
+      // --- Search theo tên + đơn vị (code/name)
+      const q = dto.q?.trim();
       if (q) {
-        qb.andWhere(
-          '(LOWER(i.name) LIKE :q OR LOWER(u.name) LIKE :q OR LOWER(u.code) LIKE :q)',
-          { q: `%${q}%` },
-        );
+        const kw = `%${q.toLowerCase()}%`;
+        qb.andWhere('(LOWER(i.name) LIKE :kw OR LOWER(u.name) LIKE :kw OR LOWER(u.code) LIKE :kw)', { kw });
+      }
+
+      // --- Lọc theo đơn vị chính xác (mã UOM)
+      if (dto.baseUomCode?.trim()) {
+        qb.andWhere('u.code = :uom', { uom: dto.baseUomCode.trim().toUpperCase() });
+      }
+
+      // --- Lọc theo tồn kho (radio)
+      switch (dto.stock) {
+        case 'BELOW': // Dưới định mức tồn
+          qb.andWhere('i.quantity < i.alertThreshold');
+          break;
+        case 'OVER': // Vượt định mức tồn
+          qb.andWhere('i.quantity > i.alertThreshold');
+          break;
+        case 'IN_STOCK': // Còn hàng
+          qb.andWhere('i.quantity > 0');
+          break;
+        case 'OUT_OF_STOCK': // Hết hàng
+          qb.andWhere('i.quantity = 0');
+          break;
+        // ALL: không thêm điều kiện
       }
 
       const [rows, total] = await qb.getManyAndCount();
@@ -125,11 +92,7 @@ export class InventoryitemsService {
         id: r.id,
         code: r.code,
         name: r.name,
-        baseUom: {
-          code: r.baseUom.code,
-          name: r.baseUom.name,
-          dimension: r.baseUom.dimension,
-        },
+        baseUom: { code: r.baseUom.code, name: r.baseUom.name, dimension: r.baseUom.dimension },
         quantity: Number(r.quantity),
         avgCost: Number(r.avgCost),
         alertThreshold: Number(r.alertThreshold),
@@ -144,12 +107,7 @@ export class InventoryitemsService {
         true,
         'Lấy danh sách vật tư thành công',
         items,
-        {
-          total,
-          page,
-          limit,
-          pages: Math.ceil(total / limit),
-        },
+        { total, page, limit, pages: Math.ceil(total / limit) || 0 },
       );
     } catch (error) {
       throw new ResponseException(error, 500, 'Không thể lấy danh sách vật tư');
