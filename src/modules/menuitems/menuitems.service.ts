@@ -9,9 +9,11 @@ import { Ingredient } from '../ingredient/entities/ingredient.entity';
 import { ResponseException } from 'src/common/common_dto/respone.dto';
 import { ConfigS3Service } from 'src/common/AWS/config-s3/config-s3.service';
 import { CreateMenuItemDto } from './dto/create-menuitem.dto';
-import { GetMenuItemsDto, PageMeta } from './dto/list-menuitem.dto';
+import { GetMenuItemsDto } from './dto/list-menuitem.dto';
 import { DataSource } from 'typeorm';
 import { UpdateMenuItemDto } from './dto/update-menuitem.dto';
+import { PageMeta } from 'src/common/common_dto/paginated';
+
 @Injectable()
 export class MenuitemsService {
   constructor(
@@ -19,7 +21,7 @@ export class MenuitemsService {
     @InjectRepository(Category) private readonly CategoryRepo: Repository<Category>,
     @InjectRepository(Ingredient) private readonly IngredientRepo: Repository<Ingredient>,
     private readonly configS3Service: ConfigS3Service,
-     private readonly dataSource: DataSource,
+    private readonly dataSource: DataSource,
   ) { }
 
   async createMenuItem(dto: CreateMenuItemDto, file: Express.Multer.File) {
@@ -111,7 +113,7 @@ export class MenuitemsService {
       page,
       limit,
       total,
-      totalPages: Math.ceil(total / limit),
+      pages: Math.ceil(total / limit),
     };
     return { data: rows, meta };
   }
@@ -119,11 +121,11 @@ export class MenuitemsService {
   async getDetail(id: string): Promise<MenuItem> {
     const item = await this.menuItemRepo.findOne({
       where: { id },
-     relations: {
-      category: true,
-      ingredients: { inventoryItem: true }, // <-- thêm
-      components: { item: true },           // nếu có combo
-    },
+      relations: {
+        category: true,
+        ingredients: { inventoryItem: true }, // <-- thêm
+        components: { item: true },           // nếu có combo
+      },
     });
 
     if (!item) throw new ResponseException('Không tìm thấy món', 404);
@@ -131,83 +133,83 @@ export class MenuitemsService {
   }
 
   async updateMenuItem(id: string, dto: UpdateMenuItemDto, file?: Express.Multer.File) {
-  const existed = await this.menuItemRepo.findOne({
-    where: { id },
-    relations: ['category', 'ingredients', 'ingredients.inventoryItem'],
-  });
-  if (!existed) throw new ResponseException('Không tìm thấy món', 404);
-
-  return this.dataSource.transaction(async (manager) => {
-    // 1) Ảnh (tùy chọn)
-    if (file) {
-      const key = await this.configS3Service.uploadBuffer(file.buffer, file.mimetype, 'menu-items');
-      existed.image = this.configS3Service.makeS3Url(key);
-    }
-
-    // 2) Trường đơn
-    if (typeof dto.name === 'string') existed.name = dto.name;
-    if (typeof dto.description === 'string') existed.description = dto.description;
-    if (typeof dto.price === 'number') existed.price = dto.price;
-    if (typeof dto.isAvailable !== 'undefined') existed.isAvailable = dto.isAvailable === 'true';
-    if (dto.categoryId) {
-      const cat = await manager.getRepository(Category).findOneBy({ id: dto.categoryId });
-      if (!cat) throw new ResponseException('Danh mục không tồn tại', 400);
-      existed.category = cat;
-    }
-    await manager.getRepository(MenuItem).save(existed);
-
-    // 3) Thay toàn bộ ingredients (nếu truyền)
-    if (dto.ingredients) {
-      // 3.1 XÓA CŨ – dùng SQL thẳng để chắc ăn tên cột
-      await manager.query(
-        `DELETE FROM "ingredients" WHERE "menuItemId" = $1`,
-        [existed.id],
-      );
-
-      // 3.2 DEDUPE theo inventoryItemId (cộng dồn quantity, giữ note đầu tiên)
-      const byInv = new Map<string, { quantity: number; note?: string }>();
-      for (const i of dto.ingredients) {
-        if (!i?.inventoryItemId) continue;
-        const q = Number(i.quantity) || 0;
-        const cur = byInv.get(i.inventoryItemId);
-        byInv.set(i.inventoryItemId, {
-          quantity: (cur?.quantity ?? 0) + q,
-          note: cur?.note ?? i.note,
-        });
-      }
-      const values = Array.from(byInv.entries()).map(([inventoryItemId, v]) => ({
-        menuItem: { id: existed.id } as any,
-        inventoryItem: { id: inventoryItemId } as any,
-        quantity: v.quantity,
-        note: v.note,
-      }));
-
-      if (values.length) {
-        // 3.3 INSERT một mạch để tránh upsert đụng unique trong cùng batch
-        await manager
-          .createQueryBuilder()
-          .insert()
-          .into(Ingredient)
-          .values(values)
-          .execute();
-      }
-    }
-
-    // 4) Trả về full relations
-    const full = await manager.getRepository(MenuItem).findOne({
-      where: { id: existed.id },
-      relations: [
-        'category',
-        'ingredients',
-        'ingredients.inventoryItem',
-        'components',
-        'components.item',
-      ],
+    const existed = await this.menuItemRepo.findOne({
+      where: { id },
+      relations: ['category', 'ingredients', 'ingredients.inventoryItem'],
     });
-    if (!full) throw new ResponseException('Cập nhật xong nhưng không thấy dữ liệu', 500);
-    return full;
-  });
-}
+    if (!existed) throw new ResponseException('Không tìm thấy món', 404);
+
+    return this.dataSource.transaction(async (manager) => {
+      // 1) Ảnh (tùy chọn)
+      if (file) {
+        const key = await this.configS3Service.uploadBuffer(file.buffer, file.mimetype, 'menu-items');
+        existed.image = this.configS3Service.makeS3Url(key);
+      }
+
+      // 2) Trường đơn
+      if (typeof dto.name === 'string') existed.name = dto.name;
+      if (typeof dto.description === 'string') existed.description = dto.description;
+      if (typeof dto.price === 'number') existed.price = dto.price;
+      if (typeof dto.isAvailable !== 'undefined') existed.isAvailable = dto.isAvailable === 'true';
+      if (dto.categoryId) {
+        const cat = await manager.getRepository(Category).findOneBy({ id: dto.categoryId });
+        if (!cat) throw new ResponseException('Danh mục không tồn tại', 400);
+        existed.category = cat;
+      }
+      await manager.getRepository(MenuItem).save(existed);
+
+      // 3) Thay toàn bộ ingredients (nếu truyền)
+      if (dto.ingredients) {
+        // 3.1 XÓA CŨ – dùng SQL thẳng để chắc ăn tên cột
+        await manager.query(
+          `DELETE FROM "ingredients" WHERE "menuItemId" = $1`,
+          [existed.id],
+        );
+
+        // 3.2 DEDUPE theo inventoryItemId (cộng dồn quantity, giữ note đầu tiên)
+        const byInv = new Map<string, { quantity: number; note?: string }>();
+        for (const i of dto.ingredients) {
+          if (!i?.inventoryItemId) continue;
+          const q = Number(i.quantity) || 0;
+          const cur = byInv.get(i.inventoryItemId);
+          byInv.set(i.inventoryItemId, {
+            quantity: (cur?.quantity ?? 0) + q,
+            note: cur?.note ?? i.note,
+          });
+        }
+        const values = Array.from(byInv.entries()).map(([inventoryItemId, v]) => ({
+          menuItem: { id: existed.id } as any,
+          inventoryItem: { id: inventoryItemId } as any,
+          quantity: v.quantity,
+          note: v.note,
+        }));
+
+        if (values.length) {
+          // 3.3 INSERT một mạch để tránh upsert đụng unique trong cùng batch
+          await manager
+            .createQueryBuilder()
+            .insert()
+            .into(Ingredient)
+            .values(values)
+            .execute();
+        }
+      }
+
+      // 4) Trả về full relations
+      const full = await manager.getRepository(MenuItem).findOne({
+        where: { id: existed.id },
+        relations: [
+          'category',
+          'ingredients',
+          'ingredients.inventoryItem',
+          'components',
+          'components.item',
+        ],
+      });
+      if (!full) throw new ResponseException('Cập nhật xong nhưng không thấy dữ liệu', 500);
+      return full;
+    });
+  }
 
 
 

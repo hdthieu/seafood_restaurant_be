@@ -37,6 +37,7 @@ import { JwtAuthGuard } from '@modules/core/auth/guards/jwt-auth.guard';
 import { RolesGuard } from '@modules/core/auth/guards/roles.guard';
 import { Roles } from 'src/common/decorators/roles.decorator';
 import { UserRole } from 'src/common/enums';
+import { ListCombosDto } from './dto/ListCombosDto.dto';
 
 @ApiTags('Menu Combos')
 @Controller('menucomboitem')
@@ -91,15 +92,10 @@ export class MenucomboitemController {
 
   @Get('/list')
   @Roles(UserRole.MANAGER, UserRole.CASHIER, UserRole.WAITER, UserRole.KITCHEN)
-  @ApiOperation({ summary: 'List combos with pagination' })
   @ApiOkResponse({ description: 'List all combos with pagination' })
-  @ApiQuery({ name: 'page', required: false, type: Number, example: 1 })
-  @ApiQuery({ name: 'limit', required: false, type: Number, example: 10 })
-  findAll(
-    @Query('page') page: number = 1,
-    @Query('limit') limit: number = 10,
-  ) {
-    return this.service.findAll(page, limit);
+  @ApiOperation({ summary: 'List combos with filters & pagination' })
+  findAll(@Query() query: ListCombosDto) {
+    return this.service.findAll(query);
   }
 
   @Get('getinfo/:id')

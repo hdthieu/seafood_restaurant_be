@@ -7,7 +7,7 @@ export class ResponseCommon<T, M = any> {
     public success: boolean,
     public message: string,
     public data: T | null = null,
-     public meta?: M,  
+    public meta?: M,  
     public errorMessage?: any,
   ) { }
 }

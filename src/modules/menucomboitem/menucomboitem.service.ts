@@ -1,6 +1,6 @@
 import { MenuItem } from '@modules/menuitems/entities/menuitem.entity';
 import { Injectable } from '@nestjs/common';
-import { ResponseCommon } from 'src/common/common_dto/respone.dto';
+import { ResponseCommon, ResponseException } from 'src/common/common_dto/respone.dto';
 import { MenuComboItem } from './entities/menucomboitem.entity';
 import { Category } from '@modules/category/entities/category.entity';
 import { UpdateComboDto } from './dto/update-combo.dto';
@@ -8,6 +8,7 @@ import { CreateComboDto } from './dto/create-combo.dto';
 import { DataSource, In, Repository } from 'typeorm';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ConfigS3Service } from 'src/common/AWS/config-s3/config-s3.service';
+import { ListCombosDto } from './dto/ListCombosDto.dto';
 
 @Injectable()
 export class MenucomboitemService {
@@ -73,22 +74,56 @@ export class MenucomboitemService {
 
 
   /** List combos */
-  async findAll(page: number = 1, limit: number = 10) {
-    const [data, total] = await this.menuRepo.findAndCount({
-      where: { isCombo: true },
-      order: { name: 'ASC' },
-      skip: (page - 1) * limit,
-      take: limit,
-    });
+  async findAll(query: ListCombosDto) {
+    try {
+      let {
+        q, categoryId, priceMin, priceMax,
+        sortBy = 'name', sortDir = 'ASC', page = 1, limit = 10,
+      } = query;
 
-    return {
-      data,
-      total,
-      page,
-      limit,
-      totalPages: Math.ceil(total / limit),
-    };
+      page = Math.max(1, Number(page || 1));
+      limit = Math.min(100, Math.max(1, Number(limit || 10)));
+
+      const qb = this.menuRepo.createQueryBuilder('m')
+        .leftJoinAndSelect('m.category', 'c')
+        .where('m.isCombo = true');
+
+      // search
+      const kw = q?.trim();
+      if (kw) {
+        const s = `%${kw.toLowerCase()}%`;
+        qb.andWhere('(LOWER(m.name) LIKE :s OR LOWER(c.name) LIKE :s)', { s });
+      }
+      
+      if (categoryId) {
+        qb.andWhere('c.id = :cid', { cid: categoryId });
+      }
+      if (typeof priceMin === 'number') qb.andWhere('m.price >= :pmin', { pmin: priceMin });
+      if (typeof priceMax === 'number') qb.andWhere('m.price <= :pmax', { pmax: priceMax });
+
+      const SORTABLE = new Set(['name', 'price', 'createdAt']);
+      if (!SORTABLE.has(sortBy)) sortBy = 'name';
+      sortDir = (String(sortDir).toUpperCase() === 'ASC') ? 'ASC' : 'DESC';
+
+      qb.orderBy(`m.${sortBy}`, sortDir as 'ASC' | 'DESC')
+        .skip((page - 1) * limit)
+        .take(limit);
+
+      const [rows, total] = await qb.getManyAndCount();
+
+      return new ResponseCommon(
+        200,
+        true,
+        'Lấy danh sách combo thành công',
+        rows,
+        { total, page, limit, pages: Math.ceil(total / limit) || 0 },
+      );
+    } catch (error) {
+      throw new ResponseException(error, 500, 'Không thể lấy danh sách combo');
+    }
   }
+
+
   /** Get combo detail */
   async findOne(id: string) {
     const combo = await this.menuRepo.findOne({

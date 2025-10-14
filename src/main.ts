@@ -55,7 +55,7 @@ async function bootstrap() {
   }
   initialSwagger(app);
 
-  app.use('/upload', express.static(join(__dirname, '..', 'upload')));
+  app.use('/upload', express.static(join(__dirname, '..', 'upload'))); 
   app.useGlobalPipes(
     new ValidationPipe({
       transform: true,

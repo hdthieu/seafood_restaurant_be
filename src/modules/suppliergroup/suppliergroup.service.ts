@@ -2,12 +2,13 @@ import { Injectable } from '@nestjs/common';
 import { CreateSupplierGroupDto } from './dto/create-suppliergroup.dto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { SupplierGroup } from './entities/suppliergroup.entity';
-import { ResponseCommon } from 'src/common/common_dto/respone.dto';
+import { ResponseCommon, ResponseException } from 'src/common/common_dto/respone.dto';
 import { Repository } from 'typeorm';
 import { QuerySupplierGroupDto } from './dto/query-supplier-group.dto';
 import { UpdateSuppliergroupDto } from './dto/update-suppliergroup.dto';
 import { SupplierStatus } from 'src/common/enums';
 import { Supplier } from '@modules/supplier/entities/supplier.entity';
+import { PageMeta } from 'src/common/common_dto/paginated';
 
 @Injectable()
 export class SuppliergroupService {
@@ -56,29 +57,63 @@ export class SuppliergroupService {
   }
 
   async findAll(q: QuerySupplierGroupDto) {
-    const { page = 1, limit = 20, search, status, sortBy = 'createdAt', sortOrder = 'DESC' } = q;
-    const sortWhitelist = new Set(['createdAt', 'name', 'code']);
-    const orderWhitelist = new Set(['ASC', 'DESC']);
+    try {
+      let {
+        page = 1,
+        limit = 20,
+        search,
+        status,
+        sortBy = 'createdAt',
+        sortOrder = 'DESC',
+      } = q;
 
-    const qb = this.groupRepo.createQueryBuilder('g');
+      // Chuẩn hóa page/limit
+      page = Math.max(1, Number(page || 1));
+      limit = Math.min(100, Math.max(1, Number(limit || 20)));
 
-    if (search) {
-      qb.andWhere('(g.name ILIKE :kw OR g.code ILIKE :kw)', { kw: `%${search}%` });
+      // Whitelist sort
+      const SORTABLE_FIELDS = new Set(['createdAt', 'name', 'code']);
+      const sortField = SORTABLE_FIELDS.has(sortBy) ? sortBy : 'createdAt';
+      const order: 'ASC' | 'DESC' =
+        String(sortOrder).toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
+
+      const qb = this.groupRepo.createQueryBuilder('g');
+
+      const kw = search?.trim();
+      if (kw) {
+        qb.andWhere('(g.name ILIKE :kw OR g.code ILIKE :kw)', { kw: `%${kw}%` });
+      }
+
+      if (status) {
+        qb.andWhere('g.status = :status', { status });
+      }
+
+      qb.orderBy(`g.${sortField}`, order)
+        .skip((page - 1) * limit)
+        .take(limit);
+
+      const [items, total] = await qb.getManyAndCount();
+
+      return new ResponseCommon<typeof items, PageMeta>(
+        200,
+        true,
+        'Lấy danh sách nhóm nhà cung cấp thành công',
+        items,
+        {
+          total,
+          page,
+          limit,
+          pages: Math.ceil(total / limit) || 0,
+        },
+      );
+    } catch (error) {
+      throw new ResponseException(error, 500, 'Không thể lấy danh sách nhóm nhà cung cấp');
     }
-    if (status) {
-      qb.andWhere('g.status = :status', { status });
-    }
-
-    qb.orderBy(`g.${sortWhitelist.has(sortBy) ? sortBy : 'createdAt'}`, orderWhitelist.has(sortOrder) ? sortOrder : 'DESC')
-      .skip((page - 1) * limit)
-      .take(limit);
-
-    const [data, total] = await qb.getManyAndCount();
-    return { data, meta: { total, page, limit, totalPages: Math.ceil(total / limit) } };
   }
 
+
   async findOneById(id: string) {
-    const found = await this.groupRepo.findOne({ where: { id } , relations: ['suppliers']});
+    const found = await this.groupRepo.findOne({ where: { id }, relations: ['suppliers'] });
     if (!found) throw new ResponseCommon(404, false, 'SUPPLIER_GROUP_NOT_FOUND');
     return found;
   }
