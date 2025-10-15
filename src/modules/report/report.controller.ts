@@ -1,8 +1,14 @@
 // report.controller.ts
-import { Controller, Get, Query } from '@nestjs/common';
-import { ApiTags, ApiQuery } from '@nestjs/swagger';
+import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { ApiTags, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
 import { ReportService } from './report.service';
 import type { RangeKey } from 'src/common/date-range';
+import { JwtAuthGuard } from '@modules/core/auth/guards/jwt-auth.guard';
+import { RolesGuard } from '@modules/core/auth/guards/roles.guard';
+import { Roles } from 'src/common/decorators/roles.decorator';
+import { UserRole } from 'src/common/enums';
+import { SalesDailyQueryDto } from './dto/sales-daily.query.dto';
+import { StaffReportQueryDto } from './dto/staff-report.query.dto';
 
 enum RangeKeyEnum {
   today = 'today',
@@ -23,16 +29,20 @@ enum TopByEnum {
 
 @ApiTags('Report')
 @Controller('report')
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard, RolesGuard)
 export class ReportController {
-  constructor(private readonly svc: ReportService) {}
+  constructor(private readonly svc: ReportService) { }
 
   @Get('dashboard/summary')
+  @Roles(UserRole.MANAGER)
   @ApiQuery({ name: 'range', required: false, enum: RangeKeyEnum, example: 'today' })
   summary(@Query('range') range: RangeKey = 'today') {
     return this.svc.summary(range);
   }
 
   @Get('dashboard/top-items')
+  @Roles(UserRole.MANAGER)
   @ApiQuery({ name: 'range', required: false, enum: RangeKeyEnum, example: 'last7' })
   @ApiQuery({ name: 'by', required: false, enum: TopByEnum, example: 'qty' })
   @ApiQuery({ name: 'limit', required: false, type: Number, example: 10 })
@@ -45,6 +55,7 @@ export class ReportController {
   }
 
   @Get('dashboard/sales')
+  @Roles(UserRole.MANAGER)
   @ApiQuery({ name: 'range', required: false, enum: RangeKeyEnum, example: 'today' })
   @ApiQuery({ name: 'granularity', required: false, enum: GranularityEnum, example: 'day' })
   sales(
@@ -52,5 +63,19 @@ export class ReportController {
     @Query('granularity') granularity: 'day' | 'hour' | 'dow' = 'day',
   ) {
     return this.svc.salesSeries(range, granularity);
+  }
+
+  @Get("daily-sales")
+  @Roles(UserRole.MANAGER)
+  dailySales(@Query() q: SalesDailyQueryDto) { // Đổi tên hàm thành dailySales
+    return this.svc.salesDaily(q);
+  }
+
+
+
+  @Get('sales-by-staff')
+  @Roles(UserRole.MANAGER)
+  salesByStaff(@Query() q: StaffReportQueryDto) {
+    return this.svc.staffSales(q);
   }
 }
