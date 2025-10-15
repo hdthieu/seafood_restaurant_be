@@ -7,7 +7,8 @@ import { ReportService } from './report.service';
 import { Order } from 'src/modules/order/entities/order.entity';
 import { OrderItem } from 'src/modules/orderitems/entities/orderitem.entity';
 import { Invoice } from 'src/modules/invoice/entities/invoice.entity';
-import { MenuItem } from 'src/modules/menuitems/entities/menuitem.entity'; 
+import { MenuItem } from 'src/modules/menuitems/entities/menuitem.entity';
+import { User } from '@modules/user/entities/user.entity';
 
 @Module({
   imports: [
@@ -15,11 +16,11 @@ import { MenuItem } from 'src/modules/menuitems/entities/menuitem.entity';
       Order,
       OrderItem,
       Invoice,
-      MenuItem, // 👈 THÊM VÀO ĐÂY
+      MenuItem, User
     ]),
   ],
   controllers: [ReportController],
   providers: [ReportService],
   exports: [ReportService],
 })
-export class ReportModule {}
+export class ReportModule { }

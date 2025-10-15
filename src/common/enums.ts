@@ -173,3 +173,5 @@ export enum StockFilter {
   IN_STOCK = 'IN_STOCK',      // Còn hàng (quantity > 0)
   OUT_OF_STOCK = 'OUT_OF_STOCK', // Hết hàng (quantity = 0)
 }
+
+export enum Channel { DINEIN = 'DINEIN', TAKEAWAY = 'TAKEAWAY', DELIVERY = 'DELIVERY' }
