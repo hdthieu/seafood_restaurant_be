@@ -11,11 +11,19 @@ import { Brackets } from 'typeorm';
 import { CreateCustomerDto } from './dtos/create-customers.dto';
 import { CustomersFilterDto } from './dtos/customers-filter.dto';
 import { ResponseCommon } from 'src/common/common_dto/respone.dto';
+import { CustomerInvoiceRow } from './dtos/query-customer-history.dto';
+import { PageMeta } from 'src/common/common_dto/paginated';
+import { DataSource } from 'typeorm';
+import { UpdateCustomerDto } from './dtos/update-customer.dto';
+
+
 @Injectable()
 export class CustomersService {
   constructor(
     @InjectRepository(Customer) private readonly cusRepo: Repository<Customer>,
     @InjectRepository(Order) private readonly orderRepo: Repository<Order>,
+  private readonly ds: DataSource
+
   ) { }
 
   // ===== helpers =====
@@ -45,7 +53,36 @@ export class CustomersService {
       limit,
     };
   }
+async getDetail(id: string): Promise<Customer> {
+    const c = await this.cusRepo.findOne({ where: { id } });
+    if (!c) throw new NotFoundException('CUSTOMER_NOT_FOUND');
+    return c;
+  }
 
+  async update(id: string, dto: UpdateCustomerDto): Promise<Customer> {
+    const c = await this.cusRepo.findOne({ where: { id } });
+    if (!c) throw new NotFoundException('CUSTOMER_NOT_FOUND');
+
+    Object.assign(c, {
+      name: dto.name ?? c.name,
+      phone: dto.phone ?? c.phone,
+      email: dto.email ?? c.email,
+      type: dto.type ?? c.type,
+      gender: dto.gender ?? c.gender,
+      birthday: dto.birthday ? new Date(dto.birthday) : c.birthday,
+      address: dto.address ?? c.address,
+      province: dto.province ?? c.province,
+      district: dto.district ?? c.district,
+      ward: dto.ward ?? c.ward,
+    });
+
+    try {
+      return await this.cusRepo.save(c);
+    } catch (e: any) {
+      if (e?.code === '23505') throw new BadRequestException('DUPLICATE_FIELD');
+      throw e;
+    }
+  }
   // ===== APIs =====
   async getOrCreateWalkin(): Promise<Customer> {
     let c = await this.cusRepo.findOne({ where: { isWalkin: true } });
@@ -173,4 +210,73 @@ export class CustomersService {
     if (!c) throw new ResponseCommon(404, false, 'CUSTOMER_NOT_FOUND');
     return c;
   }
+
+
+
+
+
+// src/modules/invoice/invoice-history.service.ts
+
+
+
+  async getInvoicesByCustomer(customerId: string, page = 1, limit = 20) {
+    page = Math.max(1, Number(page) || 1);
+    limit = Math.max(1, Math.min(100, Number(limit) || 20));
+    const offset = (page - 1) * limit;
+
+    // base query for data
+    const qb = this.ds
+      .createQueryBuilder()
+      .select([
+        'inv.id AS "invoiceId"',
+        'inv.invoice_number AS "invoiceNumber"',
+        'COALESCE(inv.created_at, inv.updated_at) AS "time"', // hoặc completedAt nếu có
+        'inv.total_amount::text AS "totalAmount"',
+        'inv.status AS "status"',
+        'ord."createdById" AS "orderedById"',
+        `COALESCE(ob_prof.full_name, ob.username, ob.email) AS "orderedByName"`,
+      ])
+      .from('invoices', 'inv')
+      .leftJoin('orders', 'ord', 'ord.id = inv.order_id')
+      .leftJoin('users', 'ob', 'ob.id = ord."createdById"')
+      .leftJoin('profiles', 'ob_prof', 'ob_prof.user_id = ob.id') // nếu profile table là 'profiles'
+      .where('inv.customer_id = :customerId', { customerId })
+      .orderBy('"time"', 'DESC')
+      .offset(offset)
+      .limit(limit);
+
+    // total count
+    const countQb = this.ds
+      .createQueryBuilder()
+      .select('COUNT(*)', 'cnt')
+      .from('invoices', 'inv')
+      .where('inv.customer_id = :customerId', { customerId });
+
+    const [rows, cnt] = await Promise.all([qb.getRawMany(), countQb.getRawOne()]);
+    const total = Number(cnt?.cnt ?? 0);
+    const pages = Math.max(1, Math.ceil(total / limit));
+
+    const items: CustomerInvoiceRow[] = rows.map((r: any) => ({
+      invoiceId: r.invoiceId,
+      invoiceNumber: r.invoiceNumber,
+      time: new Date(r.time).toISOString(),
+      totalAmount: String(r.totalAmount),
+      status: r.status,
+      orderedBy: { id: r.orderedById ?? null, name: r.orderedByName ?? null },
+    }));
+
+    const meta: PageMeta = { total, page, limit, pages };
+
+    return new ResponseCommon(
+      200,
+      true,
+      'Lấy lịch sử hóa đơn thành công',
+      { items },
+      meta,
+    );
+  }
 }
+
+
+
+

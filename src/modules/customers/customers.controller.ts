@@ -16,6 +16,11 @@ import { CustomersService } from './customers.service';
 import { Customer } from './entities/customers.entity';
 import { CustomersFilterDto } from './dtos/customers-filter.dto';
 import { CreateCustomerDto } from './dtos/create-customers.dto';
+import { ResponseCommon } from 'src/common/common_dto/respone.dto';
+import { CustomerInvoiceListResp } from './dtos/query-customer-history.dto';
+import { PageMeta } from 'src/common/common_dto/paginated';
+import { Patch } from '@nestjs/common';
+import {UpdateCustomerDto} from './dtos/update-customer.dto';
 
 class UpsertByPhoneBody {
   phone: string;
@@ -48,7 +53,17 @@ export class CustomersController {
   create(@Body() dto: CreateCustomerDto) {
     return this.svc.create(dto);
   }
+ @Get('customers/:id')
+  async getOne(@Param('id') id: string) {
+    const data = await this.svc.getDetail(id);
+    return { code: 200, success: true, message: 'OK', data };
+  }
 
+  @Patch('customers/:id')
+  async update(@Param('id') id: string, @Body() dto: UpdateCustomerDto) {
+    const data = await this.svc.update(id, dto);
+    return { code: 200, success: true, message: 'Cập nhật thành công', data };
+  }
   // GET /customers/search: autocomplete nhanh (giữ nguyên)
   @Get('customers/search')
   search(
@@ -58,7 +73,16 @@ export class CustomersController {
     return this.svc.search(q, limit ?? 10);
   }
 
-  
+   @Get('customers/:id/invoices')
+  async customerInvoices(
+    @Param('id') id: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ): Promise<ResponseCommon<CustomerInvoiceListResp, PageMeta>> {
+    const p = Number(page || 1);
+    const l = Number(limit || 20);
+    return this.svc.getInvoicesByCustomer(id, p, l);
+  }
 
 
   @Get('customers/walkin')
