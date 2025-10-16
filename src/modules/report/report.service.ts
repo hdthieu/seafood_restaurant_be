@@ -290,9 +290,9 @@ export class ReportService {
     // Gộp theo nhân viên (createdBy) trên HOÁ ĐƠN đã lập trong khoảng thời gian
     const qb = this.invRepo.createQueryBuilder('inv')
       .innerJoin('inv.order', 'o')
-      .leftJoin('o.createdBy', 'ur')        // <-- đúng với entity của bạn
+      .leftJoin('o.createdBy', 'ur')
       .innerJoin('o.items', 'oi')           // Order.items -> OrderItem
-      .leftJoin('ur.profile', 'pf')         // để lấy tên hiển thị nếu có
+      .leftJoin('ur.profile', 'pf')
       .where('inv.createdAt >= :from AND inv.createdAt < :to', { from, to })
       .select('ur.id', 'userId')
       .addSelect('pf.fullName', 'fullName')
@@ -334,10 +334,193 @@ export class ReportService {
     return { printedAt: new Date().toISOString(), dateRange: { from, to }, header, rows: data };
   }
 
-  private betweenLocal(col: string) {
-    // ví dụ: this.betweenLocal('inv.createdAt') => 'inv.createdAt AT TIME ZONE :tz BETWEEN :start AND :end'
-    return `${col} AT TIME ZONE :tz BETWEEN :start AND :end`;
+  /* ====== 2) HÀNG BÁN THEO NHÂN VIÊN ====== */
+  async staffSalesItems(q: StaffReportQueryDto) {
+    const from = q.dateFrom ? new Date(q.dateFrom) : this.sod();
+    const to = q.dateTo ? new Date(q.dateTo) : this.eod();
+
+    // ====== Common expressions ======
+    const amt = `oi.quantity * oi.price`;
+
+    // Tổng tiền hàng của HÓA ĐƠN hiện tại (không dùng window)
+    const invGoodsTotal = `
+      (SELECT SUM(oi3.quantity * oi3.price)
+         FROM order_items oi3
+        WHERE oi3."orderId" = o.id)
+    `;
+
+    // Phân bổ mức ORDER
+    const discOrder = `
+      COALESCE(
+        (${amt}) / NULLIF(${invGoodsTotal}, 0) *
+        (SELECT COALESCE(SUM(ip."discountAmount"),0)
+           FROM invoice_promotions ip
+          WHERE ip.invoice_id = inv.id AND ip."applyWith" = 'ORDER'),
+        0
+      )
+    `;
+
+    // Phân bổ mức CATEGORY
+    const discCategory = `
+      COALESCE((
+        SELECT SUM(
+          ip."discountAmount" * (${amt}) /
+          NULLIF((
+            SELECT SUM(oi2.quantity * oi2.price)
+              FROM order_items oi2
+              JOIN menu_items mi2 ON mi2.id = oi2."menuItemId"
+             WHERE oi2."orderId" = o.id
+               AND EXISTS (
+                 SELECT 1 FROM promotion_categories pc
+                  WHERE pc.promotion_id = ip.promotion_id
+                    AND pc.category_id   = mi2."categoryId"
+               )
+          ), 0)
+        )
+          FROM invoice_promotions ip
+         WHERE ip.invoice_id = inv.id
+           AND ip."applyWith" = 'CATEGORY'
+           AND EXISTS (
+             SELECT 1 FROM promotion_categories pc
+              WHERE pc.promotion_id = ip.promotion_id
+                AND pc.category_id   = mi."categoryId"
+           )
+      ),0)
+    `;
+
+    // Phân bổ mức ITEM
+    const discItem = `
+      COALESCE((
+        SELECT SUM(
+          ip."discountAmount" * (${amt}) /
+          NULLIF((
+            SELECT SUM(oi2.quantity * oi2.price)
+              FROM order_items oi2
+             WHERE oi2."orderId" = o.id
+               AND EXISTS (
+                 SELECT 1 FROM promotion_items pi
+                  WHERE pi.promotion_id = ip.promotion_id
+                    AND pi.item_id       = oi2."menuItemId"
+               )
+          ), 0)
+        )
+          FROM invoice_promotions ip
+         WHERE ip.invoice_id = inv.id
+           AND ip."applyWith" = 'ITEM'
+           AND EXISTS (
+             SELECT 1 FROM promotion_items pi
+              WHERE pi.promotion_id = ip.promotion_id
+                AND pi.item_id       = mi.id
+           )
+      ),0)
+    `;
+
+    const allocated = `(${discOrder}) + (${discCategory}) + (${discItem})`;
+
+    // ====== KHÔNG dùng alias trong GROUP BY: trích xuất biểu thức ra biến và tái sử dụng ======
+    // các biến đã có ở trên
+    const exprUserId = `
+      CASE WHEN creator.id IS NOT NULL THEN creator.id ELSE cash.id END
+      `;
+    const exprFullName = `
+      CASE
+        WHEN cp.full_name    IS NOT NULL THEN cp.full_name
+        WHEN cprof.full_name IS NOT NULL THEN cprof.full_name
+        WHEN creator.email   IS NOT NULL THEN creator.email
+        ELSE cash.email
+      END
+      `;
+
+    const qb = this.oiRepo.createQueryBuilder('oi')
+      .innerJoin('oi.order', 'o')
+      .innerJoin('o.invoice', 'inv')
+      .leftJoin('o.createdBy', 'creator')
+      .leftJoin('creator.profile', 'cp')
+      .leftJoin('inv.cashier', 'cash')
+      .leftJoin('cash.profile', 'cprof')
+      .innerJoin('oi.menuItem', 'mi')
+      .leftJoin('mi.category', 'c')
+      .where('inv.created_at >= :from AND inv.created_at < :to', { from, to })
+
+      // select alias vẫn bình thường
+      .select(exprUserId, 'userId')
+      .addSelect(exprFullName, 'fullName')
+      .addSelect('mi.id', 'itemCode')
+      .addSelect('mi.name', 'itemName')
+      .addSelect(`SUM(oi.quantity)`, 'soldQty')
+      .addSelect(`SUM(${amt})`, 'goodsAmount')
+      .addSelect(`SUM(${allocated})`, 'allocatedDiscount')
+      .addSelect(`SUM(${amt}) - SUM(${allocated})`, 'netRevenue')
+
+      // ✅ GROUP BY dùng lại biểu thức
+      .groupBy(exprUserId)
+      .addGroupBy(exprFullName)
+      .addGroupBy('mi.id')
+      .addGroupBy('mi.name')
+
+      // ✅ ORDER BY cũng dùng lại biểu thức (không dùng alias 'fullName')
+      .orderBy(exprFullName, 'ASC')
+      .addOrderBy('mi.name', 'ASC');
+
+
+    if (q.receiverId) qb.andWhere('creator.id = :rid OR cash.id = :rid', { rid: q.receiverId });
+    if (q.tableId) qb.andWhere('o.tableId = :tid', { tid: q.tableId });
+    if (q.q) qb.andWhere('mi.name ILIKE :q', { q: `%${q.q}%` });
+    if (q.categoryIds?.length) qb.andWhere('c.id IN (:...cids)', { cids: q.categoryIds });
+
+    const raw = await qb.getRawMany<{
+      userId: string; fullName: string; itemCode: string; itemName: string;
+      soldQty: string; goodsAmount: string; allocatedDiscount: string; netRevenue: string;
+    }>();
+
+    // ===== gom theo staff =====
+    const groups: Array<{
+      userId: string; fullName: string;
+      totals: { soldQty: number; goodsAmount: number; discount: number; netRevenue: number };
+      items: Array<{ itemCode: string; itemName: string; soldQty: number; goodsAmount: number; discount: number; netRevenue: number }>;
+    }> = [];
+    const idx = new Map<string, number>();
+
+    for (const r of raw) {
+      const k = r.userId || 'null';
+      let i = idx.get(k);
+      if (i == null) {
+        i = groups.length; idx.set(k, i);
+        groups.push({
+          userId: r.userId, fullName: r.fullName,
+          totals: { soldQty: 0, goodsAmount: 0, discount: 0, netRevenue: 0 },
+          items: [],
+        });
+      }
+      const soldQty = Number(r.soldQty || 0);
+      const goods = Number(r.goodsAmount || 0);
+      const discount = Number(r.allocatedDiscount || 0);
+      const net = Number(r.netRevenue || 0);
+
+      groups[i].items.push({
+        itemCode: r.itemCode, itemName: r.itemName,
+        soldQty, goodsAmount: goods, discount, netRevenue: net,
+      });
+
+      const t = groups[i].totals;
+      t.soldQty += soldQty;
+      t.goodsAmount += goods;
+      t.discount += discount;
+      t.netRevenue += net;
+    }
+
+    const header = groups.reduce((a, g) => ({
+      staffCount: a.staffCount + 1,
+      soldQty: a.soldQty + g.totals.soldQty,
+      goodsAmount: a.goodsAmount + g.totals.goodsAmount,
+      discount: a.discount + g.totals.discount,
+      netRevenue: a.netRevenue + g.totals.netRevenue,
+    }), { staffCount: 0, soldQty: 0, goodsAmount: 0, discount: 0, netRevenue: 0 });
+
+    return { printedAt: new Date().toISOString(), dateRange: { from, to }, header, groups };
   }
+
+
 
   private applyOrderFilters<T extends import('typeorm').ObjectLiteral>(
     qb: import('typeorm').SelectQueryBuilder<T>,
