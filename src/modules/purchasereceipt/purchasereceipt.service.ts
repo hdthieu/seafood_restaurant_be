@@ -16,6 +16,7 @@ import { InventoryTransaction } from '@modules/inventorytransaction/entities/inv
 import { UpdatePurchaseReceiptDto } from './dto/update-purchasereceipt.dto';
 import { UnitsOfMeasure } from '@modules/units-of-measure/entities/units-of-measure.entity';
 import { UomConversion } from '@modules/uomconversion/entities/uomconversion.entity';
+import { CashbookService } from '@modules/cashbook/cashbook.service';
 @Injectable()
 export class PurchasereceiptService {
   constructor(
@@ -27,6 +28,7 @@ export class PurchasereceiptService {
     @InjectRepository(InventoryTransaction) private readonly txRepo: Repository<InventoryTransaction>,
     @InjectRepository(UnitsOfMeasure) private readonly uomRepo: Repository<UnitsOfMeasure>,
     @InjectRepository(UomConversion) private readonly convRepo: Repository<UomConversion>,
+    private readonly cashbookService: CashbookService,
   ) { }
 
   /** PN-yyyymmdd-XXXX */
@@ -457,6 +459,11 @@ export class PurchasereceiptService {
       receipt.status = remaining === 0 ? ReceiptStatus.PAID : ReceiptStatus.OWING;
       await receiptRepo.save(receipt);
 
+      // Nếu có trả tiền ngay, tạo phiếu thu tương ứng
+      if (paidNow > 0) {
+        await this.cashbookService.postPaymentFromPurchase(em, receipt, paidNow);
+      }
+
       // 5) Response
       return {
         id: receipt.id,
@@ -807,6 +814,14 @@ export class PurchasereceiptService {
       existed.debt = remaining;
       existed.status = remaining === 0 ? ReceiptStatus.PAID : ReceiptStatus.OWING;
       await receiptRepo.save(existed);
+
+      if (paidNow > 0) {
+        const receipt = await receiptRepo.findOne({ where: { id: receiptId } });
+        if (!receipt) {
+          throw new ResponseCommon(404, false, 'RECEIPT_NOT_FOUND');
+        }
+        await this.cashbookService.postPaymentFromPurchase(em, receipt, paidNow);
+      }
 
       return {
         id: existed.id,

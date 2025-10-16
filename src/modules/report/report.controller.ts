@@ -78,9 +78,14 @@ export class ReportController {
   salesByStaff(@Query() q: StaffReportQueryDto) {
     return this.svc.staffSales(q);
   }
-  /* ====== 2) HÀNG BÁN THEO NHÂN VIÊN ====== */
+  /* ====== 2) BÁO CÁO HÀNG BÁN THEO NHÂN VIÊN ====== */
   @Get('sales-by-staff/items')
   salesByStaffItems(@Query() q: StaffReportQueryDto) {
     return this.svc.staffSalesItems(q);
   }
+  /* ====== 3) BÁO CÁO LỢI NHUẬN THEO NHÂN VIÊN ====== */
+  // @Get('profit-by-staff')
+  // profitByStaff(@Query() q: StaffReportQueryDto) {
+  //   return this.svc.staffProfit(q);
+  // }
 }

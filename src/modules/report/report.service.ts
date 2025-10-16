@@ -334,15 +334,12 @@ export class ReportService {
     return { printedAt: new Date().toISOString(), dateRange: { from, to }, header, rows: data };
   }
 
-  /* ====== 2) HÀNG BÁN THEO NHÂN VIÊN ====== */
+  /* ====== 2) BÁO CÁO HÀNG BÁN THEO NHÂN VIÊN ====== */
   async staffSalesItems(q: StaffReportQueryDto) {
     const from = q.dateFrom ? new Date(q.dateFrom) : this.sod();
     const to = q.dateTo ? new Date(q.dateTo) : this.eod();
-
-    // ====== Common expressions ======
     const amt = `oi.quantity * oi.price`;
-
-    // Tổng tiền hàng của HÓA ĐƠN hiện tại (không dùng window)
+    // Tổng tiền hàng của HÓA ĐƠN hiện tại
     const invGoodsTotal = `
       (SELECT SUM(oi3.quantity * oi3.price)
          FROM order_items oi3
@@ -416,20 +413,10 @@ export class ReportService {
     `;
 
     const allocated = `(${discOrder}) + (${discCategory}) + (${discItem})`;
-
-    // ====== KHÔNG dùng alias trong GROUP BY: trích xuất biểu thức ra biến và tái sử dụng ======
-    // các biến đã có ở trên
     const exprUserId = `
       CASE WHEN creator.id IS NOT NULL THEN creator.id ELSE cash.id END
       `;
-    const exprFullName = `
-      CASE
-        WHEN cp.full_name    IS NOT NULL THEN cp.full_name
-        WHEN cprof.full_name IS NOT NULL THEN cprof.full_name
-        WHEN creator.email   IS NOT NULL THEN creator.email
-        ELSE cash.email
-      END
-      `;
+    const exprFullName = `cp.full_name`;
 
     const qb = this.oiRepo.createQueryBuilder('oi')
       .innerJoin('oi.order', 'o')
@@ -442,7 +429,6 @@ export class ReportService {
       .leftJoin('mi.category', 'c')
       .where('inv.created_at >= :from AND inv.created_at < :to', { from, to })
 
-      // select alias vẫn bình thường
       .select(exprUserId, 'userId')
       .addSelect(exprFullName, 'fullName')
       .addSelect('mi.id', 'itemCode')
@@ -451,14 +437,10 @@ export class ReportService {
       .addSelect(`SUM(${amt})`, 'goodsAmount')
       .addSelect(`SUM(${allocated})`, 'allocatedDiscount')
       .addSelect(`SUM(${amt}) - SUM(${allocated})`, 'netRevenue')
-
-      // ✅ GROUP BY dùng lại biểu thức
       .groupBy(exprUserId)
       .addGroupBy(exprFullName)
       .addGroupBy('mi.id')
       .addGroupBy('mi.name')
-
-      // ✅ ORDER BY cũng dùng lại biểu thức (không dùng alias 'fullName')
       .orderBy(exprFullName, 'ASC')
       .addOrderBy('mi.name', 'ASC');
 
@@ -519,8 +501,106 @@ export class ReportService {
 
     return { printedAt: new Date().toISOString(), dateRange: { from, to }, header, groups };
   }
+  // /* ====== 3) BÁO CÁO LỢI NHUẬN THEO NHÂN VIÊN ====== */
+  // async staffProfit(q: StaffReportQueryDto) {
+  //   const from = q.dateFrom ? new Date(q.dateFrom) : this.sod();
+  //   const to = q.dateTo ? new Date(q.dateTo) : this.eod();
+
+  //   // tiền hàng theo dòng món
+  //   const goodsExpr = `oi.quantity * oi.price`;
+  //   const recipeCostPerOne = `
+  //     COALESCE((
+  //       SELECT SUM(ing.quantity * ii."avgCost")
+  //       FROM ingredients ing
+  //       JOIN inventory_items ii ON ii.id = ing."inventoryItemId"
+  //       WHERE ing."menuItemId" = mi.id
+  //     ), 0)
+  //   `;
+  //   // COGS của 1 dòng order_item:
+  //   const cogsExpr = `oi.quantity * (${recipeCostPerOne})`;
+
+  //   // ----- Query "nhân viên × hóa đơn" -----
+  //   const qb = this.oiRepo.createQueryBuilder('oi')
+  //     .innerJoin('oi.order', 'o')
+  //     .innerJoin('o.invoice', 'inv')
+  //     .leftJoin('o.createdBy', 'creator')
+  //     .leftJoin('creator.profile', 'cp')
+  //     .leftJoin('inv.cashier', 'cash')
+  //     .leftJoin('cash.profile', 'cprof')
+  //     .innerJoin('oi.menuItem', 'mi')
+  //     .where('inv.createdAt >= :from AND inv.createdAt < :to', { from, to })
+
+  //     // Nhân viên: ưu tiên người nhận đơn, nếu null thì lấy thu ngân
+  //     .select(
+  //       `CASE WHEN creator.id IS NOT NULL THEN creator.id ELSE cash.id END`,
+  //       'userId'
+  //     )
+  //     .addSelect('cp.full_name', 'fullName')
+
+  //     .addSelect(`SUM(${goodsExpr})`, 'goodsAmount')          // Tổng tiền hàng
+  //     .addSelect(`COALESCE(inv.discountTotal,0)`, 'invoiceDiscount')     // Giảm giá HĐ
+  //     .addSelect(`0`, 'returnValue')          // Chưa có trả hàng
+  //     .addSelect(`SUM(${cogsExpr})`, 'cogs')                 // Tổng giá vốn
+  //     .groupBy('"userId", "fullName", inv.id')
+  //     .orderBy('"fullName"', 'ASC');
+
+  //   // Bộ lọc
+  //   if (q.receiverId) qb.andWhere('creator.id = :rid OR cash.id = :rid', { rid: q.receiverId });
+  //   if (q.tableId) qb.andWhere('o.tableId = :tid', { tid: q.tableId });
+  //   if ((q as any).orderType) qb.andWhere('o.orderType = :ot', { ot: (q as any).orderType });
+
+  //   const rows = await qb.getRawMany<{
+  //     userId: string; fullName: string;
+  //     goodsAmount: string; invoiceDiscount: string; returnValue: string; cogs: string;
+  //   }>();
+  //   // Gom theo nhân viên (vì discount hóa đơn)
+  //   type Agg = {
+  //     userId: string; fullName: string;
+  //     goodsAmount: number; invoiceDiscount: number;
+  //     revenue: number; returnValue: number;
+  //     netRevenue: number; cogs: number; grossProfit: number;
+  //   };
+  //   const map = new Map<string, Agg>();
 
 
+  //   for (const r of rows) {
+  //     const k = r.userId || 'null';
+  //     const cur = map.get(k) || {
+  //       userId: r.userId, fullName: r.fullName,
+  //       goodsAmount: 0, invoiceDiscount: 0,
+  //       revenue: 0, returnValue: 0, netRevenue: 0,
+  //       cogs: 0, grossProfit: 0,
+  //     };
+  //     const goods = Number(r.goodsAmount || 0);
+  //     const disc = Number(r.invoiceDiscount || 0);
+  //     const ret = Number(r.returnValue || 0);
+  //     const cogs = Number(r.cogs || 0);
+
+  //     cur.goodsAmount += goods;
+  //     cur.invoiceDiscount += disc;
+  //     cur.revenue = cur.goodsAmount - cur.invoiceDiscount; // Doanh thu
+  //     cur.returnValue += ret;
+  //     cur.netRevenue = cur.revenue - cur.returnValue;         // Doanh thu thuần
+  //     cur.cogs += cogs;                                   // Giá vốn
+  //     cur.grossProfit = cur.netRevenue - cur.cogs;              // Lợi nhuận gộp
+  //     map.set(k, cur);
+  //   }
+
+  //   const data = [...map.values()];
+  //   console.log("data", data);
+  //   const header = {
+  //     staffCount: data.length,
+  //     goodsAmount: data.reduce((a, x) => a + x.goodsAmount, 0),
+  //     invoiceDiscount: data.reduce((a, x) => a + x.invoiceDiscount, 0),
+  //     revenue: data.reduce((a, x) => a + x.revenue, 0),
+  //     returnValue: data.reduce((a, x) => a + x.returnValue, 0),
+  //     netRevenue: data.reduce((a, x) => a + x.netRevenue, 0),
+  //     cogs: data.reduce((a, x) => a + x.cogs, 0),
+  //     grossProfit: data.reduce((a, x) => a + x.grossProfit, 0),
+  //   };
+
+  //   return { printedAt: new Date().toISOString(), dateRange: { from, to }, header, rows: data };
+  // }
 
   private applyOrderFilters<T extends import('typeorm').ObjectLiteral>(
     qb: import('typeorm').SelectQueryBuilder<T>,

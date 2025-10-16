@@ -20,7 +20,7 @@ import { ResponseCommon } from 'src/common/common_dto/respone.dto';
 import { CustomerInvoiceListResp } from './dtos/query-customer-history.dto';
 import { PageMeta } from 'src/common/common_dto/paginated';
 import { Patch } from '@nestjs/common';
-import {UpdateCustomerDto} from './dtos/update-customer.dto';
+import { UpdateCustomerDto } from './dtos/update-customer.dto';
 
 class UpsertByPhoneBody {
   phone: string;
@@ -38,7 +38,15 @@ class AttachCustomerBody {
 
 @Controller()
 export class CustomersController {
-  constructor(private readonly svc: CustomersService) {}
+  constructor(private readonly svc: CustomersService) { }
+  // GET /customers/search: autocomplete nhanh (giữ nguyên)
+  @Get('customers/search')
+  search(
+    @Query('q') q = '',
+    @Query('limit', new ParseIntPipe({ optional: true })) limit?: number,
+  ) {
+    return this.svc.search(q, limit ?? 10);
+  }
 
   // GET /customers: filter + paging (đang đúng)
   @Get('customers')
@@ -53,7 +61,7 @@ export class CustomersController {
   create(@Body() dto: CreateCustomerDto) {
     return this.svc.create(dto);
   }
- @Get('customers/:id')
+  @Get('customers/:id')
   async getOne(@Param('id') id: string) {
     const data = await this.svc.getDetail(id);
     return { code: 200, success: true, message: 'OK', data };
@@ -64,16 +72,9 @@ export class CustomersController {
     const data = await this.svc.update(id, dto);
     return { code: 200, success: true, message: 'Cập nhật thành công', data };
   }
-  // GET /customers/search: autocomplete nhanh (giữ nguyên)
-  @Get('customers/search')
-  search(
-    @Query('q') q = '',
-    @Query('limit', new ParseIntPipe({ optional: true })) limit?: number,
-  ) {
-    return this.svc.search(q, limit ?? 10);
-  }
 
-   @Get('customers/:id/invoices')
+
+  @Get('customers/:id/invoices')
   async customerInvoices(
     @Param('id') id: string,
     @Query('page') page?: string,

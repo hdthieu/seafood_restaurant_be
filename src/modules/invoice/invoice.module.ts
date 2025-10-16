@@ -6,9 +6,10 @@ import { InvoicesController } from './invoice.controller';
 import { Order } from 'src/modules/order/entities/order.entity';
 
 import { Payment } from 'src/modules/payments/entities/payment.entity';
+import { CashbookModule } from '@modules/cashbook/cashbook.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Invoice, Order,Payment])],
+  imports: [TypeOrmModule.forFeature([Invoice, Order,Payment]), CashbookModule],
   providers: [InvoicesService],
   controllers: [InvoicesController],
   exports: [InvoicesService, TypeOrmModule],
