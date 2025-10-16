@@ -12,6 +12,7 @@ import { QueryInvoicesDto } from './dto/query-invoices.dto';
 import { Brackets } from 'typeorm';
 import { ResponseCommon, ResponseException } from 'src/common/common_dto/respone.dto';
 import { PageMeta } from 'src/common/common_dto/paginated';
+import { CashbookService } from '@modules/cashbook/cashbook.service';
 
 @Injectable()
 export class InvoicesService {
@@ -20,6 +21,7 @@ export class InvoicesService {
     @InjectRepository(Invoice) private invRepo: Repository<Invoice>,
     @InjectRepository(Order) private orderRepo: Repository<Order>,
     @InjectRepository(Payment) private payRepo: Repository<Payment>,
+    private readonly cashbookService: CashbookService,
   ) { }
 
   /** Tạo invoice từ order (idempotent) */
@@ -154,6 +156,10 @@ export class InvoicesService {
         await oRepo.update({ id: inv.order.id }, { status: OrderStatus.PAID });
       }
 
+      // ghi vào sổ quỹ đã thu
+      if (method === PaymentMethod.CASH) {
+        await this.cashbookService.postReceiptFromInvoice(em, inv, take);
+      }
       return { invoice: inv, payment };
     });
   }
