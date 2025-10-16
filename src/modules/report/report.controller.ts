@@ -71,11 +71,16 @@ export class ReportController {
     return this.svc.salesDaily(q);
   }
 
-
-
+  /* ====== BÁO CÁO CỦA NHÂN VIÊN ====== */
+  /* ====== 1) BÁN HÀNG ====== */
   @Get('sales-by-staff')
   @Roles(UserRole.MANAGER)
   salesByStaff(@Query() q: StaffReportQueryDto) {
     return this.svc.staffSales(q);
+  }
+  /* ====== 2) HÀNG BÁN THEO NHÂN VIÊN ====== */
+  @Get('sales-by-staff/items')
+  salesByStaffItems(@Query() q: StaffReportQueryDto) {
+    return this.svc.staffSalesItems(q);
   }
 }
