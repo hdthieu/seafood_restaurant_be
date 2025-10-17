@@ -47,7 +47,6 @@ export class CustomersController {
   ) {
     return this.svc.search(q, limit ?? 10);
   }
-
   // GET /customers: filter + paging (đang đúng)
   @Get('customers')
   @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
