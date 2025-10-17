@@ -32,7 +32,7 @@ async function bootstrap() {
   app.enableCors({
     origin: [
       'http://localhost:3000',
-      'https://seafood-restaurant-jnkc49w24-hungdinh1212s-projects.vercel.app',
+      'https://seafood-restaurant-6kzx8a2hl-hungdinh1212s-projects.vercel.app',
     ],
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
     credentials: true,
