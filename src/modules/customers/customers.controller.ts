@@ -39,7 +39,13 @@ class AttachCustomerBody {
 @Controller()
 export class CustomersController {
   constructor(private readonly svc: CustomersService) {}
-
+  @Get('customers/search')
+  search(
+    @Query('q') q = '',
+    @Query('limit', new ParseIntPipe({ optional: true })) limit?: number,
+  ) {
+    return this.svc.search(q, limit ?? 10);
+  }
   // GET /customers: filter + paging (đang đúng)
   @Get('customers')
   @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
@@ -65,13 +71,7 @@ export class CustomersController {
     return { code: 200, success: true, message: 'Cập nhật thành công', data };
   }
   // GET /customers/search: autocomplete nhanh (giữ nguyên)
-  @Get('customers/search')
-  search(
-    @Query('q') q = '',
-    @Query('limit', new ParseIntPipe({ optional: true })) limit?: number,
-  ) {
-    return this.svc.search(q, limit ?? 10);
-  }
+
 
    @Get('customers/:id/invoices')
   async customerInvoices(
