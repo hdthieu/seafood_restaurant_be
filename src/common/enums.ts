@@ -175,3 +175,25 @@ export enum StockFilter {
 }
 
 export enum Channel { DINEIN = 'DINEIN', TAKEAWAY = 'TAKEAWAY', DELIVERY = 'DELIVERY' }
+
+
+
+// Dùng cho module Sổ quỹ
+export enum CashbookType {
+  RECEIPT = 'RECEIPT',
+  PAYMENT = 'PAYMENT',
+}
+
+export enum CounterpartyGroup {
+  CUSTOMER = 'CUSTOMER',
+  SUPPLIER = 'SUPPLIER',
+  STAFF = 'STAFF',
+  DELIVERY_PARTNER = 'DELIVERY_PARTNER',
+  OTHER = 'OTHER',
+}
+
+export enum SourceModule {
+  SALE = 'SALE',
+  PURCHASE = 'PURCHASE',
+  OTHER = 'OTHER',
+}

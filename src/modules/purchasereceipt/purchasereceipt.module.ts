@@ -9,10 +9,11 @@ import { Supplier } from '@modules/supplier/entities/supplier.entity';
 import { InventoryTransaction } from '@modules/inventorytransaction/entities/inventorytransaction.entity';
 import { UomConversion } from '@modules/uomconversion/entities/uomconversion.entity';
 import { UnitsOfMeasure } from '@modules/units-of-measure/entities/units-of-measure.entity';
+import { CashbookModule } from '@modules/cashbook/cashbook.module';
 
 @Module({
   imports: [TypeOrmModule.forFeature([PurchaseReceipt, PurchaseReceiptItem, InventoryItem, InventoryTransaction,
-    Supplier, UomConversion, UnitsOfMeasure])],
+    Supplier, UomConversion, UnitsOfMeasure]), CashbookModule],
   controllers: [PurchasereceiptController],
   providers: [PurchasereceiptService],
 })
