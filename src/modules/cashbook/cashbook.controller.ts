@@ -10,6 +10,9 @@ import { UpdateCashOtherPartyDto } from './dto/update-cash-other-party.dto';
 import { ListCashOtherPartyDto } from './dto/list-cash-other-party.dto';
 import { CreateCashOtherPartyDto } from './dto/create-cash-other-party.dto';
 import { ListCashbookEntryDto } from './dto/list-cashbook.dto';
+import { CreateCashTypeDto } from './dto/create-cash-type.dto';
+import { ListCashTypeDto } from './dto/list-cash-type.dto';
+import { UpdateCashTypeDto } from './dto/update-cash-type.dto';
 
 @ApiTags('CashBook')
 @Controller('cashbook')
@@ -78,4 +81,34 @@ export class CashbookController {
     await this.cashbookService.removeCashOtherParty(id);
   }
 
+  // ------------------ CASH TYPE ------------------
+  @Post('cash-types')
+  @ApiOperation({ summary: 'Create a new cash type' })
+  async createCashType(@Body() dto: CreateCashTypeDto) {
+    return await this.cashbookService.createCashType(dto);
+  }
+
+  @Get('cash-types')
+  @ApiOperation({ summary: 'List all cash types' })
+  async listCashTypes(@Query() q: ListCashTypeDto) {
+    return await this.cashbookService.listCashTypes(q);
+  }
+
+  @Get('cash-types/:id')
+  @ApiOperation({ summary: 'Get details of a cash type by ID' })
+  async findOneCashType(@Param('id') id: string) {
+    return await this.cashbookService.findOneCashType(id);
+  }
+
+  @Patch('cash-types/:id')
+  @ApiOperation({ summary: 'Update a cash type by ID' })
+  async updateCashType(@Param('id') id: string, @Body() dto: UpdateCashTypeDto) {
+    return await this.cashbookService.updateCashType(id, dto);
+  }
+
+  @Delete('cash-types/:id')
+  @ApiOperation({ summary: 'Delete/deactivate a cash type by ID' })
+  async removeCashType(@Param('id') id: string) {
+    return await this.cashbookService.removeCashType(id);
+  }
 }
