@@ -27,9 +27,9 @@ export class CashOtherParty {
     @Column({ type: 'text', nullable: true })
     note?: string | null;
 
-    @CreateDateColumn()
+    @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
     createdAt: Date;
 
-    @UpdateDateColumn()
+    @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' })
     updatedAt: Date;
 }

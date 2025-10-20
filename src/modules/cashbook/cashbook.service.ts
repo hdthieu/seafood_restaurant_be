@@ -7,6 +7,7 @@ import { Invoice } from '@modules/invoice/entities/invoice.entity';
 import { PurchaseReceipt } from '@modules/purchasereceipt/entities/purchasereceipt.entity';
 import { ResponseCommon, ResponseException } from 'src/common/common_dto/respone.dto';
 import { CreateCashbookEntryDto } from './dto/create-cashbook.dto';
+import { ListCashTypeDto } from './dto/list-cash-type.dto';
 import { CashbookType, CounterpartyGroup } from 'src/common/enums';
 import { Customer } from '@modules/customers/entities/customers.entity';
 import { Supplier } from '@modules/supplier/entities/supplier.entity';
@@ -17,6 +18,7 @@ import { ListCashOtherPartyDto } from './dto/list-cash-other-party.dto';
 import { UpdateCashOtherPartyDto } from './dto/update-cash-other-party.dto';
 import { CashbookSummaryDto } from './dto/summary.dto';
 import { ListCashbookEntryDto } from './dto/list-cashbook.dto';
+import { CreateCashTypeDto } from './dto/create-cash-type.dto';
 
 @Injectable()
 export class CashbookService {
@@ -432,6 +434,160 @@ export class CashbookService {
       return new ResponseCommon(200, true, 'Xóa đối tác khác thành công', true);
     } catch (error) {
       throw new ResponseException(error, 500, 'REMOVE_CASH_OTHER_PARTY_FAILED');
+    }
+  }
+
+  // ===== CASH TYPE CRUD METHODS =====
+
+  /* ===== CREATE CASH TYPE ===== */
+  async createCashType(dto: CreateCashTypeDto) {
+    try {
+      // Kiểm tra trùng tên
+      const exists = await this.typeRepo.findOne({ where: { name: dto.name } });
+      if (exists) {
+        throw new ResponseException('DUPLICATE_NAME', 400, 'Tên loại thu chi đã tồn tại');
+      }
+
+      // Tạo entity trực tiếp
+      const entity = new CashType();
+      entity.name = dto.name;
+      entity.isIncomeType = dto.isIncomeType ?? true;
+      entity.isActive = dto.isActive ?? true;
+      if (dto.description) {
+        entity.description = dto.description;
+      }
+      const saved = await this.typeRepo.save(entity);
+      return new ResponseCommon(201, true, 'Tạo loại thu chi thành công', saved);
+    } catch (error) {
+      if (error instanceof ResponseException) {
+        throw error;
+      }
+      throw new ResponseException(error, 500, 'Lỗi khi tạo loại thu chi');
+    }
+  }
+
+  /* ===== GET LIST CASH TYPE ===== */
+  async listCashTypes(params: ListCashTypeDto = {}) {
+    try {
+      const page = Math.max(1, Number(params.page ?? 1));
+      const limit = Math.max(1, Math.min(100, Number(params.limit ?? 20)));
+
+      const qb = this.typeRepo.createQueryBuilder('ct');
+
+      // Search by name or description
+      if (params.q?.trim()) {
+        qb.andWhere('(ct.name ILIKE :q OR ct.description ILIKE :q)', {
+          q: `%${params.q.trim()}%`
+        });
+      }
+
+      // Filter by income type
+      if (typeof params.isIncomeType === 'boolean') {
+        qb.andWhere('ct.isIncomeType = :isIncome', { isIncome: params.isIncomeType });
+      }
+
+      // Filter by active status
+      if (typeof params.isActive === 'boolean') {
+        qb.andWhere('ct.isActive = :isActive', { isActive: params.isActive });
+      }
+
+      qb.orderBy('ct.createdAt', 'DESC')
+        .skip((page - 1) * limit)
+        .take(limit);
+
+      const [items, total] = await qb.getManyAndCount();
+
+      const meta: PageMeta = {
+        total,
+        page,
+        limit,
+        pages: Math.ceil(total / limit) || 0,
+      };
+
+      return new ResponseCommon(200, true, 'Lấy danh sách loại thu chi thành công', items, meta);
+    } catch (error) {
+      if (error instanceof ResponseException) {
+        throw error;
+      }
+      throw new ResponseException(error, 500, 'Lỗi khi lấy danh sách loại thu chi');
+    }
+  }
+
+  /* ===== GET ONE CASH TYPE ===== */
+  async findOneCashType(id: string) {
+    try {
+      const cashType = await this.typeRepo.findOne({ where: { id } });
+      if (!cashType) {
+        throw new ResponseException('NOT_FOUND', 404, 'Loại thu chi không tồn tại');
+      }
+      return new ResponseCommon(200, true, 'Lấy thông tin loại thu chi thành công', cashType);
+    } catch (error) {
+      if (error instanceof ResponseException) {
+        throw error;
+      }
+      throw new ResponseException(error, 500, 'Lỗi khi lấy thông tin loại thu chi');
+    }
+  }
+
+  /* ===== UPDATE CASH TYPE ===== */
+  async updateCashType(id: string, dto: {
+    name?: string;
+    isIncomeType?: boolean;
+    description?: string;
+    isActive?: boolean
+  }) {
+    try {
+      const cashType = await this.typeRepo.findOne({ where: { id } });
+      if (!cashType) {
+        throw new ResponseException('NOT_FOUND', 404, 'Loại thu chi không tồn tại');
+      }
+
+      // Kiểm tra trùng tên nếu có thay đổi tên
+      if (dto.name && dto.name !== cashType.name) {
+        const exists = await this.typeRepo.findOne({
+          where: { name: dto.name }
+        });
+        if (exists) {
+          throw new ResponseException('DUPLICATE_NAME', 400, 'Tên loại thu chi đã tồn tại');
+        }
+      }
+
+      const merged = this.typeRepo.merge(cashType, dto);
+      const saved = await this.typeRepo.save(merged);
+      return new ResponseCommon(200, true, 'Cập nhật loại thu chi thành công', saved);
+    } catch (error) {
+      if (error instanceof ResponseException) {
+        throw error;
+      }
+      throw new ResponseException(error, 500, 'Lỗi khi cập nhật loại thu chi');
+    }
+  }
+
+  /* ===== SOFT DELETE CASH TYPE ===== */
+  async removeCashType(id: string) {
+    try {
+      const cashType = await this.typeRepo.findOne({ where: { id } });
+      if (!cashType) {
+        throw new ResponseException('NOT_FOUND', 404, 'Loại thu chi không tồn tại');
+      }
+
+      // Kiểm tra xem có cashbook entries nào đang sử dụng không
+      const usageCount = await this.repo.count({ where: { cashType: { id } } });
+      if (usageCount > 0) {
+        // Soft delete: đặt isActive = false thay vì xóa hẳn
+        cashType.isActive = false;
+        const saved = await this.typeRepo.save(cashType);
+        return new ResponseCommon(200, true, 'Vô hiệu hóa loại thu chi thành công', saved);
+      } else {
+        // Hard delete nếu chưa được sử dụng
+        await this.typeRepo.remove(cashType);
+        return new ResponseCommon(200, true, 'Xóa loại thu chi thành công', true);
+      }
+    } catch (error) {
+      if (error instanceof ResponseException) {
+        throw error;
+      }
+      throw new ResponseException(error, 500, 'Lỗi khi xóa loại thu chi');
     }
   }
 
