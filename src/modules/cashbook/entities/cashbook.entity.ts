@@ -1,6 +1,7 @@
 import {
     Entity, PrimaryGeneratedColumn, Column, Unique, ManyToOne, JoinColumn,
-    CreateDateColumn, Check, Index
+    CreateDateColumn, Check, Index,
+    UpdateDateColumn
 } from 'typeorm';
 import { CashType } from './cash_types.entity';
 import { Customer } from '@modules/customers/entities/customers.entity';
@@ -65,6 +66,9 @@ export class CashbookEntry {
     @Column({ name: 'source_code', nullable: true })
     sourceCode?: string;
 
-    @CreateDateColumn()
+    @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
     createdAt: Date;
+
+    @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' })
+    updatedAt: Date;
 }
