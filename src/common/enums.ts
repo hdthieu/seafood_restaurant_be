@@ -197,3 +197,17 @@ export enum SourceModule {
   PURCHASE = 'PURCHASE',
   OTHER = 'OTHER',
 }
+
+
+//socket báo bếp 
+// POST /orders/:orderId/notify-items
+type NotifyItemsDto = {
+  items: Array<{ menuItemId: string; delta: number }>; // số lượng tăng thêm
+  priority?: boolean;
+};
+
+// POST /orderitems/cancel
+type CancelItemsDto = {
+  itemIds: string[];
+  reason: string;
+};
