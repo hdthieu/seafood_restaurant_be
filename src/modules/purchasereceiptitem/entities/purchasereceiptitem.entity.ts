@@ -60,4 +60,7 @@ export class PurchaseReceiptItem {
   @Check(`"lineNo" >= 1`)
   lineNo: number;
 
+  @Column('numeric', { precision: 12, scale: 3, default: 0 })
+  returnedQuantity: number;
+
 }

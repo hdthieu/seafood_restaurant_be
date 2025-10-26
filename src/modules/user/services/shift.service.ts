@@ -5,7 +5,7 @@ import { Repository } from 'typeorm';
 import { Shift } from '../entities/shift.entity';
 import { CreateShiftDto } from '../dto/create-shift.dto';
 import { UpdateShiftDto } from '../dto/update-shift.dto';
-import { ResponseCommon } from 'src/common/common_dto/respone.dto';
+import { ResponseCommon, ResponseException } from 'src/common/common_dto/respone.dto';
 
 function toMinutes(hhmm: string) {
   const [h, m] = hhmm.split(':').map(Number);
@@ -14,11 +14,11 @@ function toMinutes(hhmm: string) {
 
 @Injectable()
 export class ShiftService {
-  constructor(@InjectRepository(Shift) private repo: Repository<Shift>) {}
+  constructor(@InjectRepository(Shift) private repo: Repository<Shift>) { }
 
   async create(dto: CreateShiftDto) {
     if (toMinutes(dto.endTime) <= toMinutes(dto.startTime)) {
-      throw new ResponseCommon(400, false, 'END_TIME_MUST_BE_AFTER_START_TIME');
+      throw new ResponseException(null, 400, 'END_TIME_MUST_BE_AFTER_START_TIME');
     }
     const created = this.repo.create(dto);
     return this.repo.save(created);
@@ -31,7 +31,7 @@ export class ShiftService {
 
   async findOne(id: string) {
     const item = await this.repo.findOne({ where: { id } });
-    if (!item) throw new ResponseCommon(404, false, 'SHIFT_NOT_FOUND');
+    if (!item) throw new ResponseException(null, 404, 'SHIFT_NOT_FOUND');
     return item;
   }
 
@@ -40,7 +40,7 @@ export class ShiftService {
     const merged = this.repo.merge(item, dto);
     if (merged.startTime && merged.endTime) {
       if (toMinutes(merged.endTime) <= toMinutes(merged.startTime)) {
-        throw new ResponseCommon(400, false, 'END_TIME_MUST_BE_AFTER_START_TIME');
+        throw new ResponseException(null, 400, 'END_TIME_MUST_BE_AFTER_START_TIME');
       }
     }
     return this.repo.save(merged);

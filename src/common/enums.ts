@@ -176,8 +176,6 @@ export enum StockFilter {
 
 export enum Channel { DINEIN = 'DINEIN', TAKEAWAY = 'TAKEAWAY', DELIVERY = 'DELIVERY' }
 
-
-
 // Dùng cho module Sổ quỹ
 export enum CashbookType {
   RECEIPT = 'RECEIPT',
@@ -198,6 +196,8 @@ export enum SourceModule {
   OTHER = 'OTHER',
 }
 
+// Dùng cho trả hàng
+export enum ReturnMode { BY_RECEIPT = 'BY_RECEIPT', STANDALONE = 'STANDALONE' }
 
 //socket báo bếp 
 // POST /orders/:orderId/notify-items
