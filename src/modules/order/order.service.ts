@@ -34,6 +34,11 @@ import { Inject } from "@nestjs/common";
 import { UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
 import { ApiBearerAuth } from '@nestjs/swagger';
+import { MergeOrderDto } from './dto/merge-order.dto';
+import { KitchenGateway } from '@modules/socket/kitchen.gateway';
+import { KitchenTicket } from '@modules/kitchen/entities/kitchen-ticket.entity';
+import { SplitOrderDto } from './dto/split-order.dto';
+import {DeepPartial} from 'typeorm';
 const ALLOWED_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   [OrderStatus.PENDING]: [OrderStatus.CONFIRMED, OrderStatus.CANCELLED],
   [OrderStatus.CONFIRMED]: [OrderStatus.PREPARING, OrderStatus.CANCELLED],
@@ -42,6 +47,7 @@ const ALLOWED_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   [OrderStatus.SERVED]: [OrderStatus.PAID, OrderStatus.CANCELLED],
   [OrderStatus.PAID]: [],
   [OrderStatus.CANCELLED]: [],
+  [OrderStatus.MERGED]: [],
 };
 
 const EDITABLE_STATUSES: OrderStatus[] = [
@@ -63,6 +69,11 @@ export class OrdersService {
     @InjectRepository(Order) private readonly orderRepo: Repository<Order>,
     @Inject(forwardRef(() => OrderItemsService))
     private readonly orderItemsSvc: OrderItemsService,
+    private readonly gw: KitchenGateway,
+     
+    @InjectRepository(OrderItem) private readonly itemRepo: Repository<OrderItem>,
+    @InjectRepository(RestaurantTable) private readonly tableRepo: Repository<RestaurantTable>,
+     @InjectRepository(KitchenTicket) private readonly ticketRepo: Repository<KitchenTicket>,
   ) { }
 
   /** CREATE: tạo đơn PENDING, tạo item PENDING, trừ kho ngay, ghi history, recompute */
@@ -552,4 +563,271 @@ export class OrdersService {
       );
     }
   }
+
+
+
+
+  // gộp order 
+ async mergeOrders(fromId: string, toId: string) {
+  if (!fromId || !toId) throw new BadRequestException('MISSING_ORDER_ID');
+  if (fromId === toId) throw new BadRequestException('SAME_ORDER');
+
+  return this.ds.transaction(async (trx) => {
+    const orderRepo = trx.getRepository(Order);
+    const itemRepo  = trx.getRepository(OrderItem);
+
+    // 1) KHÓA 2 đơn (ONLY base table, KHÔNG JOIN)
+    const locked = await orderRepo
+      .createQueryBuilder('o')
+      .where('o.id IN (:...ids)', { ids: [fromId, toId] })
+      .setLock('pessimistic_write')        // SELECT ... FOR UPDATE OF o
+      .getMany();
+
+    const lockedFrom = locked.find(o => o.id === fromId);
+    const lockedTo   = locked.find(o => o.id === toId);
+    if (!lockedFrom) throw new NotFoundException('SOURCE_ORDER_NOT_FOUND');
+    if (!lockedTo)   throw new NotFoundException('TARGET_ORDER_NOT_FOUND');
+
+    // (Tuỳ chọn) KHÓA luôn các items thuộc 2 đơn để tránh race khi cộng dồn
+    await itemRepo
+      .createQueryBuilder('oi')
+      .where('oi.orderId IN (:...ids)', { ids: [fromId, toId] })
+      .setLock('pessimistic_write')
+      .getMany();
+
+    // 2) Load đầy đủ relations (KHÔNG khoá, vì base rows đã bị khoá)
+    const [from, to] = await Promise.all([
+      orderRepo.findOne({
+        where: { id: fromId },
+        relations: ['items', 'items.menuItem', 'table'],
+      }),
+      orderRepo.findOne({
+        where: { id: toId },
+        relations: ['items', 'items.menuItem', 'table'],
+      }),
+    ]);
+    if (!from) throw new NotFoundException('SOURCE_ORDER_NOT_FOUND');
+    if (!to)   throw new NotFoundException('TARGET_ORDER_NOT_FOUND');
+
+    if ([OrderStatus.PAID, OrderStatus.CANCELLED, OrderStatus.MERGED].includes(to.status)) {
+      throw new BadRequestException('TARGET_ORDER_INVALID_STATUS');
+    }
+
+    // 3) Map items đích để cộng dồn
+    const keyOf = (menuItemId: string, note?: string | null) => `${menuItemId}__${(note ?? '').trim()}`;
+    const targetMap = new Map<string, OrderItem>();
+    for (const it of to.items ?? []) targetMap.set(keyOf(it.menuItem.id, it.note), it);
+
+    // 4) Duyệt items nguồn
+    for (const src of from.items ?? []) {
+      const k = keyOf(src.menuItem.id, src.note);
+      const existed = targetMap.get(k);
+      if (existed) {
+        existed.quantity += src.quantity;
+        await itemRepo.save(existed);
+        await itemRepo.delete(src.id);
+      } else {
+        await itemRepo.update({ id: src.id }, { order: { id: to.id } as any });
+        src.order = to as any;
+        targetMap.set(k, src);
+        to.items.push(src);
+      }
+    }
+
+    // 5) Chuyển ticket bếp (nếu có)
+    await trx.getRepository(KitchenTicket).update(
+      { order: { id: from.id } as any },
+      { order: { id: to.id } as any },
+    );
+
+    // 6) Cập nhật trạng thái đơn nguồn
+    from.status = OrderStatus.MERGED;
+    (from as any).mergedInto = to as any; // nếu có cột
+    await orderRepo.save(from);
+
+    // 7) Giải phóng bàn nguồn nếu cần
+    if (from.table) {
+      await trx.getRepository(RestaurantTable).update(
+        { id: from.table.id, currentOrder: { id: from.id } as any },
+        { currentOrder: null },
+      );
+    }
+
+    // 8) Lưu lại đơn đích
+    await orderRepo.save(to);
+
+    // 9) Bắn socket
+    try {
+      this.gw.server.to('cashier').emit('orders:merged', {
+        fromOrderId: from.id,
+        toOrderId: to.id,
+        fromTableId: from.table?.id ?? null,
+        toTableId: to.table?.id ?? null,
+      });
+    } catch {}
+
+    // 10) Trả về đơn đích sau ghép
+    return await orderRepo.findOne({
+      where: { id: to.id },
+      relations: ['items', 'items.menuItem', 'table',],
+    });
+  });
+}
+
+
+
+// tách đơn 
+ /**
+   * Tách một phần items từ đơn nguồn sang đơn đích.
+   * - Nếu mode=create-new: tạo đơn mới ở tableId
+   * - Nếu mode=to-existing: chuyển vào toOrderId
+   * - Điều kiện: tổng qty còn lại trên đơn nguồn >= 1
+   * - Dòng nào còn lại 0 sẽ DELETE (không lưu 0 để tránh vi phạm CHECK)
+   */
+  /**
+   * Tách một phần items từ đơn nguồn sang đơn đích.
+   * - mode=create-new: tạo đơn mới ở tableId
+   * - mode=to-existing: chuyển vào toOrderId
+   * - Điều kiện: tổng qty còn lại của đơn nguồn >= 1
+   * - Dòng nào về 0 sẽ DELETE (không lưu 0 để tránh CHECK)
+   */
+  async splitOrder(fromId: string, dto: SplitOrderDto) {
+    const { mode, tableId, toOrderId, items } = dto;
+
+    if (!items?.length) throw new BadRequestException('NO_ITEMS_TO_SPLIT');
+    if (mode === 'create-new' && !tableId) throw new BadRequestException('MISSING_TABLE_ID');
+    if (mode === 'to-existing' && !toOrderId) throw new BadRequestException('MISSING_TO_ORDER');
+
+    return this.ds.transaction(async (trx) => {
+      const orderRepo = trx.getRepository(Order);
+      const itemRepo  = trx.getRepository(OrderItem);
+      const tableRepo = trx.getRepository(RestaurantTable);
+
+      // 1) Khoá base row của đơn nguồn
+      await orderRepo.createQueryBuilder('o')
+        .where('o.id = :id', { id: fromId })
+        .setLock('pessimistic_write')
+        .getOneOrFail();
+
+      // 2) Load đơn nguồn (có relations)
+      const from = await orderRepo.findOne({
+        where: { id: fromId },
+        relations: ['items', 'items.menuItem', 'table'],
+      });
+      if (!from) throw new NotFoundException('SOURCE_ORDER_NOT_FOUND');
+      if ([OrderStatus.PAID, OrderStatus.CANCELLED, OrderStatus.MERGED].includes(from.status)) {
+        throw new BadRequestException('SOURCE_ORDER_INVALID_STATUS');
+      }
+
+      // 3) Map số lượng tách theo orderItemId
+      const want = new Map<string, number>();
+      for (const it of items) want.set(it.itemId, it.quantity);
+
+      // 4) Valid không vượt quá từng dòng
+      for (const src of from.items ?? []) {
+        const q = want.get(src.id) ?? 0;
+        if (q < 0) throw new BadRequestException('NEGATIVE_SPLIT');
+        if (q > src.quantity) throw new BadRequestException(`SPLIT_EXCEEDS:${src.id}`);
+      }
+
+      // 5) Tổng còn lại của đơn nguồn ≥ 1
+      const totalRemain = (from.items ?? [])
+        .reduce((s, it) => s + (it.quantity - (want.get(it.id) ?? 0)), 0);
+      if (totalRemain < 1) throw new BadRequestException('SOURCE_WOULD_BECOME_EMPTY');
+
+      // 6) Lấy/ tạo đơn đích
+      let to: Order;
+      if (mode === 'to-existing') {
+        // khoá
+        await orderRepo.createQueryBuilder('o')
+          .where('o.id = :id', { id: toOrderId })
+          .setLock('pessimistic_write')
+          .getOneOrFail();
+
+        to = await orderRepo.findOne({
+          where: { id: toOrderId! },
+          relations: ['items', 'items.menuItem', 'table'],
+        }) as Order;
+        if (!to) throw new NotFoundException('TARGET_ORDER_NOT_FOUND');
+        if ([OrderStatus.PAID, OrderStatus.CANCELLED, OrderStatus.MERGED].includes(to.status)) {
+          throw new BadRequestException('TARGET_ORDER_INVALID_STATUS');
+        }
+      } else {
+        const tbl = await tableRepo.findOne({ where: { id: tableId! } });
+        if (!tbl) throw new NotFoundException('TARGET_TABLE_NOT_FOUND');
+
+        to = await orderRepo.save(orderRepo.create({
+          table: tbl,
+          status: OrderStatus.PENDING,
+          orderType: from.orderType,
+        }));
+        to.items = [];
+      }
+
+      // 7) Map item đích để gộp theo (menuItemId + note)
+      const keyOf = (menuItemId: string, note?: string | null) =>
+        `${menuItemId}__${(note ?? '').trim()}`;
+
+      const toMap = new Map<string, OrderItem>();
+      for (const it of to.items ?? []) {
+        toMap.set(keyOf(it.menuItem.id, (it as any).note), it);
+      }
+
+      // 8) Thực hiện tách
+      for (const src of from.items ?? []) {
+        const moveQty = want.get(src.id) ?? 0;
+        if (moveQty <= 0) continue;
+
+        const remain = src.quantity - moveQty;
+
+        // 8.1 Giảm ở đơn nguồn: nếu về 0 -> DELETE
+        if (remain <= 0) {
+          await itemRepo.delete(src.id);
+        } else {
+          await itemRepo.update({ id: src.id }, { quantity: remain });
+        }
+
+        // 8.2 Cộng/gộp sang đơn đích
+        const k = keyOf(src.menuItem.id, (src as any).note);
+        const existed = toMap.get(k);
+
+        if (existed) {
+          await itemRepo.update({ id: existed.id }, { quantity: existed.quantity + moveQty });
+          existed.quantity += moveQty;
+        } else {
+          const partial: DeepPartial<OrderItem> = {
+            order:    { id: to.id } as any,
+            menuItem: { id: src.menuItem.id } as any,
+            quantity: moveQty,
+            price:    src.price,
+            status:   src.status,
+            isCooked: (src as any).isCooked,
+            batchId:  (src as any).batchId,
+            note:     (src as any).note,
+          };
+
+          const entity = itemRepo.create(partial);     // => OrderItem
+          const saved  = await itemRepo.save(entity);  // => OrderItem
+
+          toMap.set(k, saved);
+          (to.items ??= []).push(saved);
+        }
+      }
+
+      // 9) (tuỳ chọn) xử lý kitchen tickets nếu có
+      // await trx.getRepository(KitchenTicket).update({ order: { id: from.id } }, { order: { id: to.id } });
+
+      // 10) Trả về 2 đơn sau tách
+      const [fromAfter, toAfter] = await Promise.all([
+        orderRepo.findOne({ where: { id: from.id }, relations: ['items', 'items.menuItem', 'table'] }),
+        orderRepo.findOne({ where: { id: to.id },   relations: ['items', 'items.menuItem', 'table'] }),
+      ]);
+
+      // (tuỳ chọn) phát socket
+      // this.gw.server.to('cashier').emit('orders:split', { fromOrderId: from.id, toOrderId: to.id });
+
+      return { from: fromAfter, to: toAfter };
+    });
+  }
+
 }

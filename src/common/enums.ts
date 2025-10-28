@@ -35,7 +35,8 @@ export enum OrderStatus {
   READY = 'READY',                // Món đã nấu xong, chờ phục vụ mang ra
   SERVED = 'SERVED',              // Đã phục vụ xong cho bàn
   PAID = 'PAID',                  // Đã thanh toán
-  CANCELLED = 'CANCELLED',        // Đơn bị hủy (khách hủy hoặc admin)
+  CANCELLED = 'CANCELLED',  
+  MERGED = 'MERGED',         // Đơn bị hủy (khách hủy hoặc admin)
 }
 
 export enum SupplierStatus { ACTIVE = 'ACTIVE', INACTIVE = 'INACTIVE' }
@@ -176,8 +177,6 @@ export enum StockFilter {
 
 export enum Channel { DINEIN = 'DINEIN', TAKEAWAY = 'TAKEAWAY', DELIVERY = 'DELIVERY' }
 
-
-
 // Dùng cho module Sổ quỹ
 export enum CashbookType {
   RECEIPT = 'RECEIPT',
@@ -197,3 +196,19 @@ export enum SourceModule {
   PURCHASE = 'PURCHASE',
   OTHER = 'OTHER',
 }
+
+// Dùng cho trả hàng
+export enum ReturnMode { BY_RECEIPT = 'BY_RECEIPT', STANDALONE = 'STANDALONE' }
+
+//socket báo bếp 
+// POST /orders/:orderId/notify-items
+type NotifyItemsDto = {
+  items: Array<{ menuItemId: string; delta: number }>; // số lượng tăng thêm
+  priority?: boolean;
+};
+
+// POST /orderitems/cancel
+type CancelItemsDto = {
+  itemIds: string[];
+  reason: string;
+};

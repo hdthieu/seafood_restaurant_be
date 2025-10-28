@@ -28,14 +28,13 @@ export class CashbookController {
   async create(@Body() dto: CreateCashbookEntryDto) {
     return await this.cashbookService.createCashBookEntry(dto);
   }
-
   @Get('list-cashbook')
   @Roles(UserRole.MANAGER)
   @ApiOperation({ summary: 'List cashbook entries (paged) + summary' })
   async list(@Query() q: ListCashbookEntryDto) {
     return await this.cashbookService.listCashBookEntries(q);
   }
-  @Get('detail-cashbook:id')
+  @Get('detail-cashbook/:id')
   @ApiOperation({ summary: 'Get details of a Cashbook entry' })
   async findOne(@Param('id') id: string) {
     return this.cashbookService.findOneCashbook(id);

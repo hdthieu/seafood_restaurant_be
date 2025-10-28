@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { CreatePurchaseReceiptDto } from './dto/create-purchasereceipt.dto';
 import { PurchaseReceipt } from './entities/purchasereceipt.entity';
-import { ResponseCommon } from 'src/common/common_dto/respone.dto';
+import { ResponseException } from 'src/common/common_dto/respone.dto';
 import { DataSource, DeepPartial, Repository } from 'typeorm';
 import { InventoryItem } from '@modules/inventoryitems/entities/inventoryitem.entity';
 import { Supplier } from '@modules/supplier/entities/supplier.entity';
@@ -13,10 +13,14 @@ import { In } from 'typeorm';
 import { calcLineTotal, calcReceiptTotals, resolveUomAndFactor } from '@modules/helper/purchasereceipthelper.service';
 import { PayReceiptDto } from './dto/pay-receipt.dto';
 import { InventoryTransaction } from '@modules/inventorytransaction/entities/inventorytransaction.entity';
+import { PurchaseReturnLog } from './entities/purchase-return-log.entity';
 import { UpdatePurchaseReceiptDto } from './dto/update-purchasereceipt.dto';
 import { UnitsOfMeasure } from '@modules/units-of-measure/entities/units-of-measure.entity';
 import { UomConversion } from '@modules/uomconversion/entities/uomconversion.entity';
 import { CashbookService } from '@modules/cashbook/cashbook.service';
+import { ReturnReceiptDto } from './dto/return-receipt.dto';
+import { StandaloneReturnDto } from './dto/standalone-return.dto';
+import { ReturnMode } from 'src/common/enums';
 @Injectable()
 export class PurchasereceiptService {
   constructor(
@@ -26,6 +30,7 @@ export class PurchasereceiptService {
     @InjectRepository(InventoryItem) private readonly invRepo: Repository<InventoryItem>,
     @InjectRepository(Supplier) private readonly supplierRepo: Repository<Supplier>,
     @InjectRepository(InventoryTransaction) private readonly txRepo: Repository<InventoryTransaction>,
+    @InjectRepository(PurchaseReturnLog) private readonly returnLogRepo: Repository<PurchaseReturnLog>,
     @InjectRepository(UnitsOfMeasure) private readonly uomRepo: Repository<UnitsOfMeasure>,
     @InjectRepository(UomConversion) private readonly convRepo: Repository<UomConversion>,
     private readonly cashbookService: CashbookService,
@@ -38,25 +43,121 @@ export class PurchasereceiptService {
     return `PN-${ymd}-${uuidv4().slice(0, 4).toUpperCase()}`;
   }
 
+  async returnStandalone(userId: string, dto: StandaloneReturnDto) {
+    // check feature flag
+    if (process.env.ALLOW_STANDALONE_RETURN !== 'true') {
+      throw new ResponseException(null, 403, 'STANDALONE_RETURN_DISABLED');
+    }
+
+    // basic validation
+    const supplier = await this.supplierRepo.findOne({ where: { id: dto.supplierId } });
+    if (!supplier) throw new ResponseException(null, 404, 'SUPPLIER_NOT_FOUND');
+
+    if (!dto.items?.length) throw new ResponseException(null, 400, 'RETURN_ITEM_LIST_EMPTY');
+
+    // load inventory items
+    const ids = Array.from(new Set(dto.items.map(i => i.itemId)));
+    const invs = await this.invRepo.find({ where: { id: In(ids) }, relations: ['baseUom'] });
+    if (invs.length !== ids.length) {
+      const found = new Set(invs.map(i => i.id));
+      const missing = ids.filter(id => !found.has(id));
+      throw new ResponseException(null, 404, `SOME_ITEMS_NOT_FOUND:${missing.join(',')}`);
+    }
+    const invMap = new Map(invs.map(i => [i.id, i]));
+
+    // process in transaction
+    return this.ds.transaction(async (em) => {
+      const inventoryRepo = em.getRepository(InventoryItem);
+      const txRepo = em.getRepository(InventoryTransaction);
+      const returnLogRepo = em.getRepository(PurchaseReturnLog);
+
+      const created: Array<any> = [];
+      let totalReturnAmount = 0;
+
+      for (const line of dto.items) {
+        const qty = Number(line.quantity ?? 0);
+        if (!qty || qty <= 0) throw new ResponseException(null, 400, 'INVALID_RETURN_QTY');
+
+        const inv = invMap.get(line.itemId);
+        if (!inv) throw new ResponseException(null, 404, `INVENTORY_ITEM_NOT_FOUND:${line.itemId}`);
+
+        // assume qty is given in base UOM
+        const baseQty = +(qty).toFixed(3);
+        const before = Number(inv.quantity);
+        if (before + 1e-6 < baseQty) throw new ResponseException(null, 400, `INSUFFICIENT_STOCK_FOR_RETURN:${inv.id}`);
+        const after = Number((before - baseQty).toFixed(3));
+        inv.quantity = after as any;
+        await inventoryRepo.save(inv as any);
+
+        const tx = txRepo.create({
+          item: { id: inv.id } as any,
+          quantity: baseQty,
+          action: InventoryAction.OUT,
+          beforeQty: before,
+          afterQty: after,
+          refType: 'STANDALONE_RETURN',
+          refId: dto.supplierId as any,
+          refItemId: null,
+          note: dto.reason ?? undefined,
+          performedBy: userId ? ({ id: userId } as any) : null,
+        } as any);
+        const savedTx = await txRepo.save(tx as any);
+
+        // compute return amount: use unitPrice if provided, otherwise average cost
+        const unitPrice = (line.unitPrice ?? Number(inv.avgCost ?? 0));
+        const lineAmount = +(unitPrice * qty).toFixed(2);
+        totalReturnAmount = +(totalReturnAmount + lineAmount).toFixed(2);
+
+        const log = returnLogRepo.create({
+          receipt: null,
+          receiptItem: null,
+          supplier: supplier,
+          item: { id: inv.id } as any,
+          quantity: qty,
+          conversionToBase: 1,
+          baseQty,
+          reason: dto.reason ?? undefined,
+          lotNumber: line.lotNumber ?? undefined,
+          inventoryTx: savedTx,
+          performedBy: { id: userId } as any,
+          mode: ReturnMode.STANDALONE,
+        } as any);
+        const savedLog = await returnLogRepo.save(log as any);
+
+        created.push({ logId: (savedLog as any).id, txId: (savedTx as any).id, itemId: inv.id, quantity: qty, lineAmount });
+      }
+
+      return {
+        supplierId: supplier.id,
+        totalReturnAmount,
+        refundProcessed: false,
+        note: 'Standalone return processed. Create CreditNote or refund manually.',
+        returned: created,
+      };
+    });
+  }
+
+
+
   /** Tạo phiếu DRAFT + items */
   async createDraft(userId: string, dto: CreatePurchaseReceiptDto) {
     // 1) Header
     const supplier = await this.supplierRepo.findOne({ where: { id: dto.supplierId } });
-    if (!supplier) throw new ResponseCommon(404, false, 'SUPPLIER_NOT_FOUND');
+    if (!supplier) throw new ResponseException(null, 404, 'SUPPLIER_NOT_FOUND');
 
     // 2) Validate items cơ bản
     if (dto.globalDiscountType === DiscountType.PERCENT && (dto.globalDiscountValue ?? 0) > 100) {
-      throw new ResponseCommon(400, false, 'GLOBAL_PERCENT_OUT_OF_RANGE');
+      throw new ResponseException(null, 400, 'GLOBAL_PERCENT_OUT_OF_RANGE');
     }
     dto.items.forEach((it, idx) => {
       if (it.discountType === DiscountType.PERCENT && (it.discountValue ?? 0) > 100) {
-        throw new ResponseCommon(400, false, `LINE_PERCENT_OUT_OF_RANGE_AT_${idx + 1}`);
+        throw new ResponseException(null, 400, `LINE_PERCENT_OUT_OF_RANGE_AT_${idx + 1}`);
       }
       if (!it.quantity || it.quantity <= 0) {
-        throw new ResponseCommon(400, false, `INVALID_QTY_AT_${idx + 1}`);
+        throw new ResponseException(null, 400, `INVALID_QTY_AT_${idx + 1}`);
       }
       if (it.unitPrice == null || it.unitPrice < 0) {
-        throw new ResponseCommon(400, false, `INVALID_PRICE_AT_${idx + 1}`);
+        throw new ResponseException(null, 400, `INVALID_PRICE_AT_${idx + 1}`);
       }
     });
 
@@ -67,7 +168,7 @@ export class PurchasereceiptService {
       const lot = norm(it.lotNumber);
       if (!lot) return; // không nhập lô thì cho phép (tuỳ nghiệp vụ)
       const key = [it.itemId, norm(it.receivedUomCode), lot].join('|');
-      if (dupKey.has(key)) throw new ResponseCommon(400, false, `DUPLICATE_LOT_AT_${idx + 1}`);
+      if (dupKey.has(key)) throw new ResponseException(null, 400, `DUPLICATE_LOT_AT_${idx + 1}`);
       dupKey.add(key);
     });
 
@@ -81,7 +182,7 @@ export class PurchasereceiptService {
     if (invItems.length !== uniqIds.length) {
       const found = new Set(invItems.map(i => i.id));
       const missing = uniqIds.filter(id => !found.has(id));
-      throw new ResponseCommon(404, false, `SOME_ITEMS_NOT_FOUND:${missing.join(',')}`);
+      throw new ResponseException(null, 404, `SOME_ITEMS_NOT_FOUND:${missing.join(',')}`);
     }
     const itemMap = new Map(invItems.map(i => [i.id, i]));
 
@@ -128,11 +229,11 @@ export class PurchasereceiptService {
           factor = res.factor;
         } catch (err: any) {
           const msg = String(err?.message || err);
-          if (msg === 'BASE_UOM_NOT_FOUND') throw new ResponseCommon(400, false, `BASE_UOM_NOT_FOUND_AT_${lineNo}`);
-          if (msg === 'RECEIVED_UOM_NOT_FOUND') throw new ResponseCommon(400, false, `RECEIVED_UOM_NOT_FOUND_AT_${lineNo}`);
-          if (msg === 'UOM_DIMENSION_MISMATCH') throw new ResponseCommon(400, false, `UOM_DIMENSION_MISMATCH_AT_${lineNo}`);
-          if (msg === 'NO_CONVERSION_DEFINED') throw new ResponseCommon(400, false, `NO_CONVERSION_DEFINED_AT_${lineNo}`);
-          throw new ResponseCommon(400, false, `UOM_ERROR_AT_${lineNo}`);
+          if (msg === 'BASE_UOM_NOT_FOUND') throw new ResponseException(null, 400, `BASE_UOM_NOT_FOUND_AT_${lineNo}`);
+          if (msg === 'RECEIVED_UOM_NOT_FOUND') throw new ResponseException(null, 400, `RECEIVED_UOM_NOT_FOUND_AT_${lineNo}`);
+          if (msg === 'UOM_DIMENSION_MISMATCH') throw new ResponseException(null, 400, `UOM_DIMENSION_MISMATCH_AT_${lineNo}`);
+          if (msg === 'NO_CONVERSION_DEFINED') throw new ResponseException(null, 400, `NO_CONVERSION_DEFINED_AT_${lineNo}`);
+          throw new ResponseException(null, 400, `UOM_ERROR_AT_${lineNo}`);
         }
 
         const line = lineRepo.create({
@@ -226,7 +327,7 @@ export class PurchasereceiptService {
         'items.receivedUom',
       ],
     });
-    if (!r) throw new ResponseCommon(404, false, 'RECEIPT_NOT_FOUND');
+    if (!r) throw new ResponseException(null, 404, 'RECEIPT_NOT_FOUND');
 
     const totals = calcReceiptTotals(r.items, r);
 
@@ -299,22 +400,22 @@ export class PurchasereceiptService {
   async createAndPost(userId: string, dto: CreatePurchaseReceiptDto) {
     // 1) Validate header
     const supplier = await this.supplierRepo.findOne({ where: { id: dto.supplierId } });
-    if (!supplier) throw new ResponseCommon(404, false, 'SUPPLIER_NOT_FOUND');
+    if (!supplier) throw new ResponseException(null, 404, 'SUPPLIER_NOT_FOUND');
 
     // --- VALIDATE items cơ bản ---
     if (dto.globalDiscountType === DiscountType.PERCENT && (dto.globalDiscountValue ?? 0) > 100) {
-      throw new ResponseCommon(400, false, 'GLOBAL_PERCENT_OUT_OF_RANGE');
+      throw new ResponseException(null, 400, 'GLOBAL_PERCENT_OUT_OF_RANGE');
     }
 
     dto.items.forEach((it, idx) => {
       if (it.discountType === DiscountType.PERCENT && (it.discountValue ?? 0) > 100) {
-        throw new ResponseCommon(400, false, `LINE_PERCENT_OUT_OF_RANGE_AT_${idx + 1}`);
+        throw new ResponseException(null, 400, `LINE_PERCENT_OUT_OF_RANGE_AT_${idx + 1}`);
       }
       if (!it.quantity || it.quantity <= 0) {
-        throw new ResponseCommon(400, false, `INVALID_QTY_AT_${idx + 1}`);
+        throw new ResponseException(null, 400, `INVALID_QTY_AT_${idx + 1}`);
       }
       if (it.unitPrice == null || it.unitPrice < 0) {
-        throw new ResponseCommon(400, false, `INVALID_PRICE_AT_${idx + 1}`);
+        throw new ResponseException(null, 400, `INVALID_PRICE_AT_${idx + 1}`);
       }
     });
 
@@ -325,7 +426,7 @@ export class PurchasereceiptService {
       const lot = norm(it.lotNumber);
       if (!lot) return; // không nhập lô thì cho phép trùng (tuỳ nghiệp vụ)
       const key = [it.itemId, norm(it.receivedUomCode), lot].join('|');
-      if (dupKey.has(key)) throw new ResponseCommon(400, false, `DUPLICATE_LOT_AT_${idx + 1}`);
+      if (dupKey.has(key)) throw new ResponseException(null, 400, `DUPLICATE_LOT_AT_${idx + 1}`);
       dupKey.add(key);
     });
 
@@ -339,7 +440,7 @@ export class PurchasereceiptService {
     if (invItems.length !== uniqIds.length) {
       const found = new Set(invItems.map(i => i.id));
       const missing = uniqIds.filter(id => !found.has(id));
-      throw new ResponseCommon(404, false, `SOME_ITEMS_NOT_FOUND:${missing.join(',')}`);
+      throw new ResponseException(null, 404, `SOME_ITEMS_NOT_FOUND:${missing.join(',')}`);
     }
     const itemMap = new Map(invItems.map(i => [i.id, i]));
 
@@ -389,11 +490,11 @@ export class PurchasereceiptService {
           factor = res.factor;
         } catch (err: any) {
           const msg = String(err?.message || err);
-          if (msg === 'BASE_UOM_NOT_FOUND') throw new ResponseCommon(400, false, `BASE_UOM_NOT_FOUND_AT_${lineNo}`);
-          if (msg === 'RECEIVED_UOM_NOT_FOUND') throw new ResponseCommon(400, false, `RECEIVED_UOM_NOT_FOUND_AT_${lineNo}`);
-          if (msg === 'UOM_DIMENSION_MISMATCH') throw new ResponseCommon(400, false, `UOM_DIMENSION_MISMATCH_AT_${lineNo}`);
-          if (msg === 'NO_CONVERSION_DEFINED') throw new ResponseCommon(400, false, `NO_CONVERSION_DEFINED_AT_${lineNo}`);
-          throw new ResponseCommon(400, false, `UOM_ERROR_AT_${lineNo}`);
+          if (msg === 'BASE_UOM_NOT_FOUND') throw new ResponseException(null, 400, `BASE_UOM_NOT_FOUND_AT_${lineNo}`);
+          if (msg === 'RECEIVED_UOM_NOT_FOUND') throw new ResponseException(null, 400, `RECEIVED_UOM_NOT_FOUND_AT_${lineNo}`);
+          if (msg === 'UOM_DIMENSION_MISMATCH') throw new ResponseException(null, 400, `UOM_DIMENSION_MISMATCH_AT_${lineNo}`);
+          if (msg === 'NO_CONVERSION_DEFINED') throw new ResponseException(null, 400, `NO_CONVERSION_DEFINED_AT_${lineNo}`);
+          throw new ResponseException(null, 400, `UOM_ERROR_AT_${lineNo}`);
         }
 
         const line = lineRepo.create({
@@ -417,7 +518,7 @@ export class PurchasereceiptService {
         const unitCostBase = Number(line.unitPrice) / Number(line.conversionToBase);
 
         const inv = await invRepo.findOne({ where: { id: itemMaster.id } });
-        if (!inv) throw new ResponseCommon(404, false, 'ITEM_NOT_FOUND');
+        if (!inv) throw new ResponseException(null, 404, 'ITEM_NOT_FOUND');
 
         const before = Number(inv.quantity);
         const oldVal = before * Number(inv.avgCost);
@@ -451,8 +552,8 @@ export class PurchasereceiptService {
       const grandTotal = +Number(totals.total).toFixed(2);
       const paidNow = +Number(receipt.amountPaid ?? 0).toFixed(2);
 
-      if (paidNow < 0) throw new ResponseCommon(400, false, 'INVALID_PAYMENT_AMOUNT');
-      if (paidNow > grandTotal) throw new ResponseCommon(400, false, 'OVERPAY_NOT_ALLOWED');
+      if (paidNow < 0) throw new ResponseException(null, 400, 'INVALID_PAYMENT_AMOUNT');
+      if (paidNow > grandTotal) throw new ResponseException(null, 400, 'OVERPAY_NOT_ALLOWED');
 
       const remaining = Math.max(0, +(grandTotal - paidNow).toFixed(2));
       receipt.debt = remaining;
@@ -502,11 +603,11 @@ export class PurchasereceiptService {
         where: { id },
         relations: ['items'],
       });
-      if (!r) throw new ResponseCommon(404, false, 'RECEIPT_NOT_FOUND');
+      if (!r) throw new ResponseException(null, 404, 'RECEIPT_NOT_FOUND');
 
       // Chỉ cho phép thanh toán khi hóa đơn còn nợ
       if (r.status !== ReceiptStatus.POSTED && r.status !== ReceiptStatus.OWING) {
-        throw new ResponseCommon(400, false, 'ONLY_OWING_OR_POSTED_CAN_BE_PAID');
+        throw new ResponseException(null, 400, 'ONLY_OWING_OR_POSTED_CAN_BE_PAID');
       }
 
       // Tổng tiền hóa đơn
@@ -517,19 +618,19 @@ export class PurchasereceiptService {
       const add = +Number(dto.addAmountPaid || 0).toFixed(2);
 
       if (add <= 0) {
-        throw new ResponseCommon(400, false, 'INVALID_PAYMENT_AMOUNT');
+        throw new ResponseException(null, 400, 'INVALID_PAYMENT_AMOUNT');
       }
 
       const remainingBefore = Math.max(0, +(grandTotal - oldPaid).toFixed(2));
 
       // Nếu không còn nợ, không cho phép thêm tiền
       if (remainingBefore === 0) {
-        throw new ResponseCommon(400, false, 'NO_REMAINING_AMOUNT_TO_PAY');
+        throw new ResponseException(null, 400, 'NO_REMAINING_AMOUNT_TO_PAY');
       }
 
       // Chặn overpay
       if (add > remainingBefore) {
-        throw new ResponseCommon(400, false, 'OVERPAY_NOT_ALLOWED');
+        throw new ResponseException(null, 400, 'OVERPAY_NOT_ALLOWED');
       }
 
       const newPaid = +(oldPaid + add).toFixed(2);
@@ -562,9 +663,9 @@ export class PurchasereceiptService {
 
   async cancelReceipt(id: string) {
     const r = await this.receiptRepo.findOne({ where: { id } });
-    if (!r) throw new ResponseCommon(404, false, 'RECEIPT_NOT_FOUND');
+    if (!r) throw new ResponseException(null, 404, 'RECEIPT_NOT_FOUND');
     if (r.status !== ReceiptStatus.DRAFT) {
-      throw new ResponseCommon(400, false, 'ONLY_DRAFT_CAN_BE_CANCELLED');
+      throw new ResponseException(null, 400, 'ONLY_DRAFT_CAN_BE_CANCELLED');
     }
     r.status = ReceiptStatus.CANCELLED;
     await this.receiptRepo.save(r);
@@ -582,28 +683,28 @@ export class PurchasereceiptService {
       where: { id: receiptId },
       relations: ['supplier'],
     });
-    if (!existed) throw new ResponseCommon(404, false, 'RECEIPT_NOT_FOUND');
+    if (!existed) throw new ResponseException(null, 404, 'RECEIPT_NOT_FOUND');
 
     if (existed.status !== ReceiptStatus.DRAFT && !postNow) {
       // chỉ cho sửa khi còn DRAFT
-      throw new ResponseCommon(400, false, 'ONLY_DRAFT_CAN_BE_UPDATED');
+      throw new ResponseException(null, 400, 'ONLY_DRAFT_CAN_BE_UPDATED');
     }
     if (existed.status !== ReceiptStatus.DRAFT && postNow) {
       // chỉ cho POST khi đang DRAFT
-      throw new ResponseCommon(400, false, 'ONLY_DRAFT_CAN_BE_POSTED');
+      throw new ResponseException(null, 400, 'ONLY_DRAFT_CAN_BE_POSTED');
     }
 
     // 1) Validate header
     let supplier = existed.supplier;
     if (dto.supplierId && dto.supplierId !== existed.supplier?.id) {
       const foundSupplier = await this.supplierRepo.findOne({ where: { id: dto.supplierId } });
-      if (!foundSupplier) throw new ResponseCommon(404, false, 'SUPPLIER_NOT_FOUND');
+      if (!foundSupplier) throw new ResponseException(null, 404, 'SUPPLIER_NOT_FOUND');
       supplier = foundSupplier;
-      if (!supplier) throw new ResponseCommon(404, false, 'SUPPLIER_NOT_FOUND');
+      if (!supplier) throw new ResponseException(null, 404, 'SUPPLIER_NOT_FOUND');
     }
 
     if (dto.globalDiscountType === DiscountType.PERCENT && (dto.globalDiscountValue ?? 0) > 100) {
-      throw new ResponseCommon(400, false, 'GLOBAL_PERCENT_OUT_OF_RANGE');
+      throw new ResponseException(null, 400, 'GLOBAL_PERCENT_OUT_OF_RANGE');
     }
 
     // 2) Validate items
@@ -615,19 +716,19 @@ export class PurchasereceiptService {
 
     itemsDto.forEach((it, idx) => {
       if (it.discountType === DiscountType.PERCENT && (it.discountValue ?? 0) > 100) {
-        throw new ResponseCommon(400, false, `LINE_PERCENT_OUT_OF_RANGE_AT_${idx + 1}`);
+        throw new ResponseException(null, 400, `LINE_PERCENT_OUT_OF_RANGE_AT_${idx + 1}`);
       }
       if (!it.quantity || it.quantity <= 0) {
-        throw new ResponseCommon(400, false, `INVALID_QTY_AT_${idx + 1}`);
+        throw new ResponseException(null, 400, `INVALID_QTY_AT_${idx + 1}`);
       }
       if (it.unitPrice == null || it.unitPrice < 0) {
-        throw new ResponseCommon(400, false, `INVALID_PRICE_AT_${idx + 1}`);
+        throw new ResponseException(null, 400, `INVALID_PRICE_AT_${idx + 1}`);
       }
 
       const lot = norm(it.lotNumber);
       if (!lot) return;
       const key = [it.itemId, norm(it.receivedUomCode), lot].join('|');
-      if (dup.has(key)) throw new ResponseCommon(400, false, `DUPLICATE_LOT_AT_${idx + 1}`);
+      if (dup.has(key)) throw new ResponseException(null, 400, `DUPLICATE_LOT_AT_${idx + 1}`);
       dup.add(key);
     });
 
@@ -640,7 +741,7 @@ export class PurchasereceiptService {
     if (uniqIds.length && invItems.length !== uniqIds.length) {
       const found = new Set(invItems.map(i => i.id));
       const missing = uniqIds.filter(id => !found.has(id));
-      throw new ResponseCommon(404, false, `SOME_ITEMS_NOT_FOUND:${missing.join(',')}`);
+      throw new ResponseException(null, 404, `SOME_ITEMS_NOT_FOUND:${missing.join(',')}`);
     }
     const itemMap = new Map(invItems.map(i => [i.id, i]));
 
@@ -684,11 +785,11 @@ export class PurchasereceiptService {
             factor = res.factor;
           } catch (err: any) {
             const msg = String(err?.message || err);
-            if (msg === 'BASE_UOM_NOT_FOUND') throw new ResponseCommon(400, false, `BASE_UOM_NOT_FOUND_AT_${lineNo}`);
-            if (msg === 'RECEIVED_UOM_NOT_FOUND') throw new ResponseCommon(400, false, `RECEIVED_UOM_NOT_FOUND_AT_${lineNo}`);
-            if (msg === 'UOM_DIMENSION_MISMATCH') throw new ResponseCommon(400, false, `UOM_DIMENSION_MISMATCH_AT_${lineNo}`);
-            if (msg === 'NO_CONVERSION_DEFINED') throw new ResponseCommon(400, false, `NO_CONVERSION_DEFINED_AT_${lineNo}`);
-            throw new ResponseCommon(400, false, `UOM_ERROR_AT_${lineNo}`);
+            if (msg === 'BASE_UOM_NOT_FOUND') throw new ResponseException(null, 400, `BASE_UOM_NOT_FOUND_AT_${lineNo}`);
+            if (msg === 'RECEIVED_UOM_NOT_FOUND') throw new ResponseException(null, 400, `RECEIVED_UOM_NOT_FOUND_AT_${lineNo}`);
+            if (msg === 'UOM_DIMENSION_MISMATCH') throw new ResponseException(null, 400, `UOM_DIMENSION_MISMATCH_AT_${lineNo}`);
+            if (msg === 'NO_CONVERSION_DEFINED') throw new ResponseException(null, 400, `NO_CONVERSION_DEFINED_AT_${lineNo}`);
+            throw new ResponseException(null, 400, `UOM_ERROR_AT_${lineNo}`);
           }
 
           const line = lineRepo.create({
@@ -772,7 +873,7 @@ export class PurchasereceiptService {
       for (const line of linesToPost) {
         const itemId = (line.item as any)?.id ?? line.item;
         const inv = await invRepo.findOne({ where: { id: itemId } });
-        if (!inv) throw new ResponseCommon(404, false, 'ITEM_NOT_FOUND');
+        if (!inv) throw new ResponseException(null, 404, 'ITEM_NOT_FOUND');
 
         const baseQty = Number(line.quantity) * Number(line.conversionToBase);
         const unitCostBase = Number(line.unitPrice) / Number(line.conversionToBase);
@@ -807,8 +908,8 @@ export class PurchasereceiptService {
       const grandTotal = +Number(totals.total).toFixed(2);
       const paidNow = +Number((existed.amountPaid ?? 0)).toFixed(2);
 
-      if (paidNow < 0) throw new ResponseCommon(400, false, 'INVALID_PAYMENT_AMOUNT');
-      if (paidNow > grandTotal) throw new ResponseCommon(400, false, 'OVERPAY_NOT_ALLOWED');
+      if (paidNow < 0) throw new ResponseException(null, 400, 'INVALID_PAYMENT_AMOUNT');
+      if (paidNow > grandTotal) throw new ResponseException(null, 400, 'OVERPAY_NOT_ALLOWED');
 
       const remaining = Math.max(0, +(grandTotal - paidNow).toFixed(2));
       existed.debt = remaining;
@@ -818,7 +919,7 @@ export class PurchasereceiptService {
       if (paidNow > 0) {
         const receipt = await receiptRepo.findOne({ where: { id: receiptId } });
         if (!receipt) {
-          throw new ResponseCommon(404, false, 'RECEIPT_NOT_FOUND');
+          throw new ResponseException(null, 404, 'RECEIPT_NOT_FOUND');
         }
         await this.cashbookService.postPaymentFromPurchase(em, receipt, paidNow);
       }
@@ -852,4 +953,157 @@ export class PurchasereceiptService {
     });
   }
 
+
+
+  /** Trả hàng: giảm tồn, tạo inventory transaction, ghi log và điều chỉnh công nợ */
+  async returnReceiptItems(userId: string, receiptId: string, dto: ReturnReceiptDto) {
+    if (!dto.items?.length) {
+      throw new ResponseException(null, 400, 'RETURN_ITEM_LIST_EMPTY');
+    }
+
+    return this.ds.transaction(async (em) => {
+      const receiptRepo = em.getRepository(PurchaseReceipt);
+      const receipt = await receiptRepo.findOne({ where: { id: receiptId }, relations: ['supplier'] });
+      if (!receipt) throw new ResponseException(null, 404, 'RECEIPT_NOT_FOUND');
+
+      if (![ReceiptStatus.POSTED, ReceiptStatus.OWING, ReceiptStatus.PAID].includes(receipt.status)) {
+        throw new ResponseException(null, 400, 'ONLY_POSTED_OR_IN_DEBT_RECEIPTS_CAN_RETURN');
+      }
+
+      const receiptItemRepo = em.getRepository(PurchaseReceiptItem);
+      const itemIds = dto.items.map((i) => i.receiptItemId);
+
+      const rows = await receiptItemRepo.find({
+        where: {
+          id: In(itemIds),
+          receipt: { id: receiptId },
+        },
+        relations: ['item', 'receivedUom'],
+      });
+
+      if (rows.length !== itemIds.length) {
+        throw new ResponseException(null, 404, 'ONE_OR_MORE_RECEIPT_ITEMS_NOT_FOUND');
+      }
+
+      const rowMap = new Map(rows.map((r) => [r.id, r]));
+
+      const invIds = rows.map((r) => r.item.id);
+      const uniqInvIds = Array.from(new Set(invIds));
+      const inventoryRepo = em.getRepository(InventoryItem);
+      const invs = await inventoryRepo.find({ where: { id: In(uniqInvIds) } });
+      const invMap = new Map(invs.map((i) => [i.id, i]));
+
+      const txRepo = em.getRepository(InventoryTransaction);
+      const returnLogRepo = em.getRepository(PurchaseReturnLog);
+
+      const createdLogs: Array<{
+        logId: string;
+        txId: string;
+        receiptItemId: string;
+        quantity: number;
+        baseQty: number;
+        reason?: string;
+      }> = [];
+
+      let totalReturnAmount = 0;
+
+      for (const line of dto.items) {
+        const rid = line.receiptItemId;
+        const qty = Number(line.quantity ?? 0);
+        if (!qty || qty <= 0) throw new ResponseException(null, 400, 'INVALID_RETURN_QTY');
+
+        const receiptLine = rowMap.get(rid);
+        if (!receiptLine) throw new ResponseException(null, 404, `RECEIPT_ITEM_NOT_FOUND:${rid}`);
+
+        const originalQty = Number(receiptLine.quantity);
+        const prevReturned = Number(receiptLine.returnedQuantity ?? 0);
+        const maxReturnable = originalQty - prevReturned;
+        if (qty > maxReturnable + 1e-6) {
+          throw new ResponseException(null, 400, `RETURN_QTY_EXCEEDS_AVAILABLE_FOR_ITEM_${rid}`);
+        }
+
+        const inv = invMap.get(receiptLine.item.id);
+        if (!inv) throw new ResponseException(null, 404, `INVENTORY_ITEM_NOT_FOUND:${receiptLine.item.id}`);
+
+        const conversion = Number(receiptLine.conversionToBase ?? 1);
+        const baseQty = +(qty * conversion).toFixed(3);
+
+        const before = Number(inv.quantity);
+        if (before + 1e-6 < baseQty) {
+          throw new ResponseException(null, 400, `INSUFFICIENT_STOCK_FOR_RETURN:${receiptLine.item.id}`);
+        }
+        const after = Number((before - baseQty).toFixed(3));
+        inv.quantity = after as any;
+        await inventoryRepo.save(inv);
+
+        const tx = txRepo.create({
+          item: { id: inv.id } as any,
+          quantity: baseQty,
+          action: InventoryAction.OUT,
+          beforeQty: before,
+          afterQty: after,
+          refType: 'PURCHASE_RETURN',
+          refId: receipt.id as any,
+          refItemId: receiptLine.id as any,
+          note: line.reason ?? undefined,
+          performedBy: userId ? ({ id: userId } as any) : null,
+        } as any);
+        const savedTx = await txRepo.save(tx as any);
+
+        receiptLine.returnedQuantity = prevReturned + qty;
+        await receiptItemRepo.save(receiptLine);
+
+        const log = returnLogRepo.create({
+          receipt: { id: receipt.id } as any,
+          receiptItem: { id: receiptLine.id } as any,
+          item: { id: inv.id } as any,
+          quantity: qty,
+          conversionToBase: conversion,
+          baseQty,
+          reason: line.reason ?? undefined,
+          inventoryTx: savedTx,
+        } as any);
+        const savedLog = await returnLogRepo.save(log as any);
+
+        const lineTotal = calcLineTotal(receiptLine as any);
+        const ratio = qty / (originalQty || 1);
+        const lineReturnAmount = Math.max(0, +(lineTotal * ratio).toFixed(2));
+        totalReturnAmount = +(totalReturnAmount + lineReturnAmount).toFixed(2);
+
+        createdLogs.push({
+          logId: (savedLog as any).id,
+          txId: (savedTx as any).id,
+          receiptItemId: receiptLine.id,
+          quantity: qty,
+          baseQty,
+          reason: line.reason ?? undefined,
+        });
+      }
+
+      const amountPaid = Number(receipt.amountPaid ?? 0);
+      const oldGrandTotal = +(amountPaid + Number(receipt.debt ?? 0)).toFixed(2);
+      const newGrandTotal = Math.max(0, +(oldGrandTotal - totalReturnAmount).toFixed(2));
+      const newDebt = Math.max(0, +(newGrandTotal - amountPaid).toFixed(2));
+      receipt.debt = newDebt;
+      receipt.status = newGrandTotal === 0
+        ? (amountPaid === 0 ? ReceiptStatus.CANCELLED : ReceiptStatus.PAID)
+        : (amountPaid >= newGrandTotal ? ReceiptStatus.PAID : ReceiptStatus.OWING);
+      await receiptRepo.save(receipt);
+
+      const refundAmount = Math.max(0, +(amountPaid - newGrandTotal).toFixed(2));
+
+      return {
+        receiptId: receipt.id,
+        totalReturnAmount,
+        amountPaid,
+        oldGrandTotal,
+        newGrandTotal,
+        newDebt,
+        refundAmount,
+        refundProcessed: false,
+        refundNote: refundAmount > 0 ? 'Vui lòng xử lý hoàn tiền thủ công.' : null,
+        returned: createdLogs,
+      };
+    });
+  }
 }

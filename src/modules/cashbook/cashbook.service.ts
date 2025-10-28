@@ -19,7 +19,7 @@ import { UpdateCashOtherPartyDto } from './dto/update-cash-other-party.dto';
 import { CashbookSummaryDto } from './dto/summary.dto';
 import { ListCashbookEntryDto } from './dto/list-cashbook.dto';
 import { CreateCashTypeDto } from './dto/create-cash-type.dto';
-
+import {User} from '@modules/user/entities/user.entity';
 @Injectable()
 export class CashbookService {
   constructor(
@@ -30,6 +30,7 @@ export class CashbookService {
     @InjectRepository(Customer) private readonly customerRepo: Repository<any>,
     @InjectRepository(Supplier) private readonly supplierRepo: Repository<any>,
     @InjectRepository(CashOtherParty) private readonly otherPartyRepo: Repository<any>,
+    @InjectRepository(User) private readonly userRepository: Repository<User>,
     @InjectRepository(CashOtherParty)
     private readonly cashOtherParty: Repository<CashOtherParty>,
   ) { }
@@ -88,7 +89,7 @@ export class CashbookService {
           : null;
 
     if (!supplierRef) {
-      throw new ResponseException(false, 400, 'PurchaseReceipt thiếu supplier → không thể lập phiếu chi nhóm SUPPLIER.');
+      throw new ResponseException('PURCHASE_RECEIPT_MISSING_SUPPLIER', 400, 'PURCHASE_RECEIPT_MISSING_SUPPLIER');
     }
 
     const entry = em.getRepository(CashbookEntry).create({
@@ -111,18 +112,18 @@ export class CashbookService {
   // dùng cho cash book entry
   async getCashBookEntry(id: string) {
     const row = await this.repo.findOne({ where: { id }, relations: ['cashType', 'invoice', 'purchaseReceipt'] as any });
-    if (!row) throw new ResponseException(false, 404, 'Không tìm thấy phiếu thu/chi');
+    if (!row) throw new ResponseException('CASHBOOK_NOT_FOUND', 404, 'CASHBOOK_NOT_FOUND');
     return row;
   }
 
   async createCashBookEntry(dto: CreateCashbookEntryDto) {
     if (dto.invoiceId && dto.purchaseReceiptId) {
-      throw new ResponseException(false, 400, 'Chỉ được liên kết 1 nguồn (invoiceId hoặc purchaseReceiptId)');
+      throw new ResponseException('ONLY_ONE_SOURCE_ALLOWED', 400, 'ONLY_ONE_SOURCE_ALLOWED');
     }
 
     //  Loại thu/chi
     const cashType = await this.typeRepo.findOne({ where: { id: dto.cashTypeId } });
-    if (!cashType) throw new ResponseException(false, 400, 'cashTypeId không tồn tại');
+    if (!cashType) throw new ResponseException('CASH_TYPE_NOT_FOUND', 400, 'CASH_TYPE_NOT_FOUND');
 
     const entry = this.repo.create({
       type: dto.type,
@@ -137,43 +138,58 @@ export class CashbookService {
 
     if (dto.invoiceId) {
       const inv = await this.invoiceRepo.findOne({ where: { id: dto.invoiceId } });
-      if (!inv) throw new ResponseException(false, 400, 'invoiceId không tồn tại');
+      if (!inv) throw new ResponseException('INVOICE_NOT_FOUND', 400, 'INVOICE_NOT_FOUND');
       (entry as any).invoice = inv;
     }
     if (dto.purchaseReceiptId) {
       const pr = await this.prRepo.findOne({ where: { id: dto.purchaseReceiptId } });
-      if (!pr) throw new ResponseException(false, 400, 'purchaseReceiptId không tồn tại');
+      if (!pr) throw new ResponseException('PURCHASE_RECEIPT_NOT_FOUND', 400, 'PURCHASE_RECEIPT_NOT_FOUND');
       (entry as any).purchaseReceipt = pr;
     }
 
     // 5) Gắn đối tượng theo nhóm
     if (dto.counterpartyGroup === CounterpartyGroup.CUSTOMER) {
-      if (!dto.customerId) throw new ResponseException(false, 400, 'Thiếu customerId cho nhóm CUSTOMER');
+      if (!dto.customerId) throw new ResponseException('MISSING_CUSTOMER_ID', 400, 'MISSING_CUSTOMER_ID');
       const c = await this.customerRepo.findOne({ where: { id: dto.customerId } });
-      if (!c) throw new ResponseException(false, 400, 'customerId không tồn tại');
+      if (!c) throw new ResponseException('CUSTOMER_NOT_FOUND', 400, 'CUSTOMER_NOT_FOUND');
       (entry as any).customer = c;
 
     } else if (dto.counterpartyGroup === CounterpartyGroup.SUPPLIER) {
-      if (!dto.supplierId) throw new ResponseException(false, 400, 'Thiếu supplierId cho nhóm SUPPLIER');
+      if (!dto.supplierId) throw new ResponseException('MISSING_SUPPLIER_ID', 400, 'MISSING_SUPPLIER_ID');
       const s = await this.supplierRepo.findOne({ where: { id: dto.supplierId } });
-      if (!s) throw new ResponseException(false, 400, 'supplierId không tồn tại');
+      if (!s) throw new ResponseException('SUPPLIER_NOT_FOUND', 400, 'SUPPLIER_NOT_FOUND');
       (entry as any).supplier = s;
 
-    } else if (dto.counterpartyGroup === CounterpartyGroup.OTHER) {
+    } 
+    // ✅ thêm nhân viên
+ else if (dto.counterpartyGroup === CounterpartyGroup.STAFF) {
+  if (!dto.staffId) throw new ResponseException('MISSING_STAFF_ID', 400, 'MISSING_STAFF_ID');
+  const staff = await this.userRepository.findOne({ where: { id: dto.staffId } });
+  if (!staff) throw new ResponseException('STAFF_NOT_FOUND', 400, 'STAFF_NOT_FOUND');
+  (entry as any).staff = staff;
+ }
+// // ✅ thêm đối tác giao hàng
+// } else if (dto.counterpartyGroup === CounterpartyGroup.DELIVERY_PARTNER) {
+//   if (!dto.deliveryPartnerId) throw new ResponseException('MISSING_DELIVERY_PARTNER_ID', 400, 'MISSING_DELIVERY_PARTNER_ID');
+//   const dp = await this.deliveryPartnerRepo.findOne({ where: { id: dto.deliveryPartnerId } });
+//   if (!dp) throw new ResponseException('DELIVERY_PARTNER_NOT_FOUND', 400, 'DELIVERY_PARTNER_NOT_FOUND');
+//   (entry as any).deliveryPartner = dp;
+    
+    else if (dto.counterpartyGroup === CounterpartyGroup.OTHER) {
       let other = null;
       if (dto.cashOtherPartyId) {
         other = await this.otherPartyRepo.findOne({ where: { id: dto.cashOtherPartyId } });
-        if (!other) throw new ResponseException(false, 400, 'cashOtherPartyId không tồn tại');
+        if (!other) throw new ResponseException('CASH_OTHER_PARTY_NOT_FOUND', 400, 'CASH_OTHER_PARTY_NOT_FOUND');
       } else if (dto.counterpartyName?.trim()) {
         // tạo nhanh other party từ tên
         other = await this.otherPartyRepo.save(this.otherPartyRepo.create({ name: dto.counterpartyName.trim() }));
       } else {
-        throw new ResponseException(false, 400, 'Thiếu cashOtherPartyId hoặc counterpartyName cho nhóm OTHER');
+        throw new ResponseException('MISSING_COUNTERPARTY_INFO', 400, 'MISSING_COUNTERPARTY_INFO');
       }
       (entry as any).cashOtherParty = other;
 
     } else {
-      throw new ResponseException(false, 400, 'counterpartyGroup không hợp lệ');
+      throw new ResponseException('INVALID_COUNTERPARTY_GROUP', 400, 'INVALID_COUNTERPARTY_GROUP');
     }
 
     return this.repo.save(entry);
@@ -193,6 +209,7 @@ export class CashbookService {
       .leftJoinAndSelect('e.purchaseReceipt', 'purchaseReceipt')
       .leftJoinAndSelect('e.customer', 'customer')
       .leftJoinAndSelect('e.supplier', 'supplier')
+      
       .leftJoinAndSelect('e.cashOtherParty', 'other');
 
     if (q.q?.trim()) {
@@ -238,9 +255,9 @@ export class CashbookService {
       if (!cashbook) {
         throw new ResponseException('NOT_FOUND', 404, 'Cashbook không tồn tại');
       }
-      return new ResponseCommon(200, true, 'Lấy thông tin Cashbook thành công', cashbook);
+      return new ResponseCommon(200, true, 'GET_CASHBOOK_SUCCESS', cashbook);
     } catch (error) {
-      throw new ResponseException(error, 500, 'Lỗi khi lấy thông tin Cashbook');
+      throw new ResponseException(error, 500, 'GET_CASHBOOK_FAILED');
     }
   }
   // async summaryCashBookEntries(q: ListCashbookEntryDto) {
@@ -351,7 +368,7 @@ export class CashbookService {
     try {
       const entity = this.otherPartyRepo.create(dto as Partial<CashOtherParty>);
       const saved = await this.otherPartyRepo.save(entity);
-      return new ResponseCommon(201, true, 'Tạo đối tác khác thành công', saved);
+      return new ResponseCommon(201, true, 'CREATE_CASH_OTHER_PARTY_SUCCESS', saved);
     } catch (error) {
       throw new ResponseException(error, 500, 'CREATE_CASH_OTHER_PARTY_FAILED');
     }
@@ -401,14 +418,14 @@ export class CashbookService {
   /* ===== FIND ONE (helper private để reuse) ===== */
   private async getOtherPartyOrThrow(id: string): Promise<CashOtherParty> {
     const found = await this.otherPartyRepo.findOne({ where: { id } });
-    if (!found) throw new ResponseException('NOT_FOUND', 404, 'Other party không tồn tại');
+    if (!found) throw new ResponseException('CASH_OTHER_PARTY_NOT_FOUND', 404, 'CASH_OTHER_PARTY_NOT_FOUND');
     return found;
   }
 
   async findOneCashOtherParty(id: string) {
     try {
       const found = await this.getOtherPartyOrThrow(id);
-      return new ResponseCommon(200, true, 'Lấy đối tác khác thành công', found);
+      return new ResponseCommon(200, true, 'GET_CASH_OTHER_PARTY_SUCCESS', found);
     } catch (error) {
       throw new ResponseException(error, 500, 'GET_CASH_OTHER_PARTY_FAILED');
     }
@@ -420,7 +437,7 @@ export class CashbookService {
       const found = await this.getOtherPartyOrThrow(id);
       const merged = this.otherPartyRepo.merge(found, dto as Partial<CashOtherParty>);
       const saved = await this.otherPartyRepo.save(merged);
-      return new ResponseCommon(200, true, 'Cập nhật đối tác khác thành công', saved);
+      return new ResponseCommon(200, true, 'UPDATE_CASH_OTHER_PARTY_SUCCESS', saved);
     } catch (error) {
       throw new ResponseException(error, 500, 'UPDATE_CASH_OTHER_PARTY_FAILED');
     }
@@ -431,7 +448,7 @@ export class CashbookService {
     try {
       const found = await this.getOtherPartyOrThrow(id);
       await this.otherPartyRepo.remove(found);
-      return new ResponseCommon(200, true, 'Xóa đối tác khác thành công', true);
+      return new ResponseCommon(200, true, 'REMOVE_CASH_OTHER_PARTY_SUCCESS', true);
     } catch (error) {
       throw new ResponseException(error, 500, 'REMOVE_CASH_OTHER_PARTY_FAILED');
     }
@@ -445,7 +462,7 @@ export class CashbookService {
       // Kiểm tra trùng tên
       const exists = await this.typeRepo.findOne({ where: { name: dto.name } });
       if (exists) {
-        throw new ResponseException('DUPLICATE_NAME', 400, 'Tên loại thu chi đã tồn tại');
+        throw new ResponseException('DUPLICATE_NAME', 400, 'DUPLICATE_NAME');
       }
 
       // Tạo entity trực tiếp
@@ -457,12 +474,12 @@ export class CashbookService {
         entity.description = dto.description;
       }
       const saved = await this.typeRepo.save(entity);
-      return new ResponseCommon(201, true, 'Tạo loại thu chi thành công', saved);
+      return new ResponseCommon(201, true, 'CREATE_CASH_TYPE_SUCCESS', saved);
     } catch (error) {
       if (error instanceof ResponseException) {
         throw error;
       }
-      throw new ResponseException(error, 500, 'Lỗi khi tạo loại thu chi');
+      throw new ResponseException(error, 500, 'CREATE_CASH_TYPE_FAILED');
     }
   }
 
@@ -504,12 +521,12 @@ export class CashbookService {
         pages: Math.ceil(total / limit) || 0,
       };
 
-      return new ResponseCommon(200, true, 'Lấy danh sách loại thu chi thành công', items, meta);
+      return new ResponseCommon(200, true, 'LIST_CASH_TYPE_SUCCESS', items, meta);
     } catch (error) {
       if (error instanceof ResponseException) {
         throw error;
       }
-      throw new ResponseException(error, 500, 'Lỗi khi lấy danh sách loại thu chi');
+      throw new ResponseException(error, 500, 'LIST_CASH_TYPE_FAILED');
     }
   }
 
@@ -518,14 +535,14 @@ export class CashbookService {
     try {
       const cashType = await this.typeRepo.findOne({ where: { id } });
       if (!cashType) {
-        throw new ResponseException('NOT_FOUND', 404, 'Loại thu chi không tồn tại');
+        throw new ResponseException('CASH_TYPE_NOT_FOUND', 404, 'CASH_TYPE_NOT_FOUND');
       }
-      return new ResponseCommon(200, true, 'Lấy thông tin loại thu chi thành công', cashType);
+      return new ResponseCommon(200, true, 'GET_CASH_TYPE_SUCCESS', cashType);
     } catch (error) {
       if (error instanceof ResponseException) {
         throw error;
       }
-      throw new ResponseException(error, 500, 'Lỗi khi lấy thông tin loại thu chi');
+      throw new ResponseException(error, 500, 'GET_CASH_TYPE_FAILED');
     }
   }
 
@@ -539,7 +556,7 @@ export class CashbookService {
     try {
       const cashType = await this.typeRepo.findOne({ where: { id } });
       if (!cashType) {
-        throw new ResponseException('NOT_FOUND', 404, 'Loại thu chi không tồn tại');
+        throw new ResponseException('CASH_TYPE_NOT_FOUND', 404, 'CASH_TYPE_NOT_FOUND');
       }
 
       // Kiểm tra trùng tên nếu có thay đổi tên
@@ -548,18 +565,18 @@ export class CashbookService {
           where: { name: dto.name }
         });
         if (exists) {
-          throw new ResponseException('DUPLICATE_NAME', 400, 'Tên loại thu chi đã tồn tại');
+          throw new ResponseException('DUPLICATE_NAME', 400, 'DUPLICATE_NAME');
         }
       }
 
       const merged = this.typeRepo.merge(cashType, dto);
       const saved = await this.typeRepo.save(merged);
-      return new ResponseCommon(200, true, 'Cập nhật loại thu chi thành công', saved);
+      return new ResponseCommon(200, true, 'UPDATE_CASH_TYPE_SUCCESS', saved);
     } catch (error) {
       if (error instanceof ResponseException) {
         throw error;
       }
-      throw new ResponseException(error, 500, 'Lỗi khi cập nhật loại thu chi');
+      throw new ResponseException(error, 500, 'UPDATE_CASH_TYPE_FAILED');
     }
   }
 
@@ -568,26 +585,26 @@ export class CashbookService {
     try {
       const cashType = await this.typeRepo.findOne({ where: { id } });
       if (!cashType) {
-        throw new ResponseException('NOT_FOUND', 404, 'Loại thu chi không tồn tại');
+        throw new ResponseException('CASH_TYPE_NOT_FOUND', 404, 'CASH_TYPE_NOT_FOUND');
       }
 
-      // Kiểm tra xem có cashbook entries nào đang sử dụng không
-      const usageCount = await this.repo.count({ where: { cashType: { id } } });
-      if (usageCount > 0) {
-        // Soft delete: đặt isActive = false thay vì xóa hẳn
-        cashType.isActive = false;
-        const saved = await this.typeRepo.save(cashType);
-        return new ResponseCommon(200, true, 'Vô hiệu hóa loại thu chi thành công', saved);
-      } else {
-        // Hard delete nếu chưa được sử dụng
-        await this.typeRepo.remove(cashType);
-        return new ResponseCommon(200, true, 'Xóa loại thu chi thành công', true);
+      // Nếu đã inactive thì không làm gì hết
+      if (!cashType.isActive) {
+        return new ResponseCommon(200, true, 'CASH_TYPE_ALREADY_INACTIVE', cashType);
       }
+
+      // Kiểm tra xem có cash book entry nào đang dùng loại này không
+      const usageCount = await this.repo.count({ where: { cashType: { id } } });
+      cashType.isActive = false;
+      const saved = await this.typeRepo.save(cashType);
+      // Nếu có dùng thì báo đã disable nhưng không xóa được
+      const message = usageCount > 0 ? 'CASH_TYPE_DISABLED_IN_USE' : 'CASH_TYPE_DISABLED';
+      return new ResponseCommon(200, true, message, saved);
     } catch (error) {
       if (error instanceof ResponseException) {
         throw error;
       }
-      throw new ResponseException(error, 500, 'Lỗi khi xóa loại thu chi');
+      throw new ResponseException(error, 500, 'DELETE_CASH_TYPE_FAILED');
     }
   }
 

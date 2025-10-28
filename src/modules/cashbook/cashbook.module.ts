@@ -9,9 +9,10 @@ import { Invoice } from '@modules/invoice/entities/invoice.entity';
 import { CashOtherParty } from './entities/cash_other_party';
 import { Customer } from '@modules/customers/entities/customers.entity';
 import { Supplier } from '@modules/supplier/entities/supplier.entity';
+import { User } from '@modules/user/entities/user.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Customer, Supplier, CashOtherParty, CashType, CashbookEntry, PurchaseReceipt, Invoice])],
+  imports: [TypeOrmModule.forFeature([Customer, Supplier, CashOtherParty, CashType, CashbookEntry, PurchaseReceipt, Invoice, User])],
   controllers: [CashbookController],
   providers: [CashbookService],
   exports: [CashbookService],

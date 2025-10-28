@@ -20,12 +20,32 @@ import { CancelOrderDto } from './dto/cancel-order.dto';
 import { CurrentUser } from 'src/common/decorators/user.decorator';
 import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
 import { UseGuards } from '@nestjs/common';
+import { Not, In } from 'typeorm';
+import { OrderStatus } from 'src/common/enums';
+
+import { Order } from './entities/order.entity';
+import {NotFoundException} from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { ValidationPipe } from '@nestjs/common';
+import { OpenOrdersByTableQueryDto, OpenInTableQueryDto } from './dto/open-orders-by-table.dto';
+import { OpenTablesQueryDto } from './dto/open-tables.query';
+import { SplitOrderDto } from './dto/split-order.dto';
+import {RestaurantTable} from '../restauranttable/entities/restauranttable.entity';
+class MergeOrderDto {
+  toOrderId!: string; // id đơn đích
+}
+
 @ApiTags('orders')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
 @Controller('orders')
 export class OrdersController {
-  constructor(private readonly ordersService: OrdersService) {}
+  constructor(private readonly ordersService: OrdersService,
+  @InjectRepository(Order) private readonly orderRepo: Repository<Order>,
+  @InjectRepository(RestaurantTable) private readonly tableRepo: Repository<RestaurantTable>,
+
+  ) {}
 
   @Post()
   @ApiOperation({ summary: 'Tạo đơn (PENDING) + tạo items PENDING + trừ kho' })
@@ -47,7 +67,117 @@ export class OrdersController {
       excludeStatus: q.excludeStatus,
     });
   }
+  // Danh sách đơn đang mở (không PAID/CANCELLED) của một bàn cụ thể
 
+
+
+
+@Get('tables/without-open-orders')
+async tablesWithoutOpen(
+  @Query('excludeTableId') excludeTableId?: string,
+) {
+  return this.tableRepo.createQueryBuilder('t')
+    .leftJoin(Order, 'o',
+      'o.tableId = t.id AND o.status NOT IN (:...ended)',
+      { ended: [OrderStatus.PAID, OrderStatus.CANCELLED, OrderStatus.MERGED] }
+    )
+    .where('o.id IS NULL')                      // không có đơn mở
+    .andWhere(excludeTableId ? 't.id <> :ex' : '1=1', { ex: excludeTableId })
+    .orderBy('t.name','ASC')
+    .getMany(); // trả [{id,name,...}]
+}
+
+
+ @Get('open-by-table')
+  async openOrdersByTable(
+    @Query(new ValidationPipe({ transform: true, whitelist: true }))
+    query: OpenOrdersByTableQueryDto,
+  ) {
+    const { excludeOrderId, excludeTableId } = query;
+
+    const qb = this.orderRepo.createQueryBuilder('o')
+      .leftJoin('o.table', 't')
+      .select('t.id', 'tableId')
+      .addSelect('t.name', 'tableName')
+      .addSelect('COUNT(o.id)', 'orderCount')
+      .addSelect('COALESCE(SUM(o.total), 0)', 'totalAmount') // nếu có cột total
+      .where('o.status NOT IN (:...ended)', { ended: [OrderStatus.PAID, OrderStatus.CANCELLED] });
+
+    if (excludeOrderId) qb.andWhere('o.id <> :excludeOrderId', { excludeOrderId });
+    if (excludeTableId) qb.andWhere('t.id <> :excludeTableId', { excludeTableId });
+
+    const rows = await qb
+      .groupBy('t.id')
+      .addGroupBy('t.name')
+      .orderBy('t.name', 'ASC')
+      .getRawMany<{ tableId: string; tableName: string; orderCount: string; totalAmount: string }>();
+
+    return rows.map(r => ({
+      tableId: r.tableId,
+      tableName: r.tableName,
+      orderCount: Number(r.orderCount ?? 0),
+      totalAmount: Number(r.totalAmount ?? 0),
+    }));
+  }
+@Get('open-tables')
+async listTablesHasOpenOrders(
+  @Query(new ValidationPipe({ transform: true, whitelist: true }))
+  query: OpenTablesQueryDto,
+) {
+  const { excludeOrderId, excludeTableId } = query;
+
+  const qb = this.orderRepo.createQueryBuilder('o')
+    .leftJoin('o.table', 't')
+    .select('t.id', 'tableId')
+    .addSelect('t.name', 'tableName')
+    .where('o.status NOT IN (:...ended)', { ended: [OrderStatus.PAID, OrderStatus.CANCELLED, OrderStatus.MERGED] });
+
+  if (excludeOrderId)
+    qb.andWhere('o.id <> :excludeOrderId', { excludeOrderId });
+  if (excludeTableId)
+    qb.andWhere('t.id <> :excludeTableId', { excludeTableId });
+
+  const rows = await qb
+    .groupBy('t.id')
+    .addGroupBy('t.name')
+    .orderBy('t.name', 'ASC')
+    .getRawMany<{ tableId: string; tableName: string }>();
+
+  return rows;
+}
+
+  // === B) Danh sách ĐƠN mở trong 1 bàn ===
+  // FE hook: useOpenOrdersInTable(tableId) -> GET /orders/open-in-table?tableId=...
+  // Trả về: [{ id, tableName, customerName, itemsCount, total }]
+  @Get('open-in-table')
+  async openInTable(
+    @Query(new ValidationPipe({ transform: true, whitelist: true }))
+    query: OpenInTableQueryDto,
+  ) {
+    const { tableId, excludeOrderId } = query;
+
+    // Không có tableId thì trả mảng rỗng (FE đã enable theo UUID)
+    if (!tableId) return [];
+
+    const rows = await this.orderRepo.find({
+      where: {
+        table: { id: tableId } as any,
+        id: excludeOrderId ? Not(excludeOrderId) : undefined,
+        status: Not(In([OrderStatus.PAID, OrderStatus.CANCELLED,OrderStatus.MERGED])),
+      },
+      relations: ['table', 'items'], // nếu muốn đếm items ngay
+      order: { createdAt: 'ASC' },
+    });
+
+    return rows.map(o => ({
+      id: o.id,
+      tableName: o.table?.name ?? '',
+      // customerName: o.customerName ?? null, // nếu có cột
+      itemsCount: Array.isArray(o.items) ? o.items.length : 0,
+      total: Number((o as any).total ?? 0), // nếu có cột total
+      createdAt: o.createdAt,
+    }));
+  }
   @Get(':id')
   @ApiOperation({ summary: 'Chi tiết đơn' })
   detail(@Param('id', new ParseUUIDPipe()) id: string) {
@@ -141,4 +271,23 @@ export class OrdersController {
   ) {
     return this.ordersService.cancel(id, dto);
   }
+@Post(':id/split')
+async split(
+  @Param('id') id: string,
+  @Body() dto: SplitOrderDto,
+) {
+  return this.ordersService.splitOrder(id, dto);
 }
+
+@Post(':fromId/merge-into')
+  async mergeInto(
+    @Param('fromId') fromId: string,
+    @Body() body: MergeOrderDto,
+  ) {
+    if (!body?.toOrderId) throw new NotFoundException('Thiếu toOrderId');
+    return this.ordersService.mergeOrders(fromId, body.toOrderId);
+  }
+
+
+}
+

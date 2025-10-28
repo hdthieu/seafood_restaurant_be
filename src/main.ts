@@ -9,6 +9,7 @@ import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { join } from 'path';
 import * as express from 'express';
 import { setDefaultResultOrder } from 'dns';
+import { SocketIoAdapter } from './common/socket/socket.io.adapter';
 setDefaultResultOrder('ipv4first');
 function initialSwagger(app: NestExpressApplication): void {
   const options = new DocumentBuilder()
@@ -69,7 +70,7 @@ async function bootstrap() {
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-
+  app.useWebSocketAdapter(new SocketIoAdapter(app)); 
   await app.listen(configurations.port);
   const appUrl = await app.getUrl();
 
