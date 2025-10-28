@@ -42,4 +42,5 @@ export class OrderItem {
 
   // @Column({ type: 'timestamptz', nullable: true })
   // cancelledAt?: Date | null;
+  note: string | null;
 }

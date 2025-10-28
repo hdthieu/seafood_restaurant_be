@@ -12,6 +12,8 @@ import { RestaurantTable } from '../restauranttable/entities/restauranttable.ent
 import { OrdersController } from './order.controller';
 import {CustomersModule} from 'src/modules/customers/customers.module'
 import { OrderitemsModule } from 'src/modules/orderitems/orderitems.module';
+import { KitchenModule } from '../kitchen/kitchen.module';
+import {KitchenTicket } from '../kitchen/entities/kitchen-ticket.entity'; 
 @Module({
   imports: [
     TypeOrmModule.forFeature([
@@ -23,7 +25,9 @@ import { OrderitemsModule } from 'src/modules/orderitems/orderitems.module';
       InventoryItem,
       InventoryTransaction,
       RestaurantTable,
+      KitchenTicket
     ]),
+    KitchenModule,
     CustomersModule,
     OrderitemsModule,
   ],

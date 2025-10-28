@@ -1,7 +1,10 @@
 import { TableStatus } from "src/common/enums";
 import { Area } from "src/modules/area/entities/area.entity";
 import { Column, CreateDateColumn, Entity, JoinColumn, ManyToOne, PrimaryGeneratedColumn, Unique, UpdateDateColumn } from "typeorm";
+import  {Order}  from "src/modules/order/entities/order.entity";
+import { OneToOne } from "typeorm";
 @Unique(['name', 'area'])
+
 @Entity('tables')
 export class RestaurantTable {
     @PrimaryGeneratedColumn('uuid')
@@ -34,4 +37,7 @@ export class RestaurantTable {
     @ManyToOne(() => Area, (a) => a.tables, { nullable: false, onDelete: 'RESTRICT', eager: true })
     @JoinColumn({ name: 'area_id' })
     area: Area;
+    @OneToOne(() => Order, { nullable: true })
+@JoinColumn({ name: 'current_order_id' })
+currentOrder?: Order | null;
 }

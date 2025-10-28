@@ -5,10 +5,7 @@ import {
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 
-@WebSocketGateway({
-  namespace: '/realtime',                 // ws://host/realtime
-  cors: { origin: '*', credentials: false },
-})
+@WebSocketGateway({ namespace: '/realtime', path: '/socket.io', transports: ['websocket'], cors: { origin: '*'} })
 export class PaymentsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer() server: Server;
 

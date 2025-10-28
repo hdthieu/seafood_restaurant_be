@@ -1,72 +1,80 @@
-// src/orders/orders-realtime.service.ts
 import { Injectable } from '@nestjs/common';
-import { KitchenGateway } from './kitchen.gateway';
 import { randomUUID } from 'crypto';
-
+import { DataSource, In } from 'typeorm';
+import { KitchenGateway } from './kitchen.gateway';
+import { OrderItem } from '../orderitems/entities/orderitem.entity';
+import { MenuItem } from '../menuitems/entities/menuitem.entity';
+import { ItemStatus } from '../../common/enums';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { KitchenBatch } from '../kitchen/entities/kitchen-batch.entity';
+import { KitchenTicket } from '../kitchen/entities/kitchen-ticket.entity';
 @Injectable()
 export class SocketService {
-  constructor(private readonly gw: KitchenGateway) {}
+  constructor(
+    private readonly gw: KitchenGateway,
+    private readonly ds: DataSource,
+    @InjectRepository(KitchenBatch) private readonly batchRepo: Repository<KitchenBatch>,
+    @InjectRepository(KitchenTicket) private readonly ticketRepo: Repository<KitchenTicket>,
+    @InjectRepository(MenuItem) private readonly menuRepo: Repository<MenuItem>,
+  ) {}
 
   async notifyItems(opts: {
-    restaurantId: string;
     orderId: string;
     tableName: string;
     staff: string;
     itemsDelta: Array<{ menuItemId: string; delta: number }>;
     priority?: boolean;
+    note?: string;
   }) {
-    // 1) Đọc order + items hiện tại từ DB
-    // 2) Với mỗi delta:
-    //    - Nếu tồn tại dòng PENDING/CONFIRMED của menuItem đó => tăng qty
-    //    - Nếu dòng đã READY/SERVED/CANCELLED => tạo NEW row PENDING (qty = delta)
-    // 3) Lưu DB, gom các dòng hợp lệ thành `lines` để emit
+    const batch = await this.ds.transaction(async em => {
+      const b = em.getRepository(KitchenBatch).create({
+        order: { id: opts.orderId } as any,
+        tableName: opts.tableName,
+        staff: opts.staff,
+        priority: !!opts.priority,
+        note: opts.note ?? null,
+      });
+      return em.getRepository(KitchenBatch).save(b);
+    });
 
-    const batchId = randomUUID();
-    const createdAt = new Date().toISOString();
+    const lines: Array<{ ticketId: string; name: string; qty: number }> = [];
 
-    // giả sử sau khi xử lý, bạn thu được:
-    const lines: Array<{ orderItemId: string; name: string; qty: number }> = [
-      // ... từ DB thực
-    ];
+    await this.ds.transaction(async em => {
+      const mRepo = em.getRepository(MenuItem);
+      const tRepo = em.getRepository(KitchenTicket);
 
-    // 4) Emit socket
-    this.gw.emitNotifyItems({
-      restaurantId: opts.restaurantId,
+      for (const { menuItemId, delta } of opts.itemsDelta) {
+        const qty = Number(delta) || 0;
+        if (qty <= 0) continue;
+
+        const menu = await mRepo.findOneBy({ id: menuItemId });
+        if (!menu) continue;
+
+        const t = tRepo.create({
+          batch,
+          order: { id: opts.orderId } as any,
+          menuItem: { id: menuItemId } as any,
+          qty,
+          status: ItemStatus.PENDING,
+        });
+        const saved = await tRepo.save(t);
+        lines.push({ ticketId: saved.id, name: menu.name, qty });
+      }
+    });
+
+    // phát socket cho bếp
+    this.gw.emitNotifyItemsToKitchen({
       orderId: opts.orderId,
       tableName: opts.tableName,
-      batchId,
-      createdAt,
-      items: lines,
+      batchId: batch.id,
+      createdAt: batch.createdAt.toISOString(),
+      items: lines.map(l => ({ orderItemId: l.ticketId, name: l.name, qty: l.qty })), // giữ shape FE
       staff: opts.staff,
       priority: opts.priority,
     });
 
-    return { batchId, items: lines, createdAt };
-  }
-
-  async cancelItems(opts: {
-    restaurantId: string;
-    orderId: string;
-    staff: string;
-    items: Array<{ orderItemId: string; reason: string }>;
-  }) {
-    // 1) Update DB: đổi status các item => CANCELLED, ghi reason
-    // 2) Gom thông tin để emit
-
-    const createdAt = new Date().toISOString();
-
-    const lines: Array<{ orderItemId: string; name: string; qty: number; reason: string }> = [
-      // ... từ DB thực
-    ];
-
-    this.gw.emitCancelItems({
-      restaurantId: opts.restaurantId,
-      orderId: opts.orderId,
-      createdAt,
-      items: lines,
-      staff: opts.staff,
-    });
-
-    return { createdAt, items: lines };
+    return { batchId: batch.id, items: lines, createdAt: batch.createdAt };
   }
 }
+

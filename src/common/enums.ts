@@ -35,7 +35,8 @@ export enum OrderStatus {
   READY = 'READY',                // Món đã nấu xong, chờ phục vụ mang ra
   SERVED = 'SERVED',              // Đã phục vụ xong cho bàn
   PAID = 'PAID',                  // Đã thanh toán
-  CANCELLED = 'CANCELLED',        // Đơn bị hủy (khách hủy hoặc admin)
+  CANCELLED = 'CANCELLED',  
+  MERGED = 'MERGED',         // Đơn bị hủy (khách hủy hoặc admin)
 }
 
 export enum SupplierStatus { ACTIVE = 'ACTIVE', INACTIVE = 'INACTIVE' }

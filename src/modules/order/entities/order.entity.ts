@@ -38,4 +38,11 @@ export class Order {
     // @ManyToOne(() => Customer, { nullable: true, eager: true })
     // @JoinColumn({ name: 'customer_id' })
     // customer?: Customer | null;
+      @ManyToOne(() => Order, (o) => o.mergedChildren, { nullable: true })
+  @JoinColumn({ name: 'merged_into_id' })
+  mergedInto?: Order | null;
+
+  // inverse (không bắt buộc dùng)
+  @OneToMany(() => Order, (o) => o.mergedInto)
+  mergedChildren?: Order[];
 }

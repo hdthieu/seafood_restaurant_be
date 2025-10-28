@@ -19,7 +19,7 @@ import { UpdateCashOtherPartyDto } from './dto/update-cash-other-party.dto';
 import { CashbookSummaryDto } from './dto/summary.dto';
 import { ListCashbookEntryDto } from './dto/list-cashbook.dto';
 import { CreateCashTypeDto } from './dto/create-cash-type.dto';
-
+import {User} from '@modules/user/entities/user.entity';
 @Injectable()
 export class CashbookService {
   constructor(
@@ -30,6 +30,7 @@ export class CashbookService {
     @InjectRepository(Customer) private readonly customerRepo: Repository<any>,
     @InjectRepository(Supplier) private readonly supplierRepo: Repository<any>,
     @InjectRepository(CashOtherParty) private readonly otherPartyRepo: Repository<any>,
+    @InjectRepository(User) private readonly userRepository: Repository<User>,
     @InjectRepository(CashOtherParty)
     private readonly cashOtherParty: Repository<CashOtherParty>,
   ) { }
@@ -159,7 +160,22 @@ export class CashbookService {
       if (!s) throw new ResponseException('SUPPLIER_NOT_FOUND', 400, 'SUPPLIER_NOT_FOUND');
       (entry as any).supplier = s;
 
-    } else if (dto.counterpartyGroup === CounterpartyGroup.OTHER) {
+    } 
+    // ✅ thêm nhân viên
+ else if (dto.counterpartyGroup === CounterpartyGroup.STAFF) {
+  if (!dto.staffId) throw new ResponseException('MISSING_STAFF_ID', 400, 'MISSING_STAFF_ID');
+  const staff = await this.userRepository.findOne({ where: { id: dto.staffId } });
+  if (!staff) throw new ResponseException('STAFF_NOT_FOUND', 400, 'STAFF_NOT_FOUND');
+  (entry as any).staff = staff;
+ }
+// // ✅ thêm đối tác giao hàng
+// } else if (dto.counterpartyGroup === CounterpartyGroup.DELIVERY_PARTNER) {
+//   if (!dto.deliveryPartnerId) throw new ResponseException('MISSING_DELIVERY_PARTNER_ID', 400, 'MISSING_DELIVERY_PARTNER_ID');
+//   const dp = await this.deliveryPartnerRepo.findOne({ where: { id: dto.deliveryPartnerId } });
+//   if (!dp) throw new ResponseException('DELIVERY_PARTNER_NOT_FOUND', 400, 'DELIVERY_PARTNER_NOT_FOUND');
+//   (entry as any).deliveryPartner = dp;
+    
+    else if (dto.counterpartyGroup === CounterpartyGroup.OTHER) {
       let other = null;
       if (dto.cashOtherPartyId) {
         other = await this.otherPartyRepo.findOne({ where: { id: dto.cashOtherPartyId } });
@@ -193,6 +209,7 @@ export class CashbookService {
       .leftJoinAndSelect('e.purchaseReceipt', 'purchaseReceipt')
       .leftJoinAndSelect('e.customer', 'customer')
       .leftJoinAndSelect('e.supplier', 'supplier')
+      
       .leftJoinAndSelect('e.cashOtherParty', 'other');
 
     if (q.q?.trim()) {
