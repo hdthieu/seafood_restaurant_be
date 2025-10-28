@@ -30,14 +30,14 @@ export class SuppliergroupService {
       const exists = await this.groupRepo.exists({ where: { code } });
       if (!exists) return code;
     }
-    throw new ResponseCommon(500, false, 'CANNOT_GENERATE_UNIQUE_SUPPLIER_GROUP_CODE');
+    throw new ResponseException(null, 500, 'CANNOT_GENERATE_UNIQUE_SUPPLIER_GROUP_CODE');
   }
 
   // Hàm tạo nhóm nhà cung cấp
   async create(dto: CreateSupplierGroupDto) {
     // check trùng name
     const exists = await this.groupRepo.exists({ where: { name: dto.name } });
-    if (exists) throw new ResponseCommon(400, false, 'SUPPLIER_GROUP_NAME_EXISTS');
+    if (exists) throw new ResponseException(null, 400, 'SUPPLIER_GROUP_NAME_EXISTS');
 
     // Tự sinh code, không nhận từ FE
     const code = await this.generateUniqueGroupCode();
@@ -52,7 +52,7 @@ export class SuppliergroupService {
         entity.code = await this.generateUniqueGroupCode();
         return await this.groupRepo.save(entity);
       }
-      throw new ResponseCommon(500, false, 'CREATE_SUPPLIER_GROUP_FAILED', e?.message);
+      throw new ResponseException(e?.message, 500, 'CREATE_SUPPLIER_GROUP_FAILED');
     }
   }
 
@@ -114,22 +114,22 @@ export class SuppliergroupService {
 
   async findOneById(id: string) {
     const found = await this.groupRepo.findOne({ where: { id }, relations: ['suppliers'] });
-    if (!found) throw new ResponseCommon(404, false, 'SUPPLIER_GROUP_NOT_FOUND');
+    if (!found) throw new ResponseException(null, 404, 'SUPPLIER_GROUP_NOT_FOUND');
     return found;
   }
 
   async findOneByCode(code: string) {
     const found = await this.groupRepo.findOne({ where: { code }, relations: ['suppliers'] });
-    if (!found) throw new ResponseCommon(404, false, 'SUPPLIER_GROUP_NOT_FOUND');
+    if (!found) throw new ResponseException(null, 404, 'SUPPLIER_GROUP_NOT_FOUND');
     return found;
   }
   async update(id: string, dto: UpdateSuppliergroupDto) {
     const group = await this.groupRepo.findOne({ where: { id } });
-    if (!group) throw new ResponseCommon(404, false, 'SUPPLIER_GROUP_NOT_FOUND');
+    if (!group) throw new ResponseException(null, 404, 'SUPPLIER_GROUP_NOT_FOUND');
 
     if (dto.name && dto.name !== group.name) {
       const nameDup = await this.groupRepo.exists({ where: { name: dto.name } });
-      if (nameDup) throw new ResponseCommon(400, false, 'SUPPLIER_GROUP_NAME_EXISTS');
+      if (nameDup) throw new ResponseException(null, 400, 'SUPPLIER_GROUP_NAME_EXISTS');
     }
 
     Object.assign(group, dto);
@@ -140,7 +140,7 @@ export class SuppliergroupService {
   /** Ngưng hoạt động (khuyên dùng theo nghiệp vụ) */
   async deactivate(id: string) {
     const group = await this.groupRepo.findOne({ where: { id } });
-    if (!group) throw new ResponseCommon(404, false, 'SUPPLIER_GROUP_NOT_FOUND');
+    if (!group) throw new ResponseException(null, 404, 'SUPPLIER_GROUP_NOT_FOUND');
 
     if (group.status === SupplierStatus.INACTIVE) return group;
     group.status = SupplierStatus.INACTIVE;

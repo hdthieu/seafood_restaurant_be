@@ -6,7 +6,7 @@ import { WorkSchedule } from './entities/work-schedule.entity';
 import { User } from './entities/user.entity';
 import { Shift } from './entities/shift.entity';
 import { CreateScheduleDto, UpdateScheduleDto } from './dto/create-schedule.dto';
-import { ResponseCommon } from 'src/common/common_dto/respone.dto';
+import { ResponseCommon, ResponseException } from 'src/common/common_dto/respone.dto';
 import { randomUUID } from 'node:crypto';
 
 function toMinutes(hhmm: string) {
@@ -20,16 +20,16 @@ export class WorkScheduleService {
     @InjectRepository(WorkSchedule) private readonly repo: Repository<WorkSchedule>,
     @InjectRepository(User) private readonly userRepo: Repository<User>,
     @InjectRepository(Shift) private readonly shiftRepo: Repository<Shift>,
-  ) {}
+  ) { }
   /** Lấy các ca của 1 user trong 1 ngày (YYYY-MM-DD) */
   async listByDate(userId: string, date?: string) {
-   function ymdLocal(now = new Date()) {
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, '0');
-  const d = String(now.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
-}
-const d = date ?? ymdLocal();
+    function ymdLocal(now = new Date()) {
+      const y = now.getFullYear();
+      const m = String(now.getMonth() + 1).padStart(2, '0');
+      const d = String(now.getDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    }
+    const d = date ?? ymdLocal();
 
     const rows = await this.repo.find({
       where: { user: { id: userId }, date: d },
@@ -62,15 +62,15 @@ const d = date ?? ymdLocal();
       const a = toMinutes(s.shift.startTime), b = toMinutes(s.shift.endTime);
       return Math.max(a, start) < Math.min(b, end); // giao nhau
     });
-    if (clash) throw new ResponseCommon(400, false, 'SHIFT_TIME_OVERLAP');
+    if (clash) throw new ResponseException(null, 400, 'SHIFT_TIME_OVERLAP');
   }
 
   async create(dto: CreateScheduleDto) {
     const userIds = dto.applyToUserIds?.length ? dto.applyToUserIds : [dto.userId];
     const shift = await this.shiftRepo.findOne({ where: { id: dto.shiftId } });
-    if (!shift) throw new ResponseCommon(404, false, 'SHIFT_NOT_FOUND');
+    if (!shift) throw new ResponseException(null, 404, 'SHIFT_NOT_FOUND');
     const users = await this.userRepo.find({ where: { id: In(userIds), isDelete: false } });
-    if (users.length !== userIds.length) throw new ResponseCommon(404, false, 'SOME_USERS_NOT_FOUND');
+    if (users.length !== userIds.length) throw new ResponseException(null, 404, 'SOME_USERS_NOT_FOUND');
 
     const items: WorkSchedule[] = [];
     const groupId = dto.repeatWeekly ? randomUUID() : null;
@@ -111,11 +111,11 @@ const d = date ?? ymdLocal();
 
   async update(id: string, dto: UpdateScheduleDto) {
     const item = await this.repo.findOne({ where: { id }, relations: { shift: true, user: true } });
-    if (!item) throw new ResponseCommon(404, false, 'SCHEDULE_NOT_FOUND');
+    if (!item) throw new ResponseException(null, 404, 'SCHEDULE_NOT_FOUND');
 
     if (dto.shiftId || dto.date) {
       const newShift = dto.shiftId ? await this.shiftRepo.findOne({ where: { id: dto.shiftId } }) : item.shift;
-      if (!newShift) throw new ResponseCommon(404, false, 'SHIFT_NOT_FOUND');
+      if (!newShift) throw new ResponseException(null, 404, 'SHIFT_NOT_FOUND');
       const newDate = dto.date ?? item.date;
 
       await this.validateOverlap(item.user.id, newDate, newShift, item.id);

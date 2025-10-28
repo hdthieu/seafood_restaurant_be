@@ -29,7 +29,7 @@ export class PurchaseReceipt {
     items: PurchaseReceiptItem[];
 
     @Column({ type: 'enum', enum: ReceiptStatus, default: ReceiptStatus.DRAFT })
-    status: ReceiptStatus; // DRAFT | POSTED | CANCELLED | PAID (tuỳ bạn)
+    status: ReceiptStatus;
 
     @Column({ type: 'enum', enum: DiscountType, default: DiscountType.AMOUNT })
     globalDiscountType: DiscountType;

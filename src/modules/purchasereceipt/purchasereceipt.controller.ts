@@ -1,4 +1,4 @@
-import { Controller, Post, Body, UseGuards, Req, Get, Param, Query, Patch, Put } from '@nestjs/common';
+import { Controller, Post, Body, UseGuards, Req, Get, Param, Query, Patch, Put, ParseUUIDPipe } from '@nestjs/common';
 import { PurchasereceiptService } from './purchasereceipt.service';
 import { CreatePurchaseReceiptDto } from './dto/create-purchasereceipt.dto';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
@@ -9,6 +9,8 @@ import { UserRole } from 'src/common/enums';
 import { CurrentUser } from 'src/common/decorators/user.decorator';
 import { PayReceiptDto } from './dto/pay-receipt.dto';
 import { UpdatePurchaseReceiptDto } from './dto/update-purchasereceipt.dto';
+import { ReturnReceiptDto } from './dto/return-receipt.dto';
+import { StandaloneReturnDto } from './dto/standalone-return.dto';
 
 @ApiTags('Purchase Receipts')
 @Controller('purchasereceipt')
@@ -33,7 +35,7 @@ export class PurchasereceiptController {
   @Get('/getId/:id')
   @Roles(UserRole.MANAGER, UserRole.CASHIER, UserRole.WAITER, UserRole.KITCHEN)
   @ApiOperation({ summary: 'Get Purchase Receipt detail by ID' })
-  async getDetail(@Param('id') id: string) {
+  async getDetail(@Param('id', new ParseUUIDPipe({ version: '4' })) id: string) {
     return await this.purchasereceiptService.getDetail(id);
   }
 
@@ -61,14 +63,14 @@ export class PurchasereceiptController {
   // this endpoint will cancel a receopt (only DRAFT can be cancelled)
   @Post(':id/cancel')
   @Roles(UserRole.MANAGER)
-  async cancelReceipt(@Param('id') id: string) {
+  async cancelReceipt(@Param('id', new ParseUUIDPipe({ version: '4' })) id: string) {
     return await this.purchasereceiptService.cancelReceipt(id);
   }
 
   // this endpoint 
   @Post(':id/pay')
   @Roles(UserRole.MANAGER)
-  async payReceipt(@Param('id') id: string, @Body() dto: PayReceiptDto) {
+  async payReceipt(@Param('id', new ParseUUIDPipe({ version: '4' })) id: string, @Body() dto: PayReceiptDto) {
     return await this.purchasereceiptService.payReceipt(id, dto);
   }
 
@@ -76,12 +78,33 @@ export class PurchasereceiptController {
   @Put('/update-draft-or-post/:id')
   async updateDraftOrPost(
     @CurrentUser('id') userId: string,
-    @Param('id') receiptId: string,
+    @Param('id', new ParseUUIDPipe({ version: '4' })) receiptId: string,
     @Body() dto: UpdatePurchaseReceiptDto,
     @Query('postNow') postNow: string,
   ) {
     const isPostNow = postNow === 'true';
 
     return await this.purchasereceiptService.updateDraftOrPost(userId, receiptId, dto, isPostNow);
+  }
+
+  @Post(':id/return')
+  @Roles(UserRole.MANAGER)
+  @ApiOperation({ summary: 'Return items for a purchase receipt (reduce stock and log)' })
+  async returnItems(
+    @CurrentUser('id') userId: string,
+    @Param('id', new ParseUUIDPipe({ version: '4' })) receiptId: string,
+    @Body() dto: ReturnReceiptDto,
+  ) {
+    return await this.purchasereceiptService.returnReceiptItems(userId, receiptId, dto);
+  }
+
+  @Post('standalone-return')
+  @Roles(UserRole.MANAGER)
+  @ApiOperation({ summary: 'Create a standalone return (not tied to a purchase receipt)' })
+  async standaloneReturn(
+    @CurrentUser('id') userId: string,
+    @Body() dto: StandaloneReturnDto,
+  ) {
+    return await this.purchasereceiptService.returnStandalone(userId, dto);
   }
 }
