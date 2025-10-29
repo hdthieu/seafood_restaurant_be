@@ -20,7 +20,7 @@ import { CancelOrderDto } from './dto/cancel-order.dto';
 import { CurrentUser } from 'src/common/decorators/user.decorator';
 import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
 import { UseGuards } from '@nestjs/common';
-import { Not, In } from 'typeorm';
+import { Not, In, IsNull } from 'typeorm';
 import { OrderStatus } from 'src/common/enums';
 
 import { Order } from './entities/order.entity';
@@ -183,6 +183,13 @@ async listTablesHasOpenOrders(
   detail(@Param('id', new ParseUUIDPipe()) id: string) {
     return this.ordersService.detail(id);
   }
+// @Get('/orders/:id/unnotified-items')
+// async getUnnotifiedItems(@Param('id') orderId: string) {
+//   return this.itemRepo.find({
+//     where: { order: { id: orderId }, batchId: IsNull() },
+//     relations: ['menuItem'],
+//   });
+// }
 
   @Patch(':id/status')
   @ApiOperation({
