@@ -31,4 +31,12 @@ export class ReturnReceiptDto {
     @ValidateNested({ each: true })
     @Type(() => ReturnLineDto)
     items: ReturnLineDto[];
+    
+    @ApiProperty({ example: 10000, required: false })
+    @IsOptional() @Type(() => Number) @IsNumber()
+    discount?: number;
+
+    @ApiProperty({ example: 'Ghi chú', required: false })
+    @IsOptional() @IsString()
+    note?: string;
 }

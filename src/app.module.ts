@@ -34,6 +34,7 @@ import { FaceModule } from './modules/face/face.module';
 import { CashbookModule } from './modules/cashbook/cashbook.module';
 import {SocketModule} from "@modules/socket/socket.module";
 import {KitchenModule} from "./modules/kitchen/kitchen.module";
+import { PurchasereturnModule } from './modules/purchasereturn/purchasereturn.module';
 @Module({
   imports: [ConfigModule.forRoot({ isGlobal: true,
 
@@ -93,7 +94,7 @@ envFilePath: ['.env'], // tùy path
     autoLoadEntities: true,
     // logging: ['error', 'warn', 'query'],
   }),
-    UserModule, ProfileModule, MenuitemsModule, OrdersModule, OrderitemsModule, InventoryitemsModule, InventorytransactionModule, InvoiceModule, OrderstatushistoryModule, RestauranttableModule, AuthModule, AreaModule, ConfigS3Module, IngredientModule, CategoryModule, PaymentModule, CustomersModule, SupplierModule, PurchasereceiptModule, PurchasereceiptitemModule, SuppliergroupModule, ReportModule, UnitsOfMeasureModule, UomconversionModule, MenucomboitemModule, PromotionsModule, FaceModule, CashbookModule, SocketModule, KitchenModule],
+    UserModule, ProfileModule, MenuitemsModule, OrdersModule, OrderitemsModule, InventoryitemsModule, InventorytransactionModule, InvoiceModule, OrderstatushistoryModule, RestauranttableModule, AuthModule, AreaModule, ConfigS3Module, IngredientModule, CategoryModule, PaymentModule, CustomersModule, SupplierModule, PurchasereceiptModule, PurchasereceiptitemModule, SuppliergroupModule, ReportModule, UnitsOfMeasureModule, UomconversionModule, MenucomboitemModule, PromotionsModule, FaceModule, CashbookModule, SocketModule, KitchenModule, PurchasereturnModule],
   controllers: [AppController],
   providers: [AppService],
 })

@@ -32,19 +32,30 @@ export class CashbookController {
   @Roles(UserRole.MANAGER)
   @ApiOperation({ summary: 'List cashbook entries (paged) + summary' })
   async list(@Query() q: ListCashbookEntryDto) {
-    return await this.cashbookService.listCashBookEntries(q);
+    // Return items + pagination meta + summary in one response to avoid two requests from UI
+    const [listRes, summaryRes] = await Promise.all([
+      this.cashbookService.listCashBookEntries(q),
+      this.cashbookService.summaryCashBookEntries(q),
+    ]);
+
+    // listRes is a ResponseCommon with data and meta; summaryRes is ResponseCommon with data
+    return {
+      code: 200,
+      success: true,
+      message: 'OK',
+      data: {
+        items: (listRes as any).data,
+        meta: (listRes as any).meta ?? null,
+        summary: (summaryRes as any).data ?? null,
+      },
+    };
   }
   @Get('detail-cashbook/:id')
   @ApiOperation({ summary: 'Get details of a Cashbook entry' })
   async findOne(@Param('id') id: string) {
     return this.cashbookService.findOneCashbook(id);
   }
-  // @Get('entries/summary')
-  // @Roles(UserRole.MANAGER)
-  // @ApiOperation({ summary: 'Summary opening/receipt/payment/closing' })
-  // async summary(@Query() q: ListCashbookEntryDto) {
-  //   return this.cashbookService.summaryCashBookEntries(q);
-  // }
+
 
 
   // controller dùng cho cash other party
