@@ -19,7 +19,7 @@ import { UpdateCashOtherPartyDto } from './dto/update-cash-other-party.dto';
 import { CashbookSummaryDto } from './dto/summary.dto';
 import { ListCashbookEntryDto } from './dto/list-cashbook.dto';
 import { CreateCashTypeDto } from './dto/create-cash-type.dto';
-import {User} from '@modules/user/entities/user.entity';
+import { User } from '@modules/user/entities/user.entity';
 @Injectable()
 export class CashbookService {
   constructor(
@@ -77,6 +77,35 @@ export class CashbookService {
     return entry;
   }
 
+  /**
+   * Thu tiền từ nhà cung cấp khi xử lý trả hàng (ví dụ: NCC hoàn tiền cho chúng ta).
+   * Thin wrapper, dùng trong cùng transaction của PurchaseReturnService.
+   */
+  async postReceiptFromPurchaseReturn(em: EntityManager, pr: any, amount: number) {
+    if (!amount || amount <= 0) return;
+
+    const type = await this.getOrCreateType(em, 'Thu tiền nhà cung cấp', true);
+    const supplierRef = (pr as any)?.supplier?.id ? { id: (pr as any).supplier.id } : (pr as any)?.supplierId ? { id: (pr as any).supplierId } : null;
+    if (!supplierRef) {
+      throw new ResponseException('PURCHASE_RETURN_MISSING_SUPPLIER', 400, 'PURCHASE_RETURN_MISSING_SUPPLIER');
+    }
+
+    const entry = em.getRepository(CashbookEntry).create({
+      type: CashbookType.RECEIPT,
+      code: this.genCode('PT'),
+      date: (pr as any)?.createdAt ? new Date((pr as any).createdAt) : new Date(),
+      cashType: type,
+      amount: String(amount),
+      isPostedToBusinessResult: true,
+      counterpartyGroup: CounterpartyGroup.SUPPLIER,
+      supplier: supplierRef as any,
+      sourceCode: (pr as any)?.code ?? null,
+    } as any);
+
+    await em.getRepository(CashbookEntry).save(entry);
+    return entry;
+  }
+
   /** Chi tiền mặt cho phiếu nhập – gọi TRONG transaction của PurchaseReceiptService */
   async postPaymentFromPurchase(em: EntityManager, pr: PurchaseReceipt, amount: number) {
     if (!amount || amount <= 0) return;
@@ -104,6 +133,33 @@ export class CashbookService {
       purchaseReceipt: { id: (pr as any).id } as any,
       sourceCode: (pr as any)?.code ?? null,
     });
+
+    await em.getRepository(CashbookEntry).save(entry);
+    return entry;
+  }
+
+  /**
+   * Chi tiền trả lại cho nhà cung cấp khi hủy/hoàn trả (sử dụng trong transaction của PurchaseReturnService)
+   */
+  async postPaymentFromPurchaseReturn(em: EntityManager, pr: any, amount: number) {
+    if (!amount || amount <= 0) return;
+    const type = await this.getOrCreateType(em, 'Chi tiền trả NCC (Trả lại)', false);
+    const supplierRef = (pr as any)?.supplier?.id ? { id: (pr as any).supplier.id } : (pr as any)?.supplierId ? { id: (pr as any).supplierId } : null;
+    if (!supplierRef) {
+      throw new ResponseException('PURCHASE_RETURN_MISSING_SUPPLIER', 400, 'PURCHASE_RETURN_MISSING_SUPPLIER');
+    }
+
+    const entry = em.getRepository(CashbookEntry).create({
+      type: CashbookType.PAYMENT,
+      code: this.genCode('PC'),
+      date: (pr as any)?.cancelledAt ? new Date((pr as any).cancelledAt) : new Date(),
+      cashType: type,
+      amount: String(amount),
+      isPostedToBusinessResult: true,
+      counterpartyGroup: CounterpartyGroup.SUPPLIER,
+      supplier: supplierRef as any,
+      sourceCode: (pr as any)?.code ?? null,
+    } as any);
 
     await em.getRepository(CashbookEntry).save(entry);
     return entry;
@@ -160,21 +216,21 @@ export class CashbookService {
       if (!s) throw new ResponseException('SUPPLIER_NOT_FOUND', 400, 'SUPPLIER_NOT_FOUND');
       (entry as any).supplier = s;
 
-    } 
+    }
     // ✅ thêm nhân viên
- else if (dto.counterpartyGroup === CounterpartyGroup.STAFF) {
-  if (!dto.staffId) throw new ResponseException('MISSING_STAFF_ID', 400, 'MISSING_STAFF_ID');
-  const staff = await this.userRepository.findOne({ where: { id: dto.staffId } });
-  if (!staff) throw new ResponseException('STAFF_NOT_FOUND', 400, 'STAFF_NOT_FOUND');
-  (entry as any).staff = staff;
- }
-// // ✅ thêm đối tác giao hàng
-// } else if (dto.counterpartyGroup === CounterpartyGroup.DELIVERY_PARTNER) {
-//   if (!dto.deliveryPartnerId) throw new ResponseException('MISSING_DELIVERY_PARTNER_ID', 400, 'MISSING_DELIVERY_PARTNER_ID');
-//   const dp = await this.deliveryPartnerRepo.findOne({ where: { id: dto.deliveryPartnerId } });
-//   if (!dp) throw new ResponseException('DELIVERY_PARTNER_NOT_FOUND', 400, 'DELIVERY_PARTNER_NOT_FOUND');
-//   (entry as any).deliveryPartner = dp;
-    
+    else if (dto.counterpartyGroup === CounterpartyGroup.STAFF) {
+      if (!dto.staffId) throw new ResponseException('MISSING_STAFF_ID', 400, 'MISSING_STAFF_ID');
+      const staff = await this.userRepository.findOne({ where: { id: dto.staffId } });
+      if (!staff) throw new ResponseException('STAFF_NOT_FOUND', 400, 'STAFF_NOT_FOUND');
+      (entry as any).staff = staff;
+    }
+    // // ✅ thêm đối tác giao hàng
+    // } else if (dto.counterpartyGroup === CounterpartyGroup.DELIVERY_PARTNER) {
+    //   if (!dto.deliveryPartnerId) throw new ResponseException('MISSING_DELIVERY_PARTNER_ID', 400, 'MISSING_DELIVERY_PARTNER_ID');
+    //   const dp = await this.deliveryPartnerRepo.findOne({ where: { id: dto.deliveryPartnerId } });
+    //   if (!dp) throw new ResponseException('DELIVERY_PARTNER_NOT_FOUND', 400, 'DELIVERY_PARTNER_NOT_FOUND');
+    //   (entry as any).deliveryPartner = dp;
+
     else if (dto.counterpartyGroup === CounterpartyGroup.OTHER) {
       let other = null;
       if (dto.cashOtherPartyId) {
@@ -209,7 +265,7 @@ export class CashbookService {
       .leftJoinAndSelect('e.purchaseReceipt', 'purchaseReceipt')
       .leftJoinAndSelect('e.customer', 'customer')
       .leftJoinAndSelect('e.supplier', 'supplier')
-      
+
       .leftJoinAndSelect('e.cashOtherParty', 'other');
 
     if (q.q?.trim()) {
@@ -217,7 +273,9 @@ export class CashbookService {
       qb.andWhere(new Brackets(b => {
         b.where('LOWER(e.code) LIKE LOWER(:s)', { s: `%${s}%` })
           .orWhere('LOWER(e.sourceCode) LIKE LOWER(:s)', { s: `%${s}%` })
-          .orWhere('LOWER(e.counterpartyName) LIKE LOWER(:s)', { s: `%${s}%` });
+          .orWhere('LOWER(customer.name) LIKE LOWER(:s)', { s: `%${s}%` })
+          .orWhere('LOWER(supplier.name) LIKE LOWER(:s)', { s: `%${s}%` })
+          .orWhere('LOWER(other.name) LIKE LOWER(:s)', { s: `%${s}%` });
       }));
     }
     if (q.type) qb.andWhere('e.type = :type', { type: q.type });
@@ -260,54 +318,83 @@ export class CashbookService {
       throw new ResponseException(error, 500, 'GET_CASHBOOK_FAILED');
     }
   }
-  // async summaryCashBookEntries(q: ListCashbookEntryDto) {
-  //   const from = q.dateFrom ? this.sod(new Date(q.dateFrom)) : undefined;
-  //   const to = q.dateTo ? this.eod(new Date(q.dateTo)) : undefined;
 
-  //   // Opening balance (trước from). Nếu không có from -> 0
-  //   let opening = 0;
-  //   if (from) {
-  //     const openQ = this.repo.createQueryBuilder('e')
-  //       .select(`COALESCE(SUM(CASE WHEN e.type = 'RECEIPT' THEN e.amount ELSE -e.amount END), 0)`, 'balance')
-  //       .where('e.date < :from', { from });
+  async summaryCashBookEntries(q: ListCashbookEntryDto) {
+    const from = q.dateFrom ? this.sod(new Date(q.dateFrom)) : undefined;
+    const to = q.dateTo ? this.eod(new Date(q.dateTo)) : undefined;
 
-  //     if (q.counterpartyGroup) openQ.andWhere('e.counterpartyGroup = :cg', { cg: q.counterpartyGroup });
-  //     if (q.cashTypeId) openQ.andWhere('e.cashTypeId = :ct', { ct: q.cashTypeId });
-  //     if (typeof q.isPostedToBusinessResult === 'boolean') {
-  //       openQ.andWhere('e.isPostedToBusinessResult = :pbr', { pbr: q.isPostedToBusinessResult });
-  //     }
-  //     const { balance } = await openQ.getRawOne<{ balance: string }>();
-  //     opening = Number(balance || 0);
-  //   }
+    // Opening balance (trước from). Nếu không có from -> 0
+    let opening = 0;
+    if (from) {
+      const openQ = this.repo.createQueryBuilder('e')
+        .leftJoin('e.customer', 'customer')
+        .leftJoin('e.supplier', 'supplier')
+        .leftJoin('e.cashOtherParty', 'other')
+        .select(`COALESCE(SUM(CASE WHEN e.type = 'RECEIPT' THEN e.amount ELSE -e.amount END), 0)`, 'balance')
+        .where('e.date < :from', { from });
 
-  //   // Tổng thu/chi trong khoảng
-  //   const sumQ = this.repo.createQueryBuilder('e')
-  //     .select(`COALESCE(SUM(CASE WHEN e.type = 'RECEIPT' THEN e.amount END), 0)`, 'receipt')
-  //     .addSelect(`COALESCE(SUM(CASE WHEN e.type = 'PAYMENT' THEN e.amount END), 0)`, 'payment');
+      // apply same filters as list
+      if (q.q?.trim()) {
+        const s = q.q.trim();
+        openQ.andWhere(new Brackets(b => {
+          b.where('LOWER(e.code) LIKE LOWER(:s)', { s: `%${s}%` })
+            .orWhere('LOWER(e.sourceCode) LIKE LOWER(:s)', { s: `%${s}%` })
+            .orWhere('LOWER(customer.name) LIKE LOWER(:s)', { s: `%${s}%` })
+            .orWhere('LOWER(supplier.name) LIKE LOWER(:s)', { s: `%${s}%` })
+            .orWhere('LOWER(other.name) LIKE LOWER(:s)', { s: `%${s}%` });
+        }));
+      }
+      if (q.type) openQ.andWhere('e.type = :type', { type: q.type });
+      if (q.counterpartyGroup) openQ.andWhere('e.counterpartyGroup = :cg', { cg: q.counterpartyGroup });
+      if (q.cashTypeId) openQ.andWhere('e.cashTypeId = :ct', { ct: q.cashTypeId });
+      if (typeof q.isPostedToBusinessResult === 'boolean') {
+        openQ.andWhere('e.isPostedToBusinessResult = :pbr', { pbr: q.isPostedToBusinessResult });
+      }
+      const openRes = (await openQ.getRawOne<{ balance: string }>()) || { balance: '0' };
+      opening = Number(openRes.balance || 0);
+    }
 
-  //   if (from) sumQ.andWhere('e.date >= :from', { from });
-  //   if (to) sumQ.andWhere('e.date <= :to', { to });
-  //   if (q.counterpartyGroup) sumQ.andWhere('e.counterpartyGroup = :cg', { cg: q.counterpartyGroup });
-  //   if (q.cashTypeId) sumQ.andWhere('e.cashTypeId = :ct', { ct: q.cashTypeId });
-  //   if (typeof q.isPostedToBusinessResult === 'boolean') {
-  //     sumQ.andWhere('e.isPostedToBusinessResult = :pbr', { pbr: q.isPostedToBusinessResult });
-  //   }
+    // Tổng thu/chi trong khoảng
+    const sumQ = this.repo.createQueryBuilder('e')
+      .leftJoin('e.customer', 'customer')
+      .leftJoin('e.supplier', 'supplier')
+      .leftJoin('e.cashOtherParty', 'other')
+      .select(`COALESCE(SUM(CASE WHEN e.type = 'RECEIPT' THEN e.amount END), 0)`, 'receipt')
+      .addSelect(`COALESCE(SUM(CASE WHEN e.type = 'PAYMENT' THEN e.amount END), 0)`, 'payment');
 
-  //   const { receipt, payment } = await sumQ.getRawOne<{ receipt: string; payment: string }>();
-  //   const totalReceipt = Number(receipt || 0);
-  //   const totalPayment = Number(payment || 0);
-  //   const closing = opening + totalReceipt - totalPayment;
+    // apply same filters as list
+    if (from) sumQ.andWhere('e.date >= :from', { from });
+    if (to) sumQ.andWhere('e.date <= :to', { to });
+    if (q.q?.trim()) {
+      const s = q.q.trim();
+      sumQ.andWhere(new Brackets(b => {
+        b.where('LOWER(e.code) LIKE LOWER(:s)', { s: `%${s}%` })
+          .orWhere('LOWER(e.sourceCode) LIKE LOWER(:s)', { s: `%${s}%` })
+          .orWhere('LOWER(customer.name) LIKE LOWER(:s)', { s: `%${s}%` })
+          .orWhere('LOWER(supplier.name) LIKE LOWER(:s)', { s: `%${s}%` })
+          .orWhere('LOWER(other.name) LIKE LOWER(:s)', { s: `%${s}%` });
+      }));
+    }
+    if (q.type) sumQ.andWhere('e.type = :type', { type: q.type });
+    if (q.counterpartyGroup) sumQ.andWhere('e.counterpartyGroup = :cg', { cg: q.counterpartyGroup });
+    if (q.cashTypeId) sumQ.andWhere('e.cashTypeId = :ct', { ct: q.cashTypeId });
+    if (typeof q.isPostedToBusinessResult === 'boolean') {
+      sumQ.andWhere('e.isPostedToBusinessResult = :pbr', { pbr: q.isPostedToBusinessResult });
+    }
 
-  //   const summary = {
-  //     openingBalance: opening,
-  //     totalReceipt,
-  //     totalPayment,
-  //     closingBalance: closing,
-  //   };
+    const sumRes = (await sumQ.getRawOne<{ receipt: string; payment: string }>()) || { receipt: '0', payment: '0' };
+    const totalReceipt = Number(sumRes.receipt || 0);
+    const totalPayment = Number(sumRes.payment || 0);
+    const closing = opening + totalReceipt - totalPayment;
 
-  //   // 👉 Trả đúng mẫu: data = summary, không cần meta
-  //   return new ResponseCommon<typeof summary>(200, true, 'OK', summary);
-  // }
+    const summary = {
+      openingBalance: opening,
+      totalReceipt,
+      totalPayment,
+      closingBalance: closing,
+    };
+    return new ResponseCommon<typeof summary>(200, true, 'OK', summary);
+  }
 
 
   // async remove(id: string) {
@@ -315,47 +402,6 @@ export class CashbookService {
   //   if (!row) throw new NotFoundException('Cashbook entry not found');
   //   await this.repo.delete(id);
   //   return { success: true };
-  // }
-
-  // async summary(q: CashbookSummaryDto) {
-  //   const from = q.dateFrom ? new Date(q.dateFrom) : new Date(new Date().getFullYear(), new Date().getMonth(), 1);
-  //   const to = q.dateTo ? new Date(q.dateTo) : new Date();
-
-  //   // tổng thu/chi trong kỳ
-  //   const { totalReceipt } = await this.repo.createQueryBuilder('e')
-  //     .select(`COALESCE(SUM(CASE WHEN e.type = :r THEN e.amount::numeric ELSE 0 END), 0)`, 'totalReceipt')
-  //     .where('e.date BETWEEN :from AND :to', { from, to })
-  //     .setParameters({ r: CashbookType.RECEIPT })
-  //     .getRawOne<{ totalReceipt: string }>();
-
-  //   const { totalPayment } = await this.repo.createQueryBuilder('e')
-  //     .select(`COALESCE(SUM(CASE WHEN e.type = :p THEN e.amount::numeric ELSE 0 END), 0)`, 'totalPayment')
-  //     .where('e.date BETWEEN :from AND :to', { from, to })
-  //     .setParameters({ p: CashbookType.PAYMENT })
-  //     .getRawOne<{ totalPayment: string }>();
-
-  //   // số dư đầu kỳ
-  //   const { opening } = await this.repo.createQueryBuilder('e')
-  //     .select(`
-  //       COALESCE(SUM(CASE WHEN e.type = :r THEN e.amount::numeric ELSE -e.amount::numeric END), 0)
-  //     `, 'opening')
-  //     .where('e.date < :from', { from })
-  //     .setParameters({ r: CashbookType.RECEIPT })
-  //     .getRawOne<{ opening: string }>();
-
-  //   const openingNum = Number(opening ?? 0);
-  //   const inNum = Number(totalReceipt ?? 0);
-  //   const outNum = Number(totalPayment ?? 0);
-  //   const balance = openingNum + inNum - outNum;
-
-  //   return {
-  //     dateFrom: from.toISOString(),
-  //     dateTo: to.toISOString(),
-  //     opening: openingNum,
-  //     totalReceipt: inNum,
-  //     totalPayment: outNum,
-  //     balance,
-  //   };
   // }
 
 
