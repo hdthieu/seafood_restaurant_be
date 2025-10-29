@@ -9,8 +9,8 @@ import { UserRole } from 'src/common/enums';
 import { CurrentUser } from 'src/common/decorators/user.decorator';
 import { PayReceiptDto } from './dto/pay-receipt.dto';
 import { UpdatePurchaseReceiptDto } from './dto/update-purchasereceipt.dto';
-import { ReturnReceiptDto } from './dto/return-receipt.dto';
-import { StandaloneReturnDto } from './dto/standalone-return.dto';
+import { ReturnReceiptDto } from '../purchasereturn/dto/return-receipt.dto';
+import { StandaloneReturnDto } from '../purchasereturn/dto/standalone-return.dto';
 
 @ApiTags('Purchase Receipts')
 @Controller('purchasereceipt')
@@ -87,24 +87,5 @@ export class PurchasereceiptController {
     return await this.purchasereceiptService.updateDraftOrPost(userId, receiptId, dto, isPostNow);
   }
 
-  @Post(':id/return')
-  @Roles(UserRole.MANAGER)
-  @ApiOperation({ summary: 'Return items for a purchase receipt (reduce stock and log)' })
-  async returnItems(
-    @CurrentUser('id') userId: string,
-    @Param('id', new ParseUUIDPipe({ version: '4' })) receiptId: string,
-    @Body() dto: ReturnReceiptDto,
-  ) {
-    return await this.purchasereceiptService.returnReceiptItems(userId, receiptId, dto);
-  }
-
-  @Post('standalone-return')
-  @Roles(UserRole.MANAGER)
-  @ApiOperation({ summary: 'Create a standalone return (not tied to a purchase receipt)' })
-  async standaloneReturn(
-    @CurrentUser('id') userId: string,
-    @Body() dto: StandaloneReturnDto,
-  ) {
-    return await this.purchasereceiptService.returnStandalone(userId, dto);
-  }
+  
 }

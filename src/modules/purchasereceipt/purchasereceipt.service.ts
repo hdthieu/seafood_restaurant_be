@@ -13,14 +13,11 @@ import { In } from 'typeorm';
 import { calcLineTotal, calcReceiptTotals, resolveUomAndFactor } from '@modules/helper/purchasereceipthelper.service';
 import { PayReceiptDto } from './dto/pay-receipt.dto';
 import { InventoryTransaction } from '@modules/inventorytransaction/entities/inventorytransaction.entity';
-import { PurchaseReturnLog } from './entities/purchase-return-log.entity';
 import { UpdatePurchaseReceiptDto } from './dto/update-purchasereceipt.dto';
 import { UnitsOfMeasure } from '@modules/units-of-measure/entities/units-of-measure.entity';
 import { UomConversion } from '@modules/uomconversion/entities/uomconversion.entity';
 import { CashbookService } from '@modules/cashbook/cashbook.service';
-import { ReturnReceiptDto } from './dto/return-receipt.dto';
-import { StandaloneReturnDto } from './dto/standalone-return.dto';
-import { ReturnMode } from 'src/common/enums';
+import { ReturnReceiptDto } from '../purchasereturn/dto/return-receipt.dto';
 @Injectable()
 export class PurchasereceiptService {
   constructor(
@@ -30,7 +27,6 @@ export class PurchasereceiptService {
     @InjectRepository(InventoryItem) private readonly invRepo: Repository<InventoryItem>,
     @InjectRepository(Supplier) private readonly supplierRepo: Repository<Supplier>,
     @InjectRepository(InventoryTransaction) private readonly txRepo: Repository<InventoryTransaction>,
-    @InjectRepository(PurchaseReturnLog) private readonly returnLogRepo: Repository<PurchaseReturnLog>,
     @InjectRepository(UnitsOfMeasure) private readonly uomRepo: Repository<UnitsOfMeasure>,
     @InjectRepository(UomConversion) private readonly convRepo: Repository<UomConversion>,
     private readonly cashbookService: CashbookService,
@@ -42,102 +38,6 @@ export class PurchasereceiptService {
     const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
     return `PN-${ymd}-${uuidv4().slice(0, 4).toUpperCase()}`;
   }
-
-  async returnStandalone(userId: string, dto: StandaloneReturnDto) {
-    // check feature flag
-    if (process.env.ALLOW_STANDALONE_RETURN !== 'true') {
-      throw new ResponseException(null, 403, 'STANDALONE_RETURN_DISABLED');
-    }
-
-    // basic validation
-    const supplier = await this.supplierRepo.findOne({ where: { id: dto.supplierId } });
-    if (!supplier) throw new ResponseException(null, 404, 'SUPPLIER_NOT_FOUND');
-
-    if (!dto.items?.length) throw new ResponseException(null, 400, 'RETURN_ITEM_LIST_EMPTY');
-
-    // load inventory items
-    const ids = Array.from(new Set(dto.items.map(i => i.itemId)));
-    const invs = await this.invRepo.find({ where: { id: In(ids) }, relations: ['baseUom'] });
-    if (invs.length !== ids.length) {
-      const found = new Set(invs.map(i => i.id));
-      const missing = ids.filter(id => !found.has(id));
-      throw new ResponseException(null, 404, `SOME_ITEMS_NOT_FOUND:${missing.join(',')}`);
-    }
-    const invMap = new Map(invs.map(i => [i.id, i]));
-
-    // process in transaction
-    return this.ds.transaction(async (em) => {
-      const inventoryRepo = em.getRepository(InventoryItem);
-      const txRepo = em.getRepository(InventoryTransaction);
-      const returnLogRepo = em.getRepository(PurchaseReturnLog);
-
-      const created: Array<any> = [];
-      let totalReturnAmount = 0;
-
-      for (const line of dto.items) {
-        const qty = Number(line.quantity ?? 0);
-        if (!qty || qty <= 0) throw new ResponseException(null, 400, 'INVALID_RETURN_QTY');
-
-        const inv = invMap.get(line.itemId);
-        if (!inv) throw new ResponseException(null, 404, `INVENTORY_ITEM_NOT_FOUND:${line.itemId}`);
-
-        // assume qty is given in base UOM
-        const baseQty = +(qty).toFixed(3);
-        const before = Number(inv.quantity);
-        if (before + 1e-6 < baseQty) throw new ResponseException(null, 400, `INSUFFICIENT_STOCK_FOR_RETURN:${inv.id}`);
-        const after = Number((before - baseQty).toFixed(3));
-        inv.quantity = after as any;
-        await inventoryRepo.save(inv as any);
-
-        const tx = txRepo.create({
-          item: { id: inv.id } as any,
-          quantity: baseQty,
-          action: InventoryAction.OUT,
-          beforeQty: before,
-          afterQty: after,
-          refType: 'STANDALONE_RETURN',
-          refId: dto.supplierId as any,
-          refItemId: null,
-          note: dto.reason ?? undefined,
-          performedBy: userId ? ({ id: userId } as any) : null,
-        } as any);
-        const savedTx = await txRepo.save(tx as any);
-
-        // compute return amount: use unitPrice if provided, otherwise average cost
-        const unitPrice = (line.unitPrice ?? Number(inv.avgCost ?? 0));
-        const lineAmount = +(unitPrice * qty).toFixed(2);
-        totalReturnAmount = +(totalReturnAmount + lineAmount).toFixed(2);
-
-        const log = returnLogRepo.create({
-          receipt: null,
-          receiptItem: null,
-          supplier: supplier,
-          item: { id: inv.id } as any,
-          quantity: qty,
-          conversionToBase: 1,
-          baseQty,
-          reason: dto.reason ?? undefined,
-          lotNumber: line.lotNumber ?? undefined,
-          inventoryTx: savedTx,
-          performedBy: { id: userId } as any,
-          mode: ReturnMode.STANDALONE,
-        } as any);
-        const savedLog = await returnLogRepo.save(log as any);
-
-        created.push({ logId: (savedLog as any).id, txId: (savedTx as any).id, itemId: inv.id, quantity: qty, lineAmount });
-      }
-
-      return {
-        supplierId: supplier.id,
-        totalReturnAmount,
-        refundProcessed: false,
-        note: 'Standalone return processed. Create CreditNote or refund manually.',
-        returned: created,
-      };
-    });
-  }
-
-
 
   /** Tạo phiếu DRAFT + items */
   async createDraft(userId: string, dto: CreatePurchaseReceiptDto) {
@@ -953,157 +853,4 @@ export class PurchasereceiptService {
     });
   }
 
-
-
-  /** Trả hàng: giảm tồn, tạo inventory transaction, ghi log và điều chỉnh công nợ */
-  async returnReceiptItems(userId: string, receiptId: string, dto: ReturnReceiptDto) {
-    if (!dto.items?.length) {
-      throw new ResponseException(null, 400, 'RETURN_ITEM_LIST_EMPTY');
-    }
-
-    return this.ds.transaction(async (em) => {
-      const receiptRepo = em.getRepository(PurchaseReceipt);
-      const receipt = await receiptRepo.findOne({ where: { id: receiptId }, relations: ['supplier'] });
-      if (!receipt) throw new ResponseException(null, 404, 'RECEIPT_NOT_FOUND');
-
-      if (![ReceiptStatus.POSTED, ReceiptStatus.OWING, ReceiptStatus.PAID].includes(receipt.status)) {
-        throw new ResponseException(null, 400, 'ONLY_POSTED_OR_IN_DEBT_RECEIPTS_CAN_RETURN');
-      }
-
-      const receiptItemRepo = em.getRepository(PurchaseReceiptItem);
-      const itemIds = dto.items.map((i) => i.receiptItemId);
-
-      const rows = await receiptItemRepo.find({
-        where: {
-          id: In(itemIds),
-          receipt: { id: receiptId },
-        },
-        relations: ['item', 'receivedUom'],
-      });
-
-      if (rows.length !== itemIds.length) {
-        throw new ResponseException(null, 404, 'ONE_OR_MORE_RECEIPT_ITEMS_NOT_FOUND');
-      }
-
-      const rowMap = new Map(rows.map((r) => [r.id, r]));
-
-      const invIds = rows.map((r) => r.item.id);
-      const uniqInvIds = Array.from(new Set(invIds));
-      const inventoryRepo = em.getRepository(InventoryItem);
-      const invs = await inventoryRepo.find({ where: { id: In(uniqInvIds) } });
-      const invMap = new Map(invs.map((i) => [i.id, i]));
-
-      const txRepo = em.getRepository(InventoryTransaction);
-      const returnLogRepo = em.getRepository(PurchaseReturnLog);
-
-      const createdLogs: Array<{
-        logId: string;
-        txId: string;
-        receiptItemId: string;
-        quantity: number;
-        baseQty: number;
-        reason?: string;
-      }> = [];
-
-      let totalReturnAmount = 0;
-
-      for (const line of dto.items) {
-        const rid = line.receiptItemId;
-        const qty = Number(line.quantity ?? 0);
-        if (!qty || qty <= 0) throw new ResponseException(null, 400, 'INVALID_RETURN_QTY');
-
-        const receiptLine = rowMap.get(rid);
-        if (!receiptLine) throw new ResponseException(null, 404, `RECEIPT_ITEM_NOT_FOUND:${rid}`);
-
-        const originalQty = Number(receiptLine.quantity);
-        const prevReturned = Number(receiptLine.returnedQuantity ?? 0);
-        const maxReturnable = originalQty - prevReturned;
-        if (qty > maxReturnable + 1e-6) {
-          throw new ResponseException(null, 400, `RETURN_QTY_EXCEEDS_AVAILABLE_FOR_ITEM_${rid}`);
-        }
-
-        const inv = invMap.get(receiptLine.item.id);
-        if (!inv) throw new ResponseException(null, 404, `INVENTORY_ITEM_NOT_FOUND:${receiptLine.item.id}`);
-
-        const conversion = Number(receiptLine.conversionToBase ?? 1);
-        const baseQty = +(qty * conversion).toFixed(3);
-
-        const before = Number(inv.quantity);
-        if (before + 1e-6 < baseQty) {
-          throw new ResponseException(null, 400, `INSUFFICIENT_STOCK_FOR_RETURN:${receiptLine.item.id}`);
-        }
-        const after = Number((before - baseQty).toFixed(3));
-        inv.quantity = after as any;
-        await inventoryRepo.save(inv);
-
-        const tx = txRepo.create({
-          item: { id: inv.id } as any,
-          quantity: baseQty,
-          action: InventoryAction.OUT,
-          beforeQty: before,
-          afterQty: after,
-          refType: 'PURCHASE_RETURN',
-          refId: receipt.id as any,
-          refItemId: receiptLine.id as any,
-          note: line.reason ?? undefined,
-          performedBy: userId ? ({ id: userId } as any) : null,
-        } as any);
-        const savedTx = await txRepo.save(tx as any);
-
-        receiptLine.returnedQuantity = prevReturned + qty;
-        await receiptItemRepo.save(receiptLine);
-
-        const log = returnLogRepo.create({
-          receipt: { id: receipt.id } as any,
-          receiptItem: { id: receiptLine.id } as any,
-          item: { id: inv.id } as any,
-          quantity: qty,
-          conversionToBase: conversion,
-          baseQty,
-          reason: line.reason ?? undefined,
-          inventoryTx: savedTx,
-        } as any);
-        const savedLog = await returnLogRepo.save(log as any);
-
-        const lineTotal = calcLineTotal(receiptLine as any);
-        const ratio = qty / (originalQty || 1);
-        const lineReturnAmount = Math.max(0, +(lineTotal * ratio).toFixed(2));
-        totalReturnAmount = +(totalReturnAmount + lineReturnAmount).toFixed(2);
-
-        createdLogs.push({
-          logId: (savedLog as any).id,
-          txId: (savedTx as any).id,
-          receiptItemId: receiptLine.id,
-          quantity: qty,
-          baseQty,
-          reason: line.reason ?? undefined,
-        });
-      }
-
-      const amountPaid = Number(receipt.amountPaid ?? 0);
-      const oldGrandTotal = +(amountPaid + Number(receipt.debt ?? 0)).toFixed(2);
-      const newGrandTotal = Math.max(0, +(oldGrandTotal - totalReturnAmount).toFixed(2));
-      const newDebt = Math.max(0, +(newGrandTotal - amountPaid).toFixed(2));
-      receipt.debt = newDebt;
-      receipt.status = newGrandTotal === 0
-        ? (amountPaid === 0 ? ReceiptStatus.CANCELLED : ReceiptStatus.PAID)
-        : (amountPaid >= newGrandTotal ? ReceiptStatus.PAID : ReceiptStatus.OWING);
-      await receiptRepo.save(receipt);
-
-      const refundAmount = Math.max(0, +(amountPaid - newGrandTotal).toFixed(2));
-
-      return {
-        receiptId: receipt.id,
-        totalReturnAmount,
-        amountPaid,
-        oldGrandTotal,
-        newGrandTotal,
-        newDebt,
-        refundAmount,
-        refundProcessed: false,
-        refundNote: refundAmount > 0 ? 'Vui lòng xử lý hoàn tiền thủ công.' : null,
-        returned: createdLogs,
-      };
-    });
-  }
 }
