@@ -655,22 +655,22 @@ export class OrdersService {
           } catch (err) {
             // rollback về savepoint để transaction không bị abort
             await qr.query('ROLLBACK TO SAVEPOINT kt_savepoint');
-            // vẫn báo bếp nếu muốn
-            this.gw.server.to('kitchen').emit('kitchen:notify', {
-              orderId: order.id,
-              tableName: order.table?.name,
-              batchId,
-              createdAt: new Date().toISOString(),
-              priority: false,
-              note: null,
-              items: [
-                {
-                  orderItemId: row.id,
-                  name: row.menuItem.name,
-                  qty: delta,
-                },
-              ],
-            });
+            // // vẫn báo bếp nếu muốn
+            // this.gw.server.to('kitchen').emit('kitchen:notify', {
+            //   orderId: order.id,
+            //   tableName: order.table?.name,
+            //   batchId,
+            //   createdAt: new Date().toISOString(),
+            //   priority: false,
+            //   note: null,
+            //   items: [
+            //     {
+            //       orderItemId: row.id,
+            //       name: row.menuItem.name,
+            //       qty: delta,
+            //     },
+            //   ],
+            // });
           }
           // ======================== KẾT THÚC PHẦN TẠO TICKET & SOCKET ========================
 
