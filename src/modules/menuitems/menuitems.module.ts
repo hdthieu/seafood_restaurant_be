@@ -7,9 +7,10 @@ import { Category } from '../category/entities/category.entity';
 import { Ingredient } from '../ingredient/entities/ingredient.entity';
 import { ConfigS3Module } from 'src/common/AWS/config-s3/config-s3.module';
 import { MenuComboItem } from '@modules/menucomboitem/entities/menucomboitem.entity';
+import { PromotionsModule } from '@modules/promotions/promotions.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([MenuItem, Category, Ingredient, MenuComboItem]), ConfigS3Module],
+  imports: [TypeOrmModule.forFeature([MenuItem, Category, Ingredient, MenuComboItem]), ConfigS3Module, PromotionsModule],
   controllers: [MenuitemsController],
   providers: [MenuitemsService],
 })

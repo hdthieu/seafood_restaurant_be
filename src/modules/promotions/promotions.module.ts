@@ -11,5 +11,6 @@ import { Category } from '@modules/category/entities/category.entity';
   imports: [TypeOrmModule.forFeature([Promotion, InvoicePromotion, MenuItem, Category])],
   controllers: [PromotionsController],
   providers: [PromotionsService],
+  exports: [PromotionsService]
 })
 export class PromotionsModule { }

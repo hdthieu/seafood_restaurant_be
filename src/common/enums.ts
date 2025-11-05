@@ -122,7 +122,7 @@ export enum PostingState {
   CANCELLED = 'CANCELLED',
 }
 
-export enum DiscountTypePromotion { PERCENT = 'PERCENT', AMOUNT = 'AMOUNT', GIFT = 'GIFT' }
+export enum DiscountTypePromotion { PERCENT = 'PERCENT', AMOUNT = 'AMOUNT' }
 export enum ApplyWith { ORDER = 'ORDER', CATEGORY = 'CATEGORY', ITEM = 'ITEM' }
 export enum AudienceScope {
   ALL = 'ALL',

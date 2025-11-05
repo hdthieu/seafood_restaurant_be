@@ -39,4 +39,8 @@ export class GetMenuItemsDto {
   @ApiPropertyOptional({ enum: ['ASC', 'DESC'], default: 'ASC' })
   @IsOptional() @IsIn(['ASC', 'DESC'])
   order?: 'ASC' | 'DESC' = 'ASC';
+
+  @ApiPropertyOptional({ description: 'Có kèm khuyến mãi hay không', default: false })
+  @IsOptional() @IsBooleanString()
+  withPromotions?: boolean;
 }
