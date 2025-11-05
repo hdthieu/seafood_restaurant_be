@@ -795,16 +795,16 @@ export class OrdersService {
           await itemRepo.update({ id: existed.id }, { quantity: existed.quantity + moveQty });
           existed.quantity += moveQty;
         } else {
-          const partial: DeepPartial<OrderItem> = {
-            order:    { id: to.id } as any,
-            menuItem: { id: src.menuItem.id } as any,
-            quantity: moveQty,
-            price:    src.price,
-            status:   src.status,
-            isCooked: (src as any).isCooked,
-            batchId:  (src as any).batchId,
-            note:     (src as any).note,
-          };
+       const partial: DeepPartial<OrderItem> = {
+  order:    { id: to.id } as any,
+  menuItem: { id: src.menuItem.id } as any,
+  quantity: moveQty,
+  price:    src.price,
+  status:   src.status,
+  isCooked: (src as any).isCooked,
+  batchId:  src.batchId ?? null,  // ⚙️ Giữ nguyên hoặc reset null
+  note:     (src as any).note,
+};
 
           const entity = itemRepo.create(partial);     // => OrderItem
           const saved  = await itemRepo.save(entity);  // => OrderItem

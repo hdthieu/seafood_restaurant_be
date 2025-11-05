@@ -1,7 +1,5 @@
-import { Controller, Get, Post, Body, Patch, Param, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Query, UseGuards, Delete } from '@nestjs/common';
 import { PurchasereturnService } from './purchasereturn.service';
-import { CreatePurchasereturnDto } from './dto/create-purchasereturn.dto';
-import { UpdatePurchasereturnDto } from './dto/update-purchasereturn.dto';
 import { UpdateStandaloneReturnDto } from './dto/update-standalone-return.dto';
 import { ApiBearerAuth, ApiOperation, ApiTags, ApiQuery } from '@nestjs/swagger';
 import { Roles } from 'src/common/decorators/roles.decorator';
@@ -10,10 +8,8 @@ import { JwtAuthGuard } from '@modules/core/auth/guards/jwt-auth.guard';
 import { UserRole } from 'src/common/enums';
 import { CurrentUser } from 'src/common/decorators/user.decorator';
 import { ParseUUIDPipe } from '@nestjs/common';
-import { ReturnReceiptDto } from './dto/return-receipt.dto';
 import { StandaloneReturnDto } from './dto/standalone-return.dto';
 import { ChangeStatusDto } from './dto/change-status.dto';
-import { PurchaseReturnStatus } from 'src/common/enums';
 import { QueryPurchaseReturnDto } from './dto/query-purchase-return.dto';
 
 @ApiTags('Purchase Returns')
@@ -85,6 +81,13 @@ export class PurchasereturnController {
     @Body() dto: UpdateStandaloneReturnDto,
   ) {
     return await this.purchasereturnService.update(id, userId, dto as any);
+  }
+
+  @Delete(':id')
+  @Roles(UserRole.MANAGER)
+  @ApiOperation({ summary: 'Delete a purchase return (only allowed for DRAFT)' })
+  async remove(@Param('id', new ParseUUIDPipe({ version: '4' })) id: string) {
+    return await this.purchasereturnService.remove(id);
   }
 
 }

@@ -2,7 +2,7 @@ import { Controller, Get, Patch, Query, Body } from '@nestjs/common';
 import { OrderItemsService } from './orderitems.service';
 import { ItemStatus } from 'src/common/enums';
 import { UpdateItemsStatusDto } from './dto/update-items-status.dto';
-import { CancelItemsDto } from './dto/cancel-items.dto';
+import { CancelItemsDto, CancelPartialDto } from './dto/cancel-items.dto';
 @Controller('orderitems')
 
 
@@ -23,10 +23,15 @@ export class OrderItemsController {
   async updateStatus(@Body() dto: UpdateItemsStatusDto) {
     return this.svc.updateStatusBulk(dto);
   }
-  //  @Patch('cancel')
-  // cancelItems(@Body() dto: CancelItemsDto) {
-  //   return this.svc.cancelItems(dto);
-  // }
+   @Patch('cancel')
+  cancelBulk(@Body() dto: CancelItemsDto) {
+    return this.svc.cancelItems(dto);
+  }
+
+  @Patch('cancel-partial')
+  cancelPartial(@Body() dto: CancelPartialDto) {
+    return this.svc.cancelPartial(dto);
+  }
   @Patch('move-one')
 async moveOne(@Body() dto: { itemId: string; to: ItemStatus }) {
   return this.svc.moveOne(dto.itemId, dto.to);

@@ -8,6 +8,7 @@ import { resolveUomAndFactor } from '@modules/helper/purchasereceipthelper.servi
 import { PurchaseReceipt } from '@modules/purchasereceipt/entities/purchasereceipt.entity';
 import { InventoryItem } from '@modules/inventoryitems/entities/inventoryitem.entity';
 import { InventoryTransaction } from '@modules/inventorytransaction/entities/inventorytransaction.entity';
+import { CashbookService } from '@modules/cashbook/cashbook.service';
 import { Supplier } from '@modules/supplier/entities/supplier.entity';
 import { User } from '@modules/user/entities/user.entity';
 import { PurchaseReceiptItem } from '@modules/purchasereceiptitem/entities/purchasereceiptitem.entity';
@@ -21,6 +22,8 @@ export class PurchasereturnService {
   constructor(
     private readonly ds: DataSource,
     @InjectRepository(PurchaseReturn) private readonly prRepo: Repository<PurchaseReturn>
+    ,
+    private readonly cashbookService: CashbookService,
   ) { }
 
   private roundMoney(n: number) { return +(+n).toFixed(2); }
@@ -171,6 +174,11 @@ export class PurchasereturnService {
       (savedHeader as any).postedAt = new Date();
       await em.getRepository(PurchaseReturn).save(savedHeader);
 
+      // record cashbook receipt if supplier refunded money to us at posting
+      if (paidInput && paidInput > 0) {
+        await this.cashbookService.postReceiptFromPurchaseReturn(em, savedHeader, paidInput);
+      }
+
       return {
         id: savedHeader.id,
         code: savedHeader.code,
@@ -317,81 +325,80 @@ export class PurchasereturnService {
   }
 
   async changeStatus(id: string, status: PurchaseReturnStatus) {
-    // We need to create inventory transactions when posting a DRAFT
     const pr = await this.prRepo.findOne({ where: { id } });
     if (!pr) throw new ResponseException(null, 404, 'PURCHASE_RETURN_NOT_FOUND');
     if (pr.status === status) throw new ResponseException(null, 400, 'ALREADY_IN_DESIRED_STATUS');
 
-    // Only allow posting a draft
-    if (status !== PurchaseReturnStatus.POSTED) {
-      throw new ResponseException(null, 400, 'ONLY_DRAFT_TO_POSTED_ALLOWED');
-    }
-    if (pr.status !== PurchaseReturnStatus.DRAFT) {
-      throw new ResponseException(null, 400, 'ONLY_DRAFT_CAN_BE_POSTED');
-    }
+    // Transition: DRAFT -> POSTED (post the draft and reduce inventory)
+    if (status === PurchaseReturnStatus.POSTED) {
+      if (pr.status !== PurchaseReturnStatus.DRAFT) throw new ResponseException(null, 400, 'ONLY_DRAFT_CAN_BE_POSTED');
+      return this.ds.transaction(async (em) => {
+        const prTx = await em.getRepository(PurchaseReturn).findOne({ where: { id }, relations: ['logs', 'logs.item', 'createdBy'] });
+        if (!prTx) throw new ResponseException(null, 404, 'PURCHASE_RETURN_NOT_FOUND_IN_TX');
 
-    // perform posting inside a transaction: update inventory, create inventory txs and attach to logs
-    return this.ds.transaction(async (em) => {
-      const prTx = await em.getRepository(PurchaseReturn).findOne({ where: { id }, relations: ['logs', 'logs.item', 'createdBy'] });
-      if (!prTx) throw new ResponseException(null, 404, 'PURCHASE_RETURN_NOT_FOUND_IN_TX');
+        const logs = prTx.logs ?? [];
+        if (!logs.length) {
+          prTx.status = PurchaseReturnStatus.POSTED;
+          (prTx as any).postedAt = new Date();
+          return em.getRepository(PurchaseReturn).save(prTx);
+        }
 
-      const logs = prTx.logs ?? [];
-      if (!logs.length) {
-        // nothing to post, but still mark as posted
+        const invIds = logs.map(l => (l.item as any)?.id ?? l.item).filter(Boolean as any) as string[];
+        const invs = await em.getRepository(InventoryItem).find({ where: { id: In(invIds) } });
+        const invMap = new Map(invs.map(x => [x.id, x]));
+
+        for (const log of logs) {
+          if ((log as any).inventoryTx) continue; // already posted
+          const invId = (log.item as any)?.id ?? log.item;
+          const inv = invMap.get(invId as string);
+          if (!inv) throw new ResponseException(null, 404, `ONE_OR_MORE_ITEMS_NOT_FOUND:${invId}`);
+
+          const baseQty = Number(log.baseQty ?? 0);
+          const before = Number(inv.quantity ?? 0);
+          if (before + 1e-6 < baseQty) throw new ResponseException(null, 400, `INSUFFICIENT_STOCK_FOR_RETURN:${inv.id}`);
+          const after = this.roundQty(before - baseQty);
+          inv.quantity = after as any;
+          await em.getRepository(InventoryItem).save(inv);
+
+          const tx = em.getRepository(InventoryTransaction).create({
+            item: { id: inv.id } as any,
+            quantity: baseQty,
+            action: InventoryAction.OUT,
+            beforeQty: before,
+            afterQty: after,
+            refType: 'PURCHASE_RETURN',
+            refId: prTx.id,
+            refItemId: null,
+            note: prTx.note ?? undefined,
+            performedBy: prTx.createdBy ? ({ id: prTx.createdBy.id } as any) : null,
+          } as any);
+          const savedTx = await em.getRepository(InventoryTransaction).save(tx as any);
+          (log as any).inventoryTx = savedTx;
+        }
+
+        if (logs.length) await em.getRepository(PurchaseReturnLog).save(logs as any);
+
         prTx.status = PurchaseReturnStatus.POSTED;
         (prTx as any).postedAt = new Date();
-        return em.getRepository(PurchaseReturn).save(prTx);
-      }
+        await em.getRepository(PurchaseReturn).save(prTx);
 
-      // load inventory items involved
-      const invIds = logs.map(l => (l.item as any)?.id ?? l.item).filter(Boolean as any) as string[];
-      const invs = await em.getRepository(InventoryItem).find({ where: { id: In(invIds) } });
-      const invMap = new Map(invs.map(x => [x.id, x]));
+        // If supplier already refunded some money at posting, record cashbook receipt
+        const paidAmt = this.roundMoney(Number(prTx.paidAmount ?? 0));
+        if (paidAmt && paidAmt > 0) {
+          await this.cashbookService.postReceiptFromPurchaseReturn(em, prTx, paidAmt);
+        }
 
-      const savedTxs: InventoryTransaction[] = [];
-      for (const log of logs) {
-        // Skip if already has an inventory tx (shouldn't happen for DRAFT)
-        if ((log as any).inventoryTx) continue;
+        return prTx;
+      });
+    }
 
-        const invId = (log.item as any)?.id ?? log.item;
-        const inv = invMap.get(invId as string);
-        if (!inv) throw new ResponseException(null, 404, `ONE_OR_MORE_ITEMS_NOT_FOUND:${invId}`);
+    // Only allow posting a draft via changeStatus. Cancellation of a POSTED return
+    // should be handled through the `remove` flow (which performs inventory restore)
+    if (status === PurchaseReturnStatus.CANCELLED) {
+      throw new ResponseException(null, 400, 'USE_REMOVE_TO_CANCEL_POSTED_RETURN');
+    }
 
-        const baseQty = Number(log.baseQty ?? 0);
-        const before = Number(inv.quantity ?? 0);
-        if (before + 1e-6 < baseQty) throw new ResponseException(null, 400, `INSUFFICIENT_STOCK_FOR_RETURN:${inv.id}`);
-        const after = this.roundQty(before - baseQty);
-        inv.quantity = after as any;
-        await em.getRepository(InventoryItem).save(inv);
-
-        const tx = em.getRepository(InventoryTransaction).create({
-          item: { id: inv.id } as any,
-          quantity: baseQty,
-          action: InventoryAction.OUT,
-          beforeQty: before,
-          afterQty: after,
-          refType: 'PURCHASE_RETURN',
-          refId: prTx.id,
-          refItemId: null,
-          note: prTx.note ?? undefined,
-          performedBy: prTx.createdBy ? ({ id: prTx.createdBy.id } as any) : null,
-        } as any);
-        const savedTx = await em.getRepository(InventoryTransaction).save(tx as any);
-        savedTxs.push(savedTx);
-
-        // attach tx to log
-        (log as any).inventoryTx = savedTx;
-      }
-
-      // persist updated logs (attach inventoryTx)
-      if (logs.length) await em.getRepository(PurchaseReturnLog).save(logs as any);
-
-      prTx.status = PurchaseReturnStatus.POSTED;
-      (prTx as any).postedAt = new Date();
-      await em.getRepository(PurchaseReturn).save(prTx);
-
-      return prTx;
-    });
+    throw new ResponseException(null, 400, 'ONLY_DRAFT_TO_POSTED_ALLOWED');
   }
 
   async getOne(id: string) {
@@ -400,7 +407,32 @@ export class PurchasereturnService {
       relations: ['supplier', 'logs', 'logs.item'],
     });
     if (!pr) throw new ResponseException(null, 404, 'PURCHASE_RETURN_NOT_FOUND');
-    return pr;
+    return {
+      id: pr.id,
+      code: pr.code,
+      supplierId: pr.supplier?.id,
+      supplierName: pr.supplier?.name,
+      totalGoods: Number(pr.totalGoods ?? 0),
+      discount: Number(pr.discount ?? 0),
+      totalAfterDiscount: Number(pr.totalAfterDiscount ?? 0),
+      refundAmount: Number(pr.refundAmount ?? 0),
+      status: pr.status,
+      note: pr.note,
+      paidAmount: Number(pr.paidAmount ?? 0),
+      createdAt: pr.createdAt,
+      updatedAt: pr.updatedAt,
+      logs: (pr.logs ?? []).map(l => ({
+        id: l.id,
+        itemId: (l.item as any)?.id ?? null,
+        itemCode: (l.item as any)?.code ?? null,
+        itemName: (l.item as any)?.name ?? null,
+        quantity: Number(l.quantity ?? 0),
+        unitPrice: Number(l.unitPrice ?? 0),
+        refundPrice: Number(l.lineTotalAfterDiscount ?? l.refundAmount ?? 0),
+        discount: Number(l.globalDiscountAllocated ?? 0),
+        total: Number(l.lineTotalAfterDiscount ?? l.refundAmount ?? 0),
+      })),
+    };
   }
 
   async findAll(params: {
@@ -613,19 +645,118 @@ export class PurchasereturnService {
         throw new ResponseException(null, 400, 'MUST_PROVIDE_REFUND_OR_PAID_AMOUNT');
       }
 
-      const ra = (dto as any).refundAmount != null ? this.roundMoney(Number((dto as any).refundAmount ?? 0)) : this.roundMoney(Number(pr.refundAmount ?? 0));
-      if (ra < 0) throw new ResponseException(null, 400, 'INVALID_REFUND_AMOUNT');
+      // Perform update inside a transaction so we can also create cashbook entries atomically
+      return this.ds.transaction(async (em) => {
+        const prTx = await em.getRepository(PurchaseReturn).findOne({ where: { id: pr.id } });
+        if (!prTx) throw new ResponseException(null, 404, 'PURCHASE_RETURN_NOT_FOUND_IN_TX');
 
-      const pa = (dto as any).paidAmount != null ? this.roundMoney(Number((dto as any).paidAmount ?? 0)) : this.roundMoney(Number(pr.paidAmount ?? 0));
-      if (pa < 0) throw new ResponseException(null, 400, 'INVALID_PAID_AMOUNT');
+        const ra = (dto as any).refundAmount != null ? this.roundMoney(Number((dto as any).refundAmount ?? 0)) : this.roundMoney(Number(prTx.refundAmount ?? 0));
+        if (ra < 0) throw new ResponseException(null, 400, 'INVALID_REFUND_AMOUNT');
 
-      if (pa > ra) throw new ResponseException(null, 400, 'PAID_AMOUNT_EXCEEDS_REFUND');
+        const paNew = (dto as any).paidAmount != null ? this.roundMoney(Number((dto as any).paidAmount ?? 0)) : this.roundMoney(Number(prTx.paidAmount ?? 0));
+        if (paNew < 0) throw new ResponseException(null, 400, 'INVALID_PAID_AMOUNT');
+        if (paNew > ra) throw new ResponseException(null, 400, 'PAID_AMOUNT_EXCEEDS_REFUND');
 
-      pr.refundAmount = ra;
-      pr.paidAmount = pa;
-      return this.prRepo.save(pr);
+        const paidBefore = this.roundMoney(Number(prTx.paidAmount ?? 0));
+        const delta = this.roundMoney(paNew - paidBefore);
+
+        prTx.refundAmount = ra;
+        prTx.paidAmount = paNew;
+
+        // save header
+        await em.getRepository(PurchaseReturn).save(prTx);
+
+        // if paidAmount increased, record receipt from supplier inside same transaction
+        if (delta > 0) {
+          await this.cashbookService.postReceiptFromPurchaseReturn(em, prTx, delta);
+        }
+
+        return prTx;
+      });
     }
     throw new ResponseException(null, 400, 'CANNOT_UPDATE_IN_CURRENT_STATUS');
+  }
+
+  /**
+   * Remove a purchase return. Only allowed when the PR is still in DRAFT.
+   * This deletes the header and its logs inside a transaction.
+   */
+  async remove(id: string) {
+    const pr = await this.prRepo.findOne({ where: { id }, relations: ['logs', 'logs.item'] });
+    if (!pr) throw new ResponseException(null, 404, 'PURCHASE_RETURN_NOT_FOUND');
+
+    // If it's a draft, simply remove header+logs
+    if (pr.status === PurchaseReturnStatus.DRAFT) {
+      return this.ds.transaction(async (em) => {
+        const prTx = await em.getRepository(PurchaseReturn).findOne({ where: { id }, relations: ['logs'] });
+        if (!prTx) throw new ResponseException(null, 404, 'PURCHASE_RETURN_NOT_FOUND_IN_TX');
+
+        const oldLogs = prTx.logs ?? [];
+        if (oldLogs.length) {
+          await em.getRepository(PurchaseReturnLog).remove(oldLogs);
+        }
+        await em.getRepository(PurchaseReturn).remove(prTx);
+
+        return { success: true };
+      });
+    }
+
+    // If it's posted, perform a cancel: restore inventory by creating compensating IN transactions
+    if (pr.status === PurchaseReturnStatus.POSTED) {
+      return this.ds.transaction(async (em) => {
+        const prTx = await em.getRepository(PurchaseReturn).findOne({ where: { id }, relations: ['logs', 'logs.item', 'createdBy'] });
+        if (!prTx) throw new ResponseException(null, 404, 'PURCHASE_RETURN_NOT_FOUND_IN_TX');
+
+        const logs = prTx.logs ?? [];
+        if (logs.length) {
+          const invIds = logs.map(l => (l.item as any)?.id ?? l.item).filter(Boolean as any) as string[];
+          const invs = await em.getRepository(InventoryItem).find({ where: { id: In(invIds) } });
+          const invMap = new Map(invs.map(x => [x.id, x]));
+
+          for (const log of logs) {
+            const invId = (log.item as any)?.id ?? log.item;
+            const inv = invMap.get(invId as string);
+            if (!inv) throw new ResponseException(null, 404, `ONE_OR_MORE_ITEMS_NOT_FOUND:${invId}`);
+
+            const baseQty = Number(log.baseQty ?? 0);
+            const before = Number(inv.quantity ?? 0);
+            const after = this.roundQty(before + baseQty);
+            inv.quantity = after as any;
+            await em.getRepository(InventoryItem).save(inv);
+
+            // create compensating IN transaction
+            const tx = em.getRepository(InventoryTransaction).create({
+              item: { id: inv.id } as any,
+              quantity: baseQty,
+              action: InventoryAction.IN,
+              beforeQty: before,
+              afterQty: after,
+              refType: 'PURCHASE_RETURN',
+              refId: prTx.id,
+              refItemId: null,
+              note: `CANCEL_PURCHASE_RETURN:${prTx.note ?? ''}`,
+              performedBy: prTx.createdBy ? ({ id: prTx.createdBy.id } as any) : null,
+            } as any);
+            await em.getRepository(InventoryTransaction).save(tx as any);
+          }
+        }
+
+        prTx.status = PurchaseReturnStatus.CANCELLED;
+        (prTx as any).cancelledAt = new Date();
+        // If we had received money from supplier for this return, record payment back to supplier
+        const paidAmt = this.roundMoney(Number(prTx.paidAmount ?? 0));
+        if (paidAmt && paidAmt > 0) {
+          await this.cashbookService.postPaymentFromPurchaseReturn(em, prTx, paidAmt);
+        }
+
+        await em.getRepository(PurchaseReturn).save(prTx);
+
+        return prTx;
+      });
+    }
+
+    // Other statuses (REFUNDED, CANCELLED) are not removable
+    throw new ResponseException(null, 400, 'CANNOT_REMOVE_IN_CURRENT_STATUS');
   }
 
   private async genCode(em: any): Promise<string> {

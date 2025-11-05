@@ -21,7 +21,7 @@ import { Ingredient } from '../ingredient/entities/ingredient.entity';
 import { InventoryItem } from '../inventoryitems/entities/inventoryitem.entity';
 import { InventoryTransaction } from '../inventorytransaction/entities/inventorytransaction.entity';
 import { InventoryAction } from 'src/common/enums';
-import { CancelItemsDto } from './dto/cancel-items.dto';
+import { CancelItemsDto, CancelPartialDto } from './dto/cancel-items.dto';
 // OrderItemsService
 const ALLOWED_ITEM_TRANSITIONS: Record<ItemStatus, ItemStatus[]> = {
   [ItemStatus.PENDING]:   [ItemStatus.CONFIRMED, ItemStatus.PREPARING, ItemStatus.CANCELLED], // <-- thêm PREPARING
@@ -160,43 +160,43 @@ async updateStatusBulk(dto: UpdateItemsStatusDto) {
 
 
 
-  // async cancelItems(dto: CancelItemsDto) {
-  //   return this.ds.transaction(async (em) => {
-  //     const rows = await em.getRepository(OrderItem).find({
-  //       where: { id: In(dto.itemIds) },
-  //       relations: ['order', 'menuItem'],
-  //     });
-  //     if (rows.length !== dto.itemIds.length) {
-  //       throw new NotFoundException('ONE_OR_MORE_ITEMS_NOT_FOUND');
-  //     }
+  async cancelItems(dto: CancelItemsDto) {
+    return this.ds.transaction(async (em) => {
+      const rows = await em.getRepository(OrderItem).find({
+        where: { id: In(dto.itemIds) },
+        relations: ['order', 'menuItem'],
+      });
+      if (rows.length !== dto.itemIds.length) {
+        throw new NotFoundException('ONE_OR_MORE_ITEMS_NOT_FOUND');
+      }
 
-  //     // Chỉ cho huỷ khi chưa PREPARING
-  //     for (const it of rows) {
-  //       if (![ItemStatus.PENDING, ItemStatus.CONFIRMED].includes(it.status)) {
-  //         throw new BadRequestException(`CANNOT_CANCEL_IN_STATUS_${it.status}`);
-  //       }
-  //     }
+      // Chỉ cho huỷ khi chưa PREPARING
+      for (const it of rows) {
+        if (![ItemStatus.PENDING, ItemStatus.CONFIRMED].includes(it.status)) {
+          throw new BadRequestException(`CANNOT_CANCEL_IN_STATUS_${it.status}`);
+        }
+      }
 
-  //     // Hoàn kho theo delta = full quantity của item
-  //     await this.restoreInventoryForItems(em, rows);
+      // Hoàn kho theo delta = full quantity của item
+      await this.restoreInventoryForItems(em, rows);
 
-  //     // Đánh dấu CANCELLED + lý do
-  //     for (const it of rows) {
-  //       it.status = ItemStatus.CANCELLED;
-  //       it.cancelReason = dto.reason;
-  //       it.cancelledAt = new Date();
-  //     }
-  //     await em.getRepository(OrderItem).save(rows);
+      // Đánh dấu CANCELLED + lý do
+      for (const it of rows) {
+        it.status = ItemStatus.CANCELLED;
+        it.cancelReason = dto.reason;
+        it.cancelledAt = new Date();
+      }
+      await em.getRepository(OrderItem).save(rows);
 
-  //     // Recompute từng order
-  //     const orderIds = Array.from(new Set(rows.map((r) => r.order.id)));
-  //     for (const oid of orderIds) {
-  //       await this.recomputeOrderStatus(em, oid);
-  //     }
+      // Recompute từng order
+      const orderIds = Array.from(new Set(rows.map((r) => r.order.id)));
+      for (const oid of orderIds) {
+        await this.recomputeOrderStatus(em, oid);
+      }
 
-  //     return { cancelled: rows.map((r) => r.id), reason: dto.reason };
-  //   });
-  // }
+      return { cancelled: rows.map((r) => r.id), reason: dto.reason };
+    });
+  }
 
   /** Hoàn kho toàn bộ quantity của các item (copy logic từ OrdersService) */
   private async restoreInventoryForItems(em: EntityManager, items: OrderItem[]) {
@@ -244,7 +244,55 @@ async updateStatusBulk(dto: UpdateItemsStatusDto) {
     }
   }
 
+async cancelPartial(dto: CancelPartialDto) {
+  return this.ds.transaction(async (em) => {
+    const iRepo = em.getRepository(OrderItem);
+    const it = await iRepo.findOne({
+      where: { id: dto.itemId },
+      relations: ['order', 'menuItem'],
+    });
+    if (!it) throw new NotFoundException('ITEM_NOT_FOUND');
 
+    // Chỉ cho huỷ khi chưa nấu
+    if (![ItemStatus.PENDING, ItemStatus.CONFIRMED].includes(it.status)) {
+      throw new BadRequestException(`CANNOT_CANCEL_IN_STATUS_${it.status}`);
+    }
+
+    if (dto.qty > it.quantity) {
+      throw new BadRequestException('CANCEL_QTY_EXCEEDS_ITEM_QTY');
+    }
+
+    // Tính phần trả kho cho qty cần huỷ
+    const fakeRow = { ...it, quantity: dto.qty } as OrderItem;
+    await this.restoreInventoryForItems(em, [fakeRow]);
+
+    if (dto.qty === it.quantity) {
+      // huỷ toàn bộ row
+      it.status = ItemStatus.CANCELLED;
+      it.cancelledAt = new Date();
+      it.cancelReason = dto.reason ?? null;
+      await iRepo.save(it);
+    } else {
+      // tách row: giảm số lượng ở row gốc, tạo 1 row CANCELLED
+      it.quantity -= dto.qty;
+      await iRepo.save(it);
+
+      const cancelled = iRepo.create({
+        order: it.order,
+        menuItem: it.menuItem,
+        quantity: dto.qty,
+        status: ItemStatus.CANCELLED,
+        cancelReason: dto.reason ?? null,
+         price: it.price, 
+        cancelledAt: new Date(),
+      });
+      await iRepo.save(cancelled);
+    }
+
+    await this.recomputeOrderStatus(em, it.order.id);
+    return { ok: true, itemId: it.id, cancelledQty: dto.qty };
+  });
+}
 async moveOne(itemId: string, to: ItemStatus) {
   return this.ds.transaction(async (em) => {
     const iRepo = em.getRepository(OrderItem);
@@ -271,6 +319,7 @@ async moveOne(itemId: string, to: ItemStatus) {
         order: it.order,
         menuItem: it.menuItem,
         quantity: 1,
+         price: it.price, 
         status: to,
       });
       await iRepo.save(clone);
