@@ -1,15 +1,17 @@
 // src/modules/invoice/invoice.controller.ts
 import { Body, Controller, Param, ParseUUIDPipe, Patch, Post, UseGuards } from '@nestjs/common';
 import { InvoicesService } from './invoice.service';
-import { PaymentMethod } from 'src/common/enums';
+import { PaymentMethod, UserRole } from 'src/common/enums';
 import { Query, Get } from '@nestjs/common';
 import { QueryInvoicesDto } from './dto/query-invoices.dto';
 import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
-import {CurrentUser} from 'src/common/decorators/user.decorator';
+import { CurrentUser } from 'src/common/decorators/user.decorator';
+import { Roles } from 'src/common/decorators/roles.decorator';
+import { ApplyPromotionsDto } from './dto/apply-promotions.dto';
 @UseGuards(JwtAuthGuard)
 @Controller('invoices')
 export class InvoicesController {
-  constructor(private readonly svc: InvoicesService) {}
+  constructor(private readonly svc: InvoicesService) { }
 
   @Post('from-order/:orderId')
   createFromOrder(
@@ -17,8 +19,8 @@ export class InvoicesController {
     @Body() body: { guestCount?: number; customerId?: string | null },
     @CurrentUser() user: any
   ) {
-  return this.svc.createFromOrder(orderId, body, user.id);
-}
+    return this.svc.createFromOrder(orderId, body, user.id);
+  }
 
   @Post(':id/payments')
   addPayment(
@@ -44,4 +46,32 @@ export class InvoicesController {
     return this.svc.detail(id);
   }
 
+  @Post(':id/apply-promotions')
+  applyPromotions(
+    @Param('id') id: string,
+    @Body() dto: ApplyPromotionsDto,
+  ) {
+    return this.svc.applyPromotions(id, dto);
+  }
+
+  @Patch(':id/promotions/:ipId/remove')
+  removePromotion(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Param('ipId', new ParseUUIDPipe()) ipId: string,
+  ) {
+    return this.svc.removePromotion(id, ipId);
+  }
+
+  @Get(':id/applicable-promotions')
+  async listApplicable(@Param('id', new ParseUUIDPipe()) id: string) {
+    console.log('Listing applicable promotions for invoice:', id);
+    const result = await this.svc.listApplicablePromotions(id);
+    console.log('list result', result);
+    return result;
+  }
+
+  // @Get('from-order/:orderId')
+  // getByOrder(@Param('orderId') orderId: string) {
+  //   return this.svc.getByOrder(orderId);
+  // }
 }

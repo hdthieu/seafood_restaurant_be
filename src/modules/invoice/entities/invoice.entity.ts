@@ -20,6 +20,7 @@ import { InvoiceStatus } from 'src/common/enums';
 import { Payment } from 'src/modules/payments/entities/payment.entity';
 import { Order } from 'src/modules/order/entities/order.entity';
 import { Customer } from "src/modules/customers/entities/customers.entity";
+import { InvoicePromotion } from "@modules/promotions/entities/invoicepromotion.entity";
 // invoices.entity.ts
 @Entity('invoices')
 export class Invoice {
@@ -67,4 +68,8 @@ export class Invoice {
   @ManyToOne(() => User, { eager: true, nullable: true })
   @JoinColumn({ name: 'cashier_id' })
   cashier: User | null;
+
+
+  @OneToMany(() => InvoicePromotion, (invPromo) => invPromo.invoice, { cascade: true })
+  invoicePromotions: InvoicePromotion[];
 }

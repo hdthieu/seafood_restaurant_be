@@ -13,6 +13,7 @@ import { GetMenuItemsDto } from './dto/list-menuitem.dto';
 import { DataSource } from 'typeorm';
 import { UpdateMenuItemDto } from './dto/update-menuitem.dto';
 import { PageMeta } from 'src/common/common_dto/paginated';
+import { PromotionsService } from '@modules/promotions/promotions.service';
 
 @Injectable()
 export class MenuitemsService {
@@ -22,6 +23,7 @@ export class MenuitemsService {
     @InjectRepository(Ingredient) private readonly IngredientRepo: Repository<Ingredient>,
     private readonly configS3Service: ConfigS3Service,
     private readonly dataSource: DataSource,
+    private readonly promosSvc: PromotionsService,
   ) { }
 
   async createMenuItem(dto: CreateMenuItemDto, file: Express.Multer.File) {
@@ -56,7 +58,14 @@ export class MenuitemsService {
     return fullItem;
   }
 
-  async getList(query: GetMenuItemsDto): Promise<{ data: MenuItem[]; meta: PageMeta }> {
+  async getList(query: GetMenuItemsDto): Promise<{
+    data: Array<MenuItem & {
+      priceAfterDiscount?: number;
+      discountAmount?: number;
+      badge?: string | null;
+    }>;
+    meta: PageMeta;
+  }> {
     const {
       page = 1,
       limit = 20,
@@ -67,55 +76,57 @@ export class MenuitemsService {
       maxPrice,
       sortBy = 'name',
       order = 'ASC',
+      withPromotions = 'true',
     } = query;
 
     const qb = this.menuItemRepo
       .createQueryBuilder('mi')
       .leftJoinAndSelect('mi.category', 'category')
-      .leftJoinAndSelect('mi.ingredients', 'ingredients'); // nếu Ingredient có thêm quan hệ khác thì join tiếp
+      .leftJoinAndSelect('mi.ingredients', 'ingredients');
 
-    // search (name/description)
     if (search?.trim()) {
       qb.andWhere('(mi.name ILIKE :kw OR mi.description ILIKE :kw)', { kw: `%${search.trim()}%` });
     }
-
-    // lọc category
-    if (categoryId) {
-      qb.andWhere('category.id = :categoryId', { categoryId });
-    }
-
-    // lọc isAvailable
+    if (categoryId) qb.andWhere('category.id = :categoryId', { categoryId });
     if (typeof isAvailable !== 'undefined') {
       qb.andWhere('mi.isAvailable = :isAvailable', { isAvailable: isAvailable === 'true' });
     }
+    if (typeof minPrice === 'number') qb.andWhere('mi.price >= :minPrice', { minPrice });
+    if (typeof maxPrice === 'number') qb.andWhere('mi.price <= :maxPrice', { maxPrice });
 
-    // lọc khoảng giá
-    if (typeof minPrice === 'number') {
-      qb.andWhere('mi.price >= :minPrice', { minPrice });
-    }
-    if (typeof maxPrice === 'number') {
-      qb.andWhere('mi.price <= :maxPrice', { maxPrice });
-    }
-
-    // sắp xếp
-    const sortMap: Record<string, string> = {
-      name: 'mi.name',
-      price: 'mi.price',
-      createdAt: 'mi.id', // nếu có trường createdAt thì thay bằng mi.createdAt
-    };
+    const sortMap: Record<string, string> = { name: 'mi.name', price: 'mi.price', createdAt: 'mi.id' };
     qb.orderBy(sortMap[sortBy] ?? 'mi.name', order as 'ASC' | 'DESC');
 
-    // phân trang
     qb.skip((page - 1) * limit).take(limit);
 
     const [rows, total] = await qb.getManyAndCount();
-    const meta: PageMeta = {
-      page,
-      limit,
-      total,
-      pages: Math.ceil(total / limit),
-    };
-    return { data: rows, meta };
+
+    // ===== gắn giá sau khuyến mãi khi được yêu cầu =====
+    const isWithPromos = withPromotions === 'true'
+    let data: Array<MenuItem & {
+      priceAfterDiscount?: number;
+      discountAmount?: number;
+      badge?: string | null;
+    }> = rows;
+
+    if (isWithPromos && rows.length) {
+      const mapBest = await this.promosSvc.bestDiscountPerItem(rows);
+      data = rows.map((it) => {
+        const original = Math.round(Number(it.price) || 0);
+        const info = mapBest.get(it.id) ?? { discount: 0, label: null as string | null };
+        const hasDiscount = (info.discount || 0) > 0;
+        const final = Math.max(0, original - (info.discount || 0));
+
+        return Object.assign(it, {
+          priceAfterDiscount: hasDiscount ? final : undefined,
+          discountAmount: hasDiscount ? info.discount : undefined,
+          badge: hasDiscount ? info.label : null,
+        });
+      });
+    }
+
+    const meta: PageMeta = { page, limit, total, pages: Math.ceil(total / limit) };
+    return { data, meta };
   }
 
   async getDetail(id: string): Promise<MenuItem> {

@@ -7,9 +7,11 @@ import { Order } from 'src/modules/order/entities/order.entity';
 
 import { Payment } from 'src/modules/payments/entities/payment.entity';
 import { CashbookModule } from '@modules/cashbook/cashbook.module';
+import { PromotionsModule } from '@modules/promotions/promotions.module';
+import { InvoicePromotion } from '@modules/promotions/entities/invoicepromotion.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Invoice, Order,Payment]), CashbookModule],
+  imports: [TypeOrmModule.forFeature([Invoice, Order,Payment, InvoicePromotion]), CashbookModule, PromotionsModule],
   providers: [InvoicesService],
   controllers: [InvoicesController],
   exports: [InvoicesService, TypeOrmModule],
