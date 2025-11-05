@@ -22,31 +22,10 @@ import { PageMeta } from 'src/common/common_dto/paginated';
 import { Patch } from '@nestjs/common';
 import { UpdateCustomerDto } from './dtos/update-customer.dto';
 
-class UpsertByPhoneBody {
-  phone: string;
-  name?: string;
-  email?: string;
-  gender?: string;         // vẫn để lỏng ở đây nếu bạn muốn
-  birthday?: string | null;
-  address?: string;
-}
-
-class AttachCustomerBody {
-  customerId?: string;
-  walkin?: boolean;
-}
 
 @Controller()
 export class CustomersController {
   constructor(private readonly svc: CustomersService) { }
-  // GET /customers/search: autocomplete nhanh (giữ nguyên)
-  @Get('customers/search')
-  search(
-    @Query('q') q = '',
-    @Query('limit', new ParseIntPipe({ optional: true })) limit?: number,
-  ) {
-    return this.svc.search(q, limit ?? 10);
-  }
   // GET /customers: filter + paging (đang đúng)
   @Get('customers')
   @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
@@ -82,11 +61,5 @@ export class CustomersController {
     const p = Number(page || 1);
     const l = Number(limit || 20);
     return this.svc.getInvoicesByCustomer(id, p, l);
-  }
-
-
-  @Get('customers/walkin')
-  getWalkin() {
-    return this.svc.getOrCreateWalkin();
   }
 }

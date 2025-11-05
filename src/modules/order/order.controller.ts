@@ -32,6 +32,7 @@ import { OpenOrdersByTableQueryDto, OpenInTableQueryDto } from './dto/open-order
 import { OpenTablesQueryDto } from './dto/open-tables.query';
 import { SplitOrderDto } from './dto/split-order.dto';
 import {RestaurantTable} from '../restauranttable/entities/restauranttable.entity';
+import { KitchenGateway } from '../socket/kitchen.gateway';
 class MergeOrderDto {
   toOrderId!: string; // id đơn đích
 }
@@ -43,6 +44,7 @@ class MergeOrderDto {
 export class OrdersController {
   constructor(private readonly ordersService: OrdersService,
   @InjectRepository(Order) private readonly orderRepo: Repository<Order>,
+    private readonly gw: KitchenGateway,
   @InjectRepository(RestaurantTable) private readonly tableRepo: Repository<RestaurantTable>,
 
   ) {}

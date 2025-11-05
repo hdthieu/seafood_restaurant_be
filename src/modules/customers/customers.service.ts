@@ -83,24 +83,6 @@ async getDetail(id: string): Promise<Customer> {
       throw e;
     }
   }
-  // ===== APIs =====
-  async getOrCreateWalkin(): Promise<Customer> {
-    let c = await this.cusRepo.findOne({ where: { isWalkin: true } });
-    if (c) return c;
-
-    const entity = this.cusRepo.create({
-      code: 'WALKIN',
-      name: 'Khách lẻ',
-      isWalkin: true,
-      phone: null,
-      email: null,
-      gender: null,
-      birthday: null,
-      address: null,
-    }); // <-- create với OBJECT, KHÔNG bọc mảng []
-
-    return this.cusRepo.save(entity);
-  }
 
 
   async create(dto: CreateCustomerDto): Promise<Customer> {
@@ -136,22 +118,6 @@ async getDetail(id: string): Promise<Customer> {
 
  
 
-  async search(q: string, limit = 10) {
-    if (!q?.trim()) return [];
-    const key = `%${q.trim()}%`;
-
-    // đơn giản: tìm theo name (ILIKE) hoặc phone
-    const rows = await this.cusRepo.find({
-      where: [
-        { isWalkin: false, name: ILike(key) },
-        { isWalkin: false, phone: ILike(key) },
-      ],
-      order: { updatedAt: 'DESC' },
-      take: limit,
-      select: { id: true, name: true, phone: true, code: true },
-    });
-    return rows;
-  }
 
 
 

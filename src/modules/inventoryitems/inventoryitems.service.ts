@@ -25,94 +25,89 @@ export class InventoryitemsService {
 
 
   /** Danh sách tất cả item kèm baseUom/category/suppliers (đủ để FE hiển thị combobox đẹp) */
-  async findAll(
-    dto: ListIngredientsDto,
-  ): Promise<ResponseCommon<
-    Array<{
-      id: string;
-      code: string;
-      name: string;
-      baseUom: { code: string; name: string; dimension: UnitsOfMeasure['dimension'] };
-      quantity: number;
-      avgCost: number;
-      alertThreshold: number;
-      category?: { id: string; name: string } | null;
-      suppliers?: Array<{ id: string; name: string }>;
-      createdAt: Date;
-      updatedAt: Date;
-    }>,
-    PageMeta
-  >> {
-    try {
-      const page = Math.max(1, dto.page ?? 1);
-      const limit = Math.max(1, Math.min(100, dto.limit ?? 10));
-      const skip = (page - 1) * limit;
+  async findAll(dto: ListIngredientsDto): Promise<ResponseCommon<any[], PageMeta>> {
+  try {
+    const page = Math.max(1, dto.page ?? 1);
+    const limit = Math.max(1, Math.min(100, dto.limit ?? 10));
+    const skip = (page - 1) * limit;
 
-      const qb = this.inventoryRepo.createQueryBuilder('i')
-        .leftJoinAndSelect('i.baseUom', 'u')
-        .leftJoinAndSelect('i.category', 'c')
-        .leftJoinAndSelect('i.suppliers', 's')
-        .orderBy('i.createdAt', 'DESC')
-        .skip(skip)
-        .take(limit)
-        .distinct(true);
+    const qb = this.inventoryRepo.createQueryBuilder('i')
+      .leftJoinAndSelect('i.baseUom', 'u')
+      .leftJoinAndSelect('i.category', 'c')
+      .leftJoinAndSelect('i.suppliers', 's')
+      .orderBy('i.createdAt', 'DESC')
+      .skip(skip)
+      .take(limit)
+      .distinct(true);
 
-      // --- Search theo tên + đơn vị (code/name)
-      const q = dto.q?.trim();
-      if (q) {
-        const kw = `%${q.toLowerCase()}%`;
-        qb.andWhere('(LOWER(i.name) LIKE :kw OR LOWER(u.name) LIKE :kw OR LOWER(u.code) LIKE :kw)', { kw });
-      }
+    qb.select(['i', 'u', 'c', 's.id', 's.name']).distinct(true);
 
-      // --- Lọc theo đơn vị chính xác (mã UOM)
-      if (dto.baseUomCode?.trim()) {
-        qb.andWhere('u.code = :uom', { uom: dto.baseUomCode.trim().toUpperCase() });
-      }
-
-      // --- Lọc theo tồn kho (radio)
-      switch (dto.stock) {
-        case 'BELOW': // Dưới định mức tồn
-          qb.andWhere('i.quantity < i.alertThreshold');
-          break;
-        case 'OVER': // Vượt định mức tồn
-          qb.andWhere('i.quantity > i.alertThreshold');
-          break;
-        case 'IN_STOCK': // Còn hàng
-          qb.andWhere('i.quantity > 0');
-          break;
-        case 'OUT_OF_STOCK': // Hết hàng
-          qb.andWhere('i.quantity = 0');
-          break;
-        // ALL: không thêm điều kiện
-      }
-
-      const [rows, total] = await qb.getManyAndCount();
-
-      const items = rows.map(r => ({
-        id: r.id,
-        code: r.code,
-        name: r.name,
-        baseUom: { code: r.baseUom.code, name: r.baseUom.name, dimension: r.baseUom.dimension },
-        quantity: Number(r.quantity),
-        avgCost: Number(r.avgCost),
-        alertThreshold: Number(r.alertThreshold),
-        category: r.category ? { id: r.category.id, name: r.category.name } : null,
-        suppliers: (r.suppliers ?? []).map(s => ({ id: s.id, name: s.name })),
-        createdAt: r.createdAt,
-        updatedAt: r.updatedAt,
-      }));
-
-      return new ResponseCommon<typeof items, PageMeta>(
-        200,
-        true,
-        'Lấy danh sách vật tư thành công',
-        items,
-        { total, page, limit, pages: Math.ceil(total / limit) || 0 },
-      );
-    } catch (error) {
-      throw new ResponseException(error, 500, 'Không thể lấy danh sách vật tư');
+    // --- Search theo tên + đơn vị
+    const q = dto.q?.trim();
+    if (q) {
+      const kw = `%${q.toLowerCase()}%`;
+      qb.andWhere('(LOWER(i.name) LIKE :kw OR LOWER(u.name) LIKE :kw OR LOWER(u.code) LIKE :kw)', { kw });
     }
+
+    // --- Lọc theo đơn vị
+    if (dto.baseUomCode?.trim()) {
+      qb.andWhere('u.code = :uom', { uom: dto.baseUomCode.trim().toUpperCase() });
+    }
+
+    // --- Lọc theo tồn kho
+    switch (dto.stock) {
+      case 'BELOW': qb.andWhere('i.quantity < i.alertThreshold'); break;
+      case 'OVER': qb.andWhere('i.quantity > i.alertThreshold'); break;
+      case 'IN_STOCK': qb.andWhere('i.quantity > 0'); break;
+      case 'OUT_OF_STOCK': qb.andWhere('i.quantity = 0'); break;
+    }
+
+    // --- Lọc theo nhà cung cấp
+    if (dto.supplierId) {
+      qb.andWhere('s.id = :sid', { sid: dto.supplierId });
+    }
+
+    // Đếm tổng (vì DISTINCT)
+    const countQb = qb.clone()
+      .select('COUNT(DISTINCT i.id)', 'cnt')
+      .limit(undefined)
+      .offset(undefined)
+      .orderBy(undefined as any);
+    const [{ cnt }] = await countQb.getRawMany();
+    const total = Number(cnt ?? 0);
+
+    const rows = await qb.getMany();
+
+    const items = rows.map(r => ({
+      id: r.id,
+      code: r.code,
+      name: r.name,
+      baseUom: {
+        code: r.baseUom.code,
+        name: r.baseUom.name,
+        dimension: r.baseUom.dimension,
+      },
+      quantity: Number(r.quantity),
+      avgCost: Number(r.avgCost),
+      alertThreshold: Number(r.alertThreshold),
+      category: r.category ? { id: r.category.id, name: r.category.name } : null,
+      suppliers: (r.suppliers ?? []).map(s => ({ id: s.id, name: s.name })),
+      createdAt: r.createdAt,
+      updatedAt: r.updatedAt,
+    }));
+
+    return new ResponseCommon<typeof items, PageMeta>(
+      200,
+      true,
+      'Lấy danh sách vật tư thành công',
+      items,
+      { total, page, limit, pages: Math.ceil(total / limit) || 0 },
+    );
+  } catch (error) {
+    throw new ResponseException(error, 500, 'Không thể lấy danh sách vật tư');
   }
+}
+
 
 
   /** (tuỳ chọn) lấy chi tiết 1 item */

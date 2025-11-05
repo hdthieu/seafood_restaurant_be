@@ -4,6 +4,7 @@ import { Order } from "src/modules/order/entities/order.entity";
 import { Check, Column, Entity, ManyToOne, PrimaryGeneratedColumn } from "typeorm";
 import { ItemStatus } from "src/common/enums";
 import { CreateDateColumn, UpdateDateColumn } from "typeorm";
+import { DeleteDateColumn } from "typeorm";
 @Entity('order_items')
 export class OrderItem {
   @PrimaryGeneratedColumn('uuid')
@@ -43,9 +44,16 @@ export class OrderItem {
   // @Column({ type: 'timestamptz', nullable: true })
   // cancelledAt?: Date | null;
   note: string | null;
-   @Column({ type: 'timestamptz', nullable: true })
-  cancelledAt?: Date | null;
+@Column({ name: 'cancelled_at', type: 'timestamptz', nullable: true })
+cancelledAt?: Date | null;
 
-  @Column({ type: 'text', nullable: true })
-  cancelReason?: string | null;
+@Column({ name: 'cancel_reason', type: 'text', nullable: true })
+cancelReason?: string | null;
+
+@Column({ name: 'cancelled_by', type: 'varchar', length: 120, nullable: true })
+cancelledBy?: string | null;
+
+
+@DeleteDateColumn({ name: 'deleted_at', nullable: true })
+  deletedAt?: Date | null;
 }

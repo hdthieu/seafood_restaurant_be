@@ -30,14 +30,12 @@ async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     rawBody: true,   // <-- Nest sẽ gắn req.rawBody sẵn 
   });
-  app.enableCors({
-    origin: [
-      'http://localhost:3000',
-      'https://seafood-restaurant-6kzx8a2hl-hungdinh1212s-projects.vercel.app',
-    ],
-    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
-    credentials: true,
-  });
+  const origins = process.env.CORS_ORIGIN?.split(",") ?? [];
+app.enableCors({
+  origin: origins,
+  methods: "GET,HEAD,PUT,PATCH,POST,DELETE",
+  credentials: true,
+})
 
   Date.prototype.toJSON = function () {
     var tzo = -this.getTimezoneOffset(),
@@ -71,7 +69,7 @@ async function bootstrap() {
   app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
   app.useWebSocketAdapter(new SocketIoAdapter(app)); 
-  await app.listen(configurations.port);
+  await app.listen(configurations.port,'0.0.0.0');
   const appUrl = await app.getUrl();
 
   console.log(`
