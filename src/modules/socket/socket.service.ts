@@ -20,61 +20,75 @@ export class SocketService {
   ) {}
 
   async notifyItems(opts: {
-    orderId: string;
-    tableName: string;
-    staff: string;
-    itemsDelta: Array<{ menuItemId: string; delta: number }>;
-    priority?: boolean;
-    note?: string;
-  }) {
-    const batch = await this.ds.transaction(async em => {
-      const b = em.getRepository(KitchenBatch).create({
-        order: { id: opts.orderId } as any,
-        tableName: opts.tableName,
-        staff: opts.staff,
-        priority: !!opts.priority,
-        note: opts.note ?? null,
-      });
-      return em.getRepository(KitchenBatch).save(b);
-    });
-
-    const lines: Array<{ ticketId: string; name: string; qty: number }> = [];
-
-    await this.ds.transaction(async em => {
-      const mRepo = em.getRepository(MenuItem);
-      const tRepo = em.getRepository(KitchenTicket);
-
-      for (const { menuItemId, delta } of opts.itemsDelta) {
-        const qty = Number(delta) || 0;
-        if (qty <= 0) continue;
-
-        const menu = await mRepo.findOneBy({ id: menuItemId });
-        if (!menu) continue;
-
-        const t = tRepo.create({
-          batch,
-          order: { id: opts.orderId } as any,
-          menuItem: { id: menuItemId } as any,
-          qty,
-          status: ItemStatus.PENDING,
-        });
-        const saved = await tRepo.save(t);
-        lines.push({ ticketId: saved.id, name: menu.name, qty });
-      }
-    });
-
-    // phát socket cho bếp
-    this.gw.emitNotifyItemsToKitchen({
-      orderId: opts.orderId,
+  orderId: string;
+  tableName: string;
+  staff: string;
+  itemsDelta: Array<{ menuItemId: string; delta: number }>;
+  priority?: boolean;
+  note?: string;
+  orderItemId?: string;
+}) {
+  const batch = await this.ds.transaction(async em => {
+    const b = em.getRepository(KitchenBatch).create({
+      order: { id: opts.orderId } as any,
       tableName: opts.tableName,
-      batchId: batch.id,
-      createdAt: batch.createdAt.toISOString(),
-      items: lines.map(l => ({ orderItemId: l.ticketId, name: l.name, qty: l.qty })), // giữ shape FE
       staff: opts.staff,
-      priority: opts.priority,
+      priority: !!opts.priority,
+      note: opts.note ?? null,
     });
+    return em.getRepository(KitchenBatch).save(b);
+  });
 
-    return { batchId: batch.id, items: lines, createdAt: batch.createdAt };
-  }
+  const lines: Array<{
+    ticketId: string;
+    orderItemId?: string;     // optional
+    menuItemId: string;
+    name: string;
+    qty: number;
+  }> = [];
+
+  await this.ds.transaction(async em => {
+    const mRepo = em.getRepository(MenuItem);
+    const tRepo = em.getRepository(KitchenTicket);
+
+    for (const { menuItemId, delta } of opts.itemsDelta) {
+      const qty = Number(delta) || 0;
+      if (qty <= 0) continue;
+
+      const menu = await mRepo.findOneBy({ id: menuItemId });
+      if (!menu) continue;
+
+      const t = tRepo.create({
+        batch,
+        order: { id: opts.orderId } as any,
+        menuItem: { id: menuItemId } as any,
+        qty,
+        status: ItemStatus.PENDING,
+        orderItemId: opts.orderItemId,
+      });
+      const saved = await tRepo.save(t);
+
+      lines.push({
+        ticketId: saved.id,
+        // orderItemId: … (nếu có thì gán, không có thì bỏ)
+        menuItemId,
+        name: menu.name,
+        qty,
+      });
+    }
+  });
+
+  this.gw.emitNotifyItemsToKitchen({
+    orderId: opts.orderId,
+    tableName: opts.tableName,
+    batchId: batch.id,
+    createdAt: batch.createdAt.toISOString(),
+    items: lines,
+    staff: opts.staff,
+    priority: opts.priority,
+    // note: opts.note ?? null,
+  });
+
+  return { batchId: batch.id, items: lines, createdAt: batch.createdAt };
 }
-
+}

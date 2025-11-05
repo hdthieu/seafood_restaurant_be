@@ -14,6 +14,7 @@ import {CustomersModule} from 'src/modules/customers/customers.module'
 import { OrderitemsModule } from 'src/modules/orderitems/orderitems.module';
 import { KitchenModule } from '../kitchen/kitchen.module';
 import {KitchenTicket } from '../kitchen/entities/kitchen-ticket.entity'; 
+import {KitchenGateway} from '../socket/kitchen.gateway';
 @Module({
   imports: [
     TypeOrmModule.forFeature([
@@ -32,7 +33,7 @@ import {KitchenTicket } from '../kitchen/entities/kitchen-ticket.entity';
     OrderitemsModule,
   ],
   controllers: [OrdersController],
-  providers: [OrdersService],
+  providers: [OrdersService,KitchenGateway],
   exports: [OrdersService],
 })
 export class OrdersModule {}

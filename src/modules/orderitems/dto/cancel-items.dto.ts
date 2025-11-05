@@ -12,4 +12,5 @@ export class CancelPartialDto {
   @IsUUID() itemId: string;
   @IsInt() @Min(1) qty: number;      // số lượng cần huỷ
   @IsString() @IsOptional() reason?: string;
+  
 }

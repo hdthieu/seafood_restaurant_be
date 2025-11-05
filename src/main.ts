@@ -71,7 +71,7 @@ async function bootstrap() {
   app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
   app.useWebSocketAdapter(new SocketIoAdapter(app)); 
-  await app.listen(configurations.port);
+  await app.listen(configurations.port,'0.0.0.0');
   const appUrl = await app.getUrl();
 
   console.log(`

@@ -6,6 +6,7 @@ import { Column, CreateDateColumn, Entity, ManyToOne, OneToMany, PrimaryGenerate
 import { Invoice } from "src/modules/invoice/entities/invoice.entity";
 import { OneToOne } from "typeorm";
 import { JoinColumn } from "typeorm";
+import { DeleteDateColumn } from "typeorm";
 @Entity('orders')
 export class Order {
     @PrimaryGeneratedColumn('uuid')
@@ -45,4 +46,6 @@ export class Order {
   // inverse (không bắt buộc dùng)
   @OneToMany(() => Order, (o) => o.mergedInto)
   mergedChildren?: Order[];
+//   @DeleteDateColumn({ name: 'deleted_at', nullable: true })
+// deletedAt?: Date | null;
 }

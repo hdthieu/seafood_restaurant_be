@@ -3,7 +3,8 @@ import { Body, Controller, Get, Param, Patch, Post, Query, Req, UseGuards } from
 import { KitchenService } from './kitchen.service';
 import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
 import { ItemStatus } from 'src/common/enums';
-
+import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { CurrentUser } from 'src/common/decorators/user.decorator';
 @Controller('kitchen')
 @UseGuards(JwtAuthGuard)
 export class KitchenController {
@@ -52,4 +53,42 @@ async progress(@Param('orderId') orderId: string) {
   async history(@Param('orderId') orderId: string) {
     return this.svc.getNotifyHistory(orderId);
   }
+
+
+
+
+
+  @UseGuards(JwtAuthGuard)
+@Post('/orders/:orderId/cancel-items')
+async cancelAfterNotify(
+  @Param('orderId') orderId: string,
+  @Body() body: { menuItemId: string; qty: number; reason?: string },
+  @Req() req: any,
+    @CurrentUser() user: any
+) {
+  const staff = user?.name ?? 'Thu ngân';
+  return this.svc.voidTicketsByMenu({
+    orderId,
+    menuItemId: body.menuItemId,
+    qtyToVoid: Number(body.qty),
+    by: staff,
+    reason: body.reason,
+  });
+}
+
+@Patch('/tickets/:id/delete')
+async deleteCancelled(@Param('id') id: string) {
+  // chỉ cho xóa nếu là ticket hủy
+  const t = await this.svc['ticketRepo'].findOne({ where: { id } });
+  if (!t) throw new NotFoundException('TICKET_NOT_FOUND');
+  if (t.status !== ItemStatus.CANCELLED) {
+    throw new BadRequestException('ONLY_CANCELLED_TICKET_DELETABLE');
+  }
+  await this.svc['ticketRepo'].delete(id);
+  // (tuỳ chọn) emit sự kiện để FE bếp/cashier/waiter refresh
+  this.svc['gw'].server.to('kitchen').emit('kitchen:cancel_ticket_deleted', { id });
+  this.svc['gw'].server.to('cashier').emit('kitchen:cancel_ticket_deleted', { id });
+  this.svc['gw'].server.to('waiter').emit('kitchen:cancel_ticket_deleted', { id });
+  return { ok: true, id };
+}
 }

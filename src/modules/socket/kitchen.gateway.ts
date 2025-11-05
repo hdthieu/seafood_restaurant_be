@@ -8,7 +8,43 @@ import {
   SubscribeMessage,
 } from '@nestjs/websockets';
 import { Server, Socket, Namespace } from 'socket.io';
+import { ItemStatus } from '../../common/enums';
+export type KitchenNotifyItem = {
+  ticketId?: string;          // có nếu bạn tạo thực thể ticket riêng
+  orderItemId?: string;       // có nếu phát theo row OrderItem
+  menuItemId: string;
+  name: string;
+  qty: number;
+};
 
+export type TicketChangeItem = {
+  ticketId?: string;
+  menuItemId: string;
+  qty: number;
+  fromStatus: ItemStatus;     // ⚠ dùng enum, không dùng string literal
+  toStatus: ItemStatus;
+  reason?: string | null;     // cho phép null
+};
+
+export type TicketsVoidedPayload = {
+  orderId: string;
+  tableName?: string;
+  by?: string | null;
+  // ❶ case cũ: hủy theo id các ticket
+  ticketIds?: string[];
+  // ❷ case mới: hủy theo tổng qty của từng món
+  items?: Array<{ menuItemId: string; qty: number; reason?: string | null; by?: string | null }>;
+};
+
+export type NotifyItemsToKitchenPayload = {
+  orderId: string;
+  tableName?: string;
+  batchId?: string;
+  createdAt?: string;
+  items: KitchenNotifyItem[];
+  staff?: string;
+  priority?: boolean;
+};
 @WebSocketGateway({
   namespace: '/realtime-pos',
   path: '/socket.io',
@@ -18,6 +54,39 @@ import { Server, Socket, Namespace } from 'socket.io';
 export class KitchenGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server: Server; // server trong trường hợp có namespace là đối tượng của namespace đó
+
+
+  // socket cho order thay đổi
+  emitOrderChanged(payload: {
+    orderId: string;
+    tableId: string;
+   reason:
+    | 'CREATED'
+    | 'ITEMS_ADDED'
+    | 'ITEM_QTY_SET'
+    | 'ITEM_REMOVED'
+    | 'ORDER_STATUS'
+    | 'ORDER_CANCELLED'
+    | 'MERGED'
+    | 'SPLIT';
+  }) {
+    // Gửi cho cashier & waiter (để cả 2 phía đồng bộ)
+    this.server.to('cashier').emit('orders:changed', payload);
+    this.server.to('waiter').emit('orders:changed', payload);
+  }
+   emitOrdersMerged(payload: { fromOrderId: string; toOrderId: string; fromTableId?: string | null; toTableId?: string | null }) {
+    this.server.to('cashier').emit('orders:merged', payload);
+    this.server.to('waiter').emit('orders:merged', payload);
+  }
+
+  emitOrdersSplit(payload: { fromOrderId: string; toOrderId: string }) {
+    this.server.to('cashier').emit('orders:split', payload);
+    this.server.to('waiter').emit('orders:split', payload);
+  }
+
+
+
+
 
   /** 🔹 Phát sự kiện thông báo số lượng bếp online */
   private broadcastKitchenPresence(nsp: Namespace) {
@@ -62,18 +131,12 @@ export class KitchenGateway implements OnGatewayConnection, OnGatewayDisconnect 
   }
 
   /** 🔹 Thu ngân → Phát món mới cho bếp */
-  emitNotifyItemsToKitchen(payload: {
-    orderId: string;
-    tableName: string;
-    batchId: string;
-    createdAt: string;
-    items: Array<{ orderItemId: string; name: string; qty: number }>;
-    staff: string;
-    priority?: boolean;
-  }) {
+   emitNotifyItemsToKitchen(payload: NotifyItemsToKitchenPayload) {
     // this.server lúc này CHÍNH LÀ namespace '/realtime-pos'
     console.log('[ws] Emitting cashier:notify_items => kitchen', payload);
     this.server.to('kitchen').emit('cashier:notify_items', payload);
+     this.server.to('waiter').emit('kitchen:new_batch', payload);
+  this.server.to('cashier').emit('kitchen:new_batch', payload);
   }
 
   /** 🔹 Thu ngân → Bếp: huỷ món */
@@ -83,10 +146,55 @@ export class KitchenGateway implements OnGatewayConnection, OnGatewayDisconnect 
     createdAt: string;
     items: Array<{ orderItemId: string; name: string; qty: number; reason: string }>;
     staff: string;
+     priority?: boolean;
   }) {
     console.log('[ws] Emitting cashier:cancel_items => kitchen', payload);
     this.server.to('kitchen').emit('cashier:cancel_items', payload);
+
+     // 🔸 Gửi lại cho waiter và cashier để đồng bộ “đã báo bếp”
+   this.server.to('cashier').emit('kitchen:items_cancelled', payload);
+this.server.to('waiter').emit('kitchen:items_cancelled', payload);
+
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+
+
+
   }
+
+
+
+  emitTicketStatusChanged(payload: {
+    orderId: string;
+    items: TicketChangeItem[]
+  }) {
+    this.server.to('kitchen').emit('kitchen:ticket_status_changed', payload);
+  }
+
+  // Nếu muốn phân biệt event hủy riêng:
+   emitTicketsVoided(payload: TicketsVoidedPayload)  {
+    this.server.to('kitchen').emit('kitchen:tickets_voided', payload);
+  }
+
+
+
+
+
+
+
 
   /** 🔹 Bếp phản hồi đã nhận */
   @SubscribeMessage('kitchen:ack')
@@ -95,4 +203,8 @@ export class KitchenGateway implements OnGatewayConnection, OnGatewayDisconnect 
     // broadcast cho thu ngân (room 'cashier' nếu có)
     client.nsp.to('cashier').emit('kitchen:ack', data);
   }
+
+
+
+  
 }
