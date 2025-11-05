@@ -66,8 +66,9 @@ export class PaymentController {
     const paid = (inv.payments ?? [])
       .filter((p) => p.status === PaymentStatus.SUCCESS)
       .reduce((s, p) => s + Number(p.amount), 0);
-    const total = Number(inv.totalAmount);
-    const remaining = Math.max(0, total - paid);
+   const total = Number(inv.finalAmount ?? inv.totalAmount ?? 0);
+const remaining = Math.max(0, total - paid);
+
 
     return { status: inv.status, total, paid, remaining };
   }
@@ -231,19 +232,20 @@ async payosWebhook(@Req() req: Request & { rawBody?: Buffer }, @Body() body: any
   const inv = await this.invRepo.findOne({ where: { id: invoiceId }, relations: ['payments'] });
   if (!inv) return { ok: true };
 
-  const paid = (inv.payments ?? [])
-    .filter(p => p.status === PaymentStatus.SUCCESS)
-    .reduce((s, p) => s + Number(p.amount), 0);
+const paid = (inv.payments ?? [])
+  .filter(p => p.status === PaymentStatus.SUCCESS)
+  .reduce((s, p) => s + Number(p.amount), 0);
 
-  const total = Number(inv.totalAmount);
-  const remaining = Math.max(0, total - paid);
+const total = Number(inv.finalAmount ?? inv.totalAmount ?? 0);
+const remaining = Math.max(0, total - paid);
 
-  // Nếu giữ chặt đúng số còn lại:
-  const TOL = 2;
-  if (Math.abs(amount - remaining) > TOL) {
-    this.logger.warn(`PayOS webhook: AMOUNT_MISMATCH amount=${amount} remaining=${remaining} invoiceId=${invoiceId}`);
-    return { ok: true };
-  }
+const TOL = 2; // 2 VND
+if (Math.abs(amount - remaining) > TOL) {
+  this.logger.warn(`PayOS webhook: AMOUNT_MISMATCH amount=${amount} remaining=${remaining} invoiceId=${invoiceId}`);
+  return { ok: true };
+}
+
+
 
   // 4) Ghi nhận tiền + mark pending success
   await this.invoiceSvc.addPayment(invoiceId, {
