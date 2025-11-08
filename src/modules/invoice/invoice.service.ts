@@ -246,8 +246,8 @@ export class InvoicesService {
         await oRepo.update({ id: inv.order.id }, { status: OrderStatus.PAID });
       }
 
-      // ghi vào sổ quỹ đã thu
-      if (method === PaymentMethod.CASH) {
+      // Ghi vào sổ quỹ đã thu: áp dụng cho CASH, VIETQR, VNPAY, CARD
+      if ([PaymentMethod.CASH, PaymentMethod.VIETQR, PaymentMethod.VNPAY, PaymentMethod.CARD].includes(method)) {
         await this.cashbookService.postReceiptFromInvoice(em, inv, take);
       }
       return { invoice: inv, payment };
