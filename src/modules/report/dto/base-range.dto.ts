@@ -17,10 +17,10 @@ export class BaseRangeDto {
     dateTo?: string;
     
 
-    @ApiPropertyOptional({ enum: Channel }) 
-    @IsOptional() 
-    @IsEnum(Channel) 
-    channel?: Channel;
+    // @ApiPropertyOptional({ enum: Channel }) 
+    // @IsOptional() 
+    // @IsEnum(Channel) 
+    // channel?: Channel;
 
     @ApiPropertyOptional() 
     @IsOptional() 
@@ -32,18 +32,18 @@ export class BaseRangeDto {
     @IsUUID() 
     tableId?: string;
 
-    @ApiPropertyOptional() 
-    @IsOptional() 
-    @IsUUID() 
-    receiverId?: string;  // người nhận đơn
+    // @ApiPropertyOptional() 
+    // @IsOptional() 
+    // @IsUUID() 
+    // receiverId?: string;  // người nhận đơn
 
-    @ApiPropertyOptional() 
-    @IsOptional() 
-    @IsUUID() 
-    creatorId?: string;   // người tạo
+    // @ApiPropertyOptional() 
+    // @IsOptional() 
+    // @IsUUID() 
+    // creatorId?: string;   // người tạo
     
-    @ApiPropertyOptional()
-    @IsOptional()
-    @Transform(({ value }) => value === true || value === 'true')
-    includeCancelled?: boolean;
+    // @ApiPropertyOptional()
+    // @IsOptional()
+    // @Transform(({ value }) => value === true || value === 'true')
+    // includeCancelled?: boolean;
 }

@@ -1,6 +1,6 @@
 // report.controller.ts
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
-import { ApiTags, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiQuery, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { ReportService } from './report.service';
 import type { RangeKey } from 'src/common/date-range';
 import { JwtAuthGuard } from '@modules/core/auth/guards/jwt-auth.guard';
@@ -9,6 +9,8 @@ import { Roles } from 'src/common/decorators/roles.decorator';
 import { UserRole } from 'src/common/enums';
 import { SalesDailyQueryDto } from './dto/sales-daily.query.dto';
 import { StaffReportQueryDto } from './dto/staff-report.query.dto';
+import { BaseRangeDto } from './dto/base-range.dto';
+import { CashbookDailyQueryDto } from './dto/cashbook-daily.query.dto';
 
 enum RangeKeyEnum {
   today = 'today',
@@ -65,13 +67,30 @@ export class ReportController {
     return this.svc.salesSeries(range, granularity);
   }
 
+  // ================= BÁO CÁO CUỐI NGÀY ==================
+  // ================= 1) BÁN HÀNG CUỐI NGÀY ==================
   @Get("daily-sales")
   @Roles(UserRole.MANAGER)
+  @ApiOperation({ summary: 'Get daily sales report (END OF THE DAY)' })
   dailySales(@Query() q: SalesDailyQueryDto) { // Đổi tên hàm thành dailySales
     return this.svc.salesDaily(q);
   }
+  // ================= 2) SỔ QUỸ CUỐI NGÀY ==================
+  @Get('daily-cashbook')
+  @Roles(UserRole.MANAGER)
+  @ApiOperation({ summary: 'Get daily cashbook report (END OF THE DAY)' })
+  dailyCashbook(@Query() q: CashbookDailyQueryDto) {
+    return this.svc.cashbookDaily(q);
+  }
+  // ================= 3) HÀNG HỦY CUỐI NGÀY ==================
+  @Get('daily-cancel-items')
+  @Roles(UserRole.MANAGER)
+  @ApiOperation({ summary: 'Get daily canceled items report (END OF THE DAY)' })
+  dailyCancelItems(@Query() q: BaseRangeDto) {
+    return this.svc.cancelItemsDaily(q);
+  }
 
-  /* ====== BÁO CÁO CỦA NHÂN VIÊN ====== */
+  // ================= BÁO CÁO BÁN HÀNG THEO NHÂN VIÊN ==================
   /* ====== 1) BÁN HÀNG ====== */
   @Get('sales-by-staff')
   @Roles(UserRole.MANAGER)

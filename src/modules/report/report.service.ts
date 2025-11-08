@@ -12,6 +12,10 @@ import { SalesDailyQueryDto } from './dto/sales-daily.query.dto';
 import { User } from '@modules/user/entities/user.entity';
 import { MenuItem } from '@modules/menuitems/entities/menuitem.entity';
 import { StaffReportQueryDto } from './dto/staff-report.query.dto';
+import { ResponseCommon, ResponseException } from 'src/common/common_dto/respone.dto';
+import { PageMeta } from 'src/common/common_dto/paginated';
+import { BaseRangeDto } from './dto/base-range.dto';
+import { CashbookDailyQueryDto } from './dto/cashbook-daily.query.dto';
 @Injectable()
 export class ReportService {
   constructor(
@@ -25,6 +29,8 @@ export class ReportService {
 
   // === cấu hình múi giờ dùng chung ===
   private readonly TZ = process.env.TZ_DB ?? 'Asia/Ho_Chi_Minh';
+  // Vì Asia/Ho_Chi_Minh cố định GMT+7 (không DST), dùng trực tiếp để suy ra mốc UTC cho 00:00 local
+  private readonly TZ_OFFSET = '+07:00';
 
   // format YYYY-MM-DD theo TZ VN (KHÔNG dùng toISOString)
   private fmtYMD(d: Date) {
@@ -210,76 +216,279 @@ export class ReportService {
   /* ====== Dùng cho page BÁO CÁO ====== */
 
   /* ====== 1. BÁO CÁO CUỐI NGÀY ====== */
-  /* ====== BÁN HÀNG ====== */
+  // ====== BÁN HÀNG (EOD: chỉ hóa đơn) ======
   async salesDaily(q: SalesDailyQueryDto) {
-    const from = q.dateFrom ? new Date(q.dateFrom) : this.sod();
-    const to = q.dateTo ? new Date(q.dateTo) : this.eod();
+    try {
+      const { from, to } = this.resolveLocalRange(q.dateFrom as any, q.dateTo as any);
+      const page = Math.max(1, Number((q as any).page) || 1);
+      const limit = Math.min(200, Math.max(1, Number((q as any).limit) || 20));
 
-    // === Đặt hàng (chưa hóa đơn) ===
-    const orderQb = this.orderRepo.createQueryBuilder('o')
-      .select(`
-        'ORDER' as "docType",
-        o.code as "docCode",
-        COALESCE(a.name || ' / ' || t.name, t.name, a.name) as "place",
-        ur.full_name as "receiverName",
-        to_char(o.createdAt,'HH24:MI') as "time",
-        NULL as "payMethod",
-        SUM(oi.quantity) as "itemsCount",
-        SUM(oi.quantity * oi.price) as "goodsAmount",
-        COALESCE(SUM(oi.discount),0) as "invoiceDiscount",
-        (SUM(oi.quantity * oi.price) - COALESCE(SUM(oi.discount),0)) as "revenue",
-        0 as "otherIncome", 0 as "tax", 0 as "returnFee", 0 as "paid", 0 as "debt"
-      `)
-      .leftJoin('o.items', 'oi')
-      .leftJoin('o.table', 't')
-      .leftJoin('o.area', 'a')
-      .leftJoin('o.receiver', 'ur')
-      .where('o.createdAt >= :from AND o.createdAt < :to', { from, to })
-      .andWhere('o.status IN (:...st)', { st: [OrderStatus.PENDING, OrderStatus.CONFIRMED] })
-      .groupBy('o.id, t.name, a.name, ur.full_name')
-      .orderBy('o.createdAt', 'ASC');
-    this.applyOrderFilters(orderQb, q);
-    const orders = await orderQb.getRawMany();
+      // Total count (distinct invoices) with same filters
+      const countQb = this.invRepo.createQueryBuilder('inv')
+        .innerJoin('inv.order', 'o')
+        .leftJoin('o.table', 't')
+        .leftJoin('t.area', 'a')
+        .leftJoin('o.createdBy', 'ur')
+        .leftJoin('ur.profile', 'pf')
+        .where('inv.createdAt >= :from AND inv.createdAt < :to', { from, to })
+        .select('COUNT(DISTINCT inv.id)', 'total');
+      if (q.paymentMethod) {
+        countQb.leftJoin('inv.payments', 'pay').andWhere('pay.method = :pm', { pm: q.paymentMethod });
+      }
+      if (q.areaId) {
+        countQb.andWhere('a.id = :aid', { aid: q.areaId });
+      }
+      this.applyOrderFilters(countQb as any, q);
+      const countRow = await countQb.getRawOne<{ total: string }>();
+      const total = Number(countRow?.total || 0);
 
-    // === Hóa đơn (đã xuất) ===
-    const invQb = this.invRepo.createQueryBuilder('inv')
-      .select(`
+      const invQb = this.invRepo.createQueryBuilder('inv')
+        .select(`
         'INVOICE' as "docType",
-        inv.code as "docCode",
+        inv.invoiceNumber as "docCode",
         COALESCE(a.name || ' / ' || t.name, t.name, a.name) as "place",
-        ur.full_name as "receiverName",
-        to_char(inv.createdAt,'HH24:MI') as "time",
+        pf.fullName as "receiverName",
+  to_char(inv.created_at,'HH24:MI') as "time",
+  inv.created_at as "occurredAt",
         STRING_AGG(DISTINCT pay.method, ',') as "payMethod",
         SUM(oi.quantity) as "itemsCount",
         SUM(oi.quantity * oi.price) as "goodsAmount",
-        COALESCE(inv.discountAmount,0) as "invoiceDiscount",
-        (SUM(oi.quantity * oi.price) - COALESCE(inv.discountAmount,0)) as "revenue",
-        COALESCE(inv.surcharge,0) as "otherIncome",
-        COALESCE(inv.taxAmount,0) as "tax",
-        COALESCE(inv.returnFee,0) as "returnFee",
-        COALESCE(SUM(pay.amount),0) as "paid",
-        GREATEST(inv.totalAmount - COALESCE(SUM(pay.amount),0), 0) as "debt"
+        COALESCE(inv.discountTotal,0) as "invoiceDiscount",
+        (SUM(oi.quantity * oi.price) - COALESCE(inv.discountTotal,0)) as "revenue",
+        0 as "otherIncome",
+        0 as "tax",
+        0 as "returnFee"
       `)
-      .innerJoin('inv.order', 'o')
-      .innerJoin('o.items', 'oi')
-      .leftJoin('inv.payments', 'pay')
-      .leftJoin('o.table', 't')
-      .leftJoin('o.area', 'a')
-      .leftJoin('o.receiver', 'ur')
-      .where('inv.createdAt >= :from AND inv.createdAt < :to', { from, to })
-      .groupBy('inv.id, t.name, a.name, ur.full_name')
-      .orderBy('inv.createdAt', 'ASC');
+        .innerJoin('inv.order', 'o')
+        .innerJoin('o.items', 'oi')
+        .leftJoin('inv.payments', 'pay')
+        .leftJoin('o.table', 't')
+        .leftJoin('t.area', 'a')
+        .leftJoin('o.createdBy', 'ur')
+        .leftJoin('ur.profile', 'pf')
+        .where('inv.createdAt >= :from AND inv.createdAt < :to', { from, to })
+        .groupBy('inv.id, t.name, a.name, pf.fullName, to_char(inv.created_at,\'HH24:MI\')')
+        .orderBy('inv.createdAt', 'ASC')
+        .offset((page - 1) * limit)
+        .limit(limit);
 
-    if (q.paymentMethod) invQb.andWhere('pay.method = :pm', { pm: q.paymentMethod });
-    this.applyOrderFilters(invQb, q);
-    const invoices = await invQb.getRawMany();
+      if (q.paymentMethod) invQb.andWhere('pay.method = :pm', { pm: q.paymentMethod });
+      if (q.areaId) invQb.andWhere('a.id = :aid', { aid: q.areaId });
+      this.applyOrderFilters(invQb, q);
 
-    return {
-      printedAt: new Date().toISOString(),
-      dateRange: { from: from.toISOString(), to: to.toISOString() },
-      groups: [this.groupify('Đặt hàng', orders), this.groupify('Hóa đơn', invoices)],
-    };
+      const invoices = await invQb.getRawMany();
+
+      const meta: PageMeta = { total, page, limit, pages: Math.ceil(total / limit) };
+      const data = {
+        printedAt: new Date().toISOString(),
+        dateRange: { from: from.toISOString(), to: to.toISOString() },
+        groups: [
+          this.groupify('Hóa đơn', invoices),
+        ],
+      };
+      return new ResponseCommon<typeof data, PageMeta>(200, true, 'OK', data, meta);
+    } catch (error) {
+      throw new ResponseException(error, 500, 'GET_DAILY_SALES_FAILED');
+    }
   }
+
+  // ====== THU CHI (cashbook) ======
+  async cashbookDaily(q: CashbookDailyQueryDto) {
+    try {
+      const { from, to } = this.resolveLocalRange(q.dateFrom as any, q.dateTo as any);
+      const page = Math.max(1, Number((q as any).page) || 1);
+      const limit = Math.min(200, Math.max(1, Number((q as any).limit) || 10));
+
+      // Total
+      const countQb = this.ds.createQueryBuilder()
+        .from('cashbook_entries', 'cb')
+        .leftJoin('invoices', 'inv', 'inv.id = cb.invoice_id')
+        .leftJoin('purchase_receipts', 'prc', 'prc.id = cb.purchase_receipt_id')
+        .leftJoin('orders', 'o', 'o.id = inv.order_id')
+        .leftJoin('tables', 't', 't.id = o."tableId"')
+        .leftJoin('areas', 'ar', 'ar.id = t.area_id')
+        .leftJoin('customers', 'cus', 'cus.id = cb.customer_id')
+        .leftJoin('payments', 'pay', 'pay."invoiceId" = inv.id')
+        .where('cb.date >= :from AND cb.date < :to', { from, to })
+        .select('COUNT(1)', 'total');
+      const countRow = await countQb.getRawOne<{ total: string }>();
+      const total = Number(countRow?.total || 0);
+
+      const qb = this.ds.createQueryBuilder()
+        .from('cashbook_entries', 'cb')
+        .leftJoin('cash_types', 'ct', 'ct.id = cb.cash_type_id')
+        .leftJoin('customers', 'cus', 'cus.id = cb.customer_id')
+        .leftJoin('suppliers', 'sup', 'sup.id = cb.supplier_id')
+        .leftJoin('cash_other_parties', 'cop', 'cop.id = cb.cash_other_party_id')
+        .leftJoin('invoices', 'inv', 'inv.id = cb.invoice_id')
+        .leftJoin('orders', 'o', 'o.id = inv.order_id')
+        .leftJoin('tables', 't', 't.id = o."tableId"')
+        .leftJoin('areas', 'ar', 'ar.id = t.area_id')
+        .leftJoin('purchase_receipts', 'prc', 'prc.id = cb.purchase_receipt_id')
+        .leftJoin('payments', 'pay', 'pay."invoiceId" = inv.id')
+        .leftJoin('users', 'ucr', 'ucr.id = inv.cashier_id')
+        .leftJoin('profiles', 'pcr', 'pcr.user_id = ucr.id')
+        .leftJoin('users', 'ur', 'ur.id = o."createdById"')
+        .leftJoin('profiles', 'pr', 'pr.user_id = ur.id')
+        .leftJoin('users', 'ucrp', 'ucrp.id = prc.created_by_id')
+        .leftJoin('profiles', 'pcrp', 'pcrp.user_id = ucrp.id')
+        .select(`cb.code`, 'code')
+        .addSelect(`to_char(cb.created_at AT TIME ZONE :tz,'HH24:MI')`, 'time')
+        .addSelect('cb.created_at', 'occurredAt')
+        .addSelect(`CASE WHEN cb.type = 'RECEIPT' THEN cb.amount::numeric ELSE 0 END`, 'receipt')
+        .addSelect(`CASE WHEN cb.type = 'PAYMENT' THEN cb.amount::numeric ELSE 0 END`, 'payment')
+        .addSelect(`ct.name`, 'cashType')
+        .addSelect(`COALESCE(cus.name, sup.name, cop.name)`, 'counterparty')
+        .addSelect('t.name', 'tableName')
+        .addSelect('ar.name', 'areaName')
+        .addSelect('COALESCE(ucr.id::text, ucrp.id::text)', 'creatorId')
+        .addSelect('COALESCE(pcr.full_name, pcrp.full_name)', 'creatorName')
+        .addSelect('ur.id', 'receiverId')
+        .addSelect('pr.full_name', 'receiverName')
+        .addSelect(`(
+          SELECT STRING_AGG(DISTINCT p.method, ',')
+          FROM payments p
+          WHERE p."invoiceId" = inv.id
+        )`, 'paymentMethods')
+        .where('cb.date >= :from AND cb.date < :to', { from, to })
+        .orderBy('cb.date', 'ASC')
+        .offset((page - 1) * limit)
+        .limit(limit)
+        .setParameters({ tz: this.TZ });
+
+      const rows = await qb.getRawMany<{
+        code: string; time: string; occurredAt: string; receipt: string; payment: string; cashType: string; counterparty: string; tableName: string; areaName: string; paymentMethods: string; creatorId: string | null; creatorName: string | null; receiverId: string | null; receiverName: string | null;
+      }>();
+
+      const sum = rows.reduce((a, r) => ({
+        receipt: a.receipt + Number(r.receipt || 0),
+        payment: a.payment + Number(r.payment || 0),
+      }), { receipt: 0, payment: 0 });
+
+      const meta: PageMeta = { total, page, limit, pages: Math.ceil(total / limit) };
+      const data = {
+        printedAt: new Date().toISOString(),
+        dateRange: { from: from.toISOString(), to: to.toISOString() },
+        groups: [{
+          title: `Thu chi: ${rows.length}`, totalCount: rows.length, sum, rows: rows.map(r => ({
+            code: r.code,
+            time: r.time,
+            occurredAt: r.occurredAt,
+            receipt: r.receipt,
+            payment: r.payment,
+            cashType: r.cashType,
+            counterparty: r.counterparty,
+            tableName: r.tableName,
+            areaName: r.areaName,
+            creatorId: r.creatorId,
+            creatorName: r.creatorName,
+            receiverId: r.receiverId,
+            receiverName: r.receiverName,
+            paymentMethods: r.paymentMethods,
+          }))
+        }],
+      };
+      return new ResponseCommon<typeof data, PageMeta>(200, true, 'OK', data, meta);
+    } catch (error) {
+      throw new ResponseException(error, 500, 'GET_DAILY_CASHBOOK_FAILED');
+    }
+  }
+
+  // ====== HỦY MÓN ======
+  async cancelItemsDaily(q: BaseRangeDto) {
+    try {
+      const { from, to } = this.resolveLocalRange(q.dateFrom as any, q.dateTo as any);
+      const page = Math.max(1, Number((q as any).page) || 1);
+      const limit = Math.min(200, Math.max(1, Number((q as any).limit) || 10));
+
+      // Đếm tổng số DÒNG hủy (mỗi order_item bị hủy) thay vì distinct item
+      const countQb = this.oiRepo.createQueryBuilder('oi')
+        .innerJoin('oi.order', 'o')
+        .leftJoin('o.table', 't')
+        .leftJoin('t.area', 'a')
+        .innerJoin('oi.menuItem', 'mi')
+        .leftJoin('mi.category', 'c')
+        .where('oi.cancelledAt IS NOT NULL')
+        .andWhere('oi.cancelledAt >= :from AND oi.cancelledAt < :to', { from, to })
+        .select('COUNT(oi.id)', 'total');
+      if (q.tableId) countQb.andWhere('t.id = :tid', { tid: q.tableId });
+      if (q.areaId) countQb.andWhere('a.id = :aid', { aid: q.areaId });
+      const countRow = await countQb.getRawOne<{ total: string }>();
+      const total = Number(countRow?.total || 0);
+
+      // Lấy chi tiết từng món hủy
+      const qb = this.oiRepo.createQueryBuilder('oi')
+        .innerJoin('oi.order', 'o')
+        .leftJoin('o.table', 't')
+        .leftJoin('t.area', 'a')
+        .innerJoin('oi.menuItem', 'mi')
+        .leftJoin('mi.category', 'c')
+        .leftJoin('users', 'u', 'u.id::text = oi.cancelled_by')
+        .leftJoin('profiles', 'pr', 'pr.user_id = u.id')
+        .select('oi.id', 'rowId')
+        .addSelect('mi.id', 'itemCode')
+        .addSelect('mi.name', 'itemName')
+        .addSelect('c.name', 'categoryName')
+        .addSelect('t.name', 'tableName')
+        .addSelect('a.name', 'areaName')
+        .addSelect('oi.quantity', 'cancelQty')
+        .addSelect('(oi.quantity * oi.price)', 'cancelValue')
+        .addSelect('oi.cancel_reason', 'cancelReason')
+        .addSelect('oi.cancelled_by', 'cancelledBy')
+        .addSelect('pr.full_name', 'cancelledByName')
+        .addSelect(`to_char(oi.cancelled_at AT TIME ZONE '${this.TZ}','HH24:MI')`, 'time')
+        .addSelect('oi.cancelled_at', 'occurredAt')
+        .where('oi.cancelledAt IS NOT NULL')
+        .andWhere('oi.cancelledAt >= :from AND oi.cancelledAt < :to', { from, to })
+        .orderBy('oi.cancelledAt', 'ASC')
+        .offset((page - 1) * limit)
+        .limit(limit);
+
+      if (q.tableId) qb.andWhere('t.id = :tid', { tid: q.tableId });
+      if (q.areaId) qb.andWhere('a.id = :aid', { aid: q.areaId });
+
+      const rows = await qb.getRawMany<{
+        rowId: string; itemCode: string; itemName: string; categoryName: string;
+        tableName: string; areaName: string; cancelQty: string; cancelValue: string;
+        cancelReason: string; cancelledBy: string; cancelledByName: string; time: string; occurredAt: string;
+      }>();
+
+      const sum = rows.reduce((a, r) => ({
+        cancelQty: a.cancelQty + Number(r.cancelQty || 0),
+        cancelValue: a.cancelValue + Number(r.cancelValue || 0),
+      }), { cancelQty: 0, cancelValue: 0 });
+
+      const meta: PageMeta = { total, page, limit, pages: Math.ceil(total / limit) };
+      const data = {
+        printedAt: new Date().toISOString(),
+        dateRange: { from: from.toISOString(), to: to.toISOString() },
+        groups: [{
+          title: `Hủy món: ${rows.length}`,
+          totalCount: rows.length,
+          sum,
+          rows: rows.map(r => ({
+            rowId: r.rowId,
+            itemCode: r.itemCode,
+            itemName: r.itemName,
+            categoryName: r.categoryName,
+            tableName: r.tableName,
+            areaName: r.areaName,
+            cancelQty: r.cancelQty,
+            cancelValue: r.cancelValue,
+            cancelReason: r.cancelReason,
+            cancelledBy: r.cancelledBy,
+            cancelledByName: r.cancelledByName,
+            time: r.time,
+            occurredAt: r.occurredAt,
+          }))
+        }],
+      };
+      return new ResponseCommon<typeof data, PageMeta>(200, true, 'OK', data, meta);
+    } catch (error) {
+      throw new ResponseException(error, 500, 'GET_DAILY_CANCEL_ITEMS_FAILED');
+    }
+  }
+
 
 
   /* ====== 1) BÁN HÀNG THEO NHÂN VIÊN ====== */
@@ -630,4 +839,48 @@ export class ReportService {
 
   private sod() { const d = new Date(); d.setHours(0, 0, 0, 0); return d; }
   private eod() { const d = new Date(); d.setHours(24, 0, 0, 0); return d; }
+
+  // ===== Helpers: chuẩn hoá [from, to) theo NGÀY LOCAL VN khi người dùng nhập YYYY-MM-DD =====
+  private localStartOfDay(dateInput?: string | Date): Date {
+    // Nếu input là 'YYYY-MM-DD' → hiểu là 00:00:00 theo TZ VN; còn lại thì lấy ngày từ input rồi chuẩn hoá về 00:00 TZ VN
+    if (typeof dateInput === 'string') {
+      if (/^\d{4}-\d{2}-\d{2}$/.test(dateInput)) {
+        return new Date(`${dateInput}T00:00:00${this.TZ_OFFSET}`);
+      }
+      // Chuỗi ISO có giờ → lấy ngày theo TZ VN rồi về 00:00 TZ VN
+      const ymd = this.fmtYMD(new Date(dateInput));
+      return new Date(`${ymd}T00:00:00${this.TZ_OFFSET}`);
+    }
+    const ymd = this.fmtYMD(dateInput ?? new Date());
+    return new Date(`${ymd}T00:00:00${this.TZ_OFFSET}`);
+  }
+
+  private plusDays(d: Date, days: number): Date {
+    return new Date(d.getTime() + days * 24 * 60 * 60 * 1000);
+  }
+
+  private resolveLocalRange(dateFrom?: string, dateTo?: string): { from: Date; to: Date } {
+    let from: Date;
+    let to: Date;
+
+    if (dateFrom && dateTo) {
+      // Inclusive dateTo: [dateFrom 00:00, (dateTo + 1) 00:00)
+      const start = this.localStartOfDay(dateFrom);
+      const endInclusive = this.localStartOfDay(dateTo);
+      from = start;
+      to = this.plusDays(endInclusive, 1);
+    } else if (dateFrom) {
+      from = this.localStartOfDay(dateFrom);
+      to = this.plusDays(from, 1);
+    } else if (dateTo) {
+      // Only dateTo provided → lấy trọn ngày dateTo
+      from = this.localStartOfDay(dateTo);
+      to = this.plusDays(from, 1);
+    } else {
+      // Ngày hôm nay (theo TZ VN): [00:00, 24:00)
+      from = this.localStartOfDay();
+      to = this.plusDays(from, 1);
+    }
+    return { from, to };
+  }
 }
