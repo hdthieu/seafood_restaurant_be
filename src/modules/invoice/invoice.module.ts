@@ -9,10 +9,11 @@ import { Payment } from 'src/modules/payments/entities/payment.entity';
 import { CashbookModule } from '@modules/cashbook/cashbook.module';
 import { PromotionsModule } from '@modules/promotions/promotions.module';
 import { InvoicePromotion } from '@modules/promotions/entities/invoicepromotion.entity';
+import { PaymentsGateway } from '@modules/payments/payments.gateway';
 
 @Module({
   imports: [TypeOrmModule.forFeature([Invoice, Order,Payment, InvoicePromotion]), CashbookModule, PromotionsModule],
-  providers: [InvoicesService],
+  providers: [InvoicesService, PaymentsGateway],
   controllers: [InvoicesController],
   exports: [InvoicesService, TypeOrmModule],
 })
