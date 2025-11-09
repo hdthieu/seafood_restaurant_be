@@ -16,7 +16,7 @@ import { CashbookService } from '@modules/cashbook/cashbook.service';
 import { InvoicePromotion } from '@modules/promotions/entities/invoicepromotion.entity';
 import { Promotion } from '@modules/promotions/entities/promotion.entity';
 import { ApplyPromotionsDto } from './dto/apply-promotions.dto';
-
+import {PaymentsGateway} from '@modules/payments/payments.gateway';
 @Injectable()
 export class InvoicesService {
   constructor(
@@ -26,6 +26,7 @@ export class InvoicesService {
     @InjectRepository(Payment) private payRepo: Repository<Payment>,
     private readonly cashbookService: CashbookService,
     @InjectRepository(InvoicePromotion) private invPromoRepo: Repository<InvoicePromotion>,
+     private readonly gateway: PaymentsGateway, 
   ) { }
 
   /** Tạo invoice từ order (idempotent) */
@@ -209,7 +210,7 @@ export class InvoicesService {
       const net = Number(inv.finalAmount ?? 0) || gross - Number(inv.discountTotal ?? 0);
       const totalToPay = Math.max(0, net);
       const remaining = Math.max(0, totalToPay - paid);
-
+  const total = Number(inv.finalAmount ?? inv.totalAmount ?? 0);
       // Nếu đã đủ tiền rồi thì chặn
       if (remaining <= 0) {
         throw new BadRequestException('INVOICE_ALREADY_PAID');
@@ -238,6 +239,7 @@ export class InvoicesService {
 
       // Cập nhật trạng thái invoice
       const paidAfter = paid + take;
+        const still = Math.max(0, total - paidAfter);
       inv.status = paidAfter >= totalToPay ? InvoiceStatus.PAID : InvoiceStatus.PARTIAL;
       await invRepo.save(inv);
 
@@ -250,6 +252,12 @@ export class InvoicesService {
       if (method === PaymentMethod.CASH) {
         await this.cashbookService.postReceiptFromInvoice(em, inv, take);
       }
+      if (still <= 0) {
+        this.gateway.emitPaid(inv.id, { invoiceId: inv.id, amount: take, method: 'CASH_OR_PAYOS' });
+      } else {
+        this.gateway.emitPartial(inv.id, { invoiceId: inv.id, amount: take, remaining: still });
+      }
+
       return { invoice: inv, payment };
     });
   }

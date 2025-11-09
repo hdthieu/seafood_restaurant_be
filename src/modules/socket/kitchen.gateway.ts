@@ -182,11 +182,15 @@ this.server.to('waiter').emit('kitchen:items_cancelled', payload);
     items: TicketChangeItem[]
   }) {
     this.server.to('kitchen').emit('kitchen:ticket_status_changed', payload);
+     this.server.to('cashier').emit('kitchen:ticket_status_changed', payload);
+  this.server.to('waiter').emit('kitchen:ticket_status_changed', payload);
   }
 
   // Nếu muốn phân biệt event hủy riêng:
    emitTicketsVoided(payload: TicketsVoidedPayload)  {
     this.server.to('kitchen').emit('kitchen:tickets_voided', payload);
+     this.server.to('cashier').emit('kitchen:tickets_voided', payload);
+  this.server.to('waiter').emit('kitchen:tickets_voided', payload);
   }
 
 
