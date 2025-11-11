@@ -23,19 +23,12 @@ export class MobileAttendanceService {
     private readonly rulesSvc: RulesService,
   ) {}
 
-  private toHHmm(d: Date) {
+   private toHHmm(d: Date) {
     const h = String(d.getHours()).padStart(2, '0');
     const m = String(d.getMinutes()).padStart(2, '0');
     return `${h}:${m}`;
   }
   private hmToNum(hm: string) { const [h,m] = hm.split(':').map(Number); return h*100+m; }
-
-  private inWindow(dateISO: string, startHHmm: string, endHHmm: string, now: Date) {
-    const toDate = (d: string, hm: string) => new Date(`${d}T${hm}:00`);
-    const start = new Date(toDate(dateISO, startHHmm).getTime() - 15 * 60_000);
-    const end   = new Date(toDate(dateISO, endHHmm).getTime() + 15 * 60_000);
-    return now >= start && now <= end;
-  }
 
   /** Haversine (m) */
   private haversineMeter(lat1: number, lon1: number, lat2: number, lon2: number) {
@@ -47,7 +40,7 @@ export class MobileAttendanceService {
     return 2 * R * Math.asin(Math.sqrt(a));
   }
 
-  async check(userId: string, dto: CheckPayload) {
+    async check(userId: string, dto: CheckPayload) {
     // 1) Lấy WorkSchedule & validate owner
     const ws = await this.wsRepo.findOne({
       where: { id: dto.scheduleId },
@@ -57,18 +50,31 @@ export class MobileAttendanceService {
       throw new ForbiddenException('SCHEDULE_NOT_FOUND');
     }
 
-    const now = new Date();
-    const shift = ws.shift as any; // { id, name, startTime:'HH:mm', endTime:'HH:mm' }
+    // 1.1) Guard lệch giờ client/server (tuỳ policy)
+    const serverNow = new Date();
+    const clientNow = dto.clientTs ? new Date(dto.clientTs) : null;
+    const driftOk = clientNow ? Math.abs(clientNow.getTime() - serverNow.getTime()) <= 3 * 60_000 : true;
+    const now = driftOk && clientNow ? clientNow : serverNow;
 
-    // 2) Kiểm tra trong cửa sổ cho phép (±15’)
-    if (!this.inWindow(ws.date, shift.startTime, shift.endTime, now)) {
+    const shift = ws.shift as any; // { startTime:'HH:mm', endTime:'HH:mm' }
+
+    // 2) Kiểm tra cửa sổ theo loại check
+    const okWindow = this.inWindowByType(
+      ws.date,            // cần là 'YYYY-MM-DD' của ngày BẮT ĐẦU ca
+      shift.startTime,
+      shift.endTime,
+      now,
+      dto.checkType,
+      15, // graceInMin
+      15  // graceOutMin
+    );
+    if (!okWindow) {
       throw new BadRequestException('OUT_OF_SHIFT_WINDOW');
     }
 
     // 3) Verify GEO/NET
     const { geo, net } = await this.rulesSvc.getRules(); // tạm không phân branch
 
-    // GPS
     let gpsOk = true;
     if (geo.length) {
       if (dto.lat == null || dto.lng == null) gpsOk = false;
@@ -81,16 +87,14 @@ export class MobileAttendanceService {
       }
     }
 
-    // Wi-Fi / IP (tuỳ bạn triển khai; mặc định pass nếu chưa cấu hình rule)
     let wifiOk = true;
     if (net.length) {
-      // ví dụ: nếu có CIDR rule -> sẽ so IP (clientIp) với CIDR (chưa cài ở đây)
-      // Có thể bổ sung ipInCidrs(dto.clientIp, net.map(n => n.cidr).filter(Boolean))
+      // TODO: kiểm tra IP/CIDR hoặc SSID/BSSID theo rule
       wifiOk = true;
     }
 
-      if (!gpsOk) return { ok: false, verify: 'FAIL_GPS',  serverTime: now.toISOString() };
-  if (!wifiOk) return { ok: false, verify: 'FAIL_WIFI', serverTime: now.toISOString() };
+    if (!gpsOk)  return { ok: false, verify: 'FAIL_GPS',  serverTime: now.toISOString() };
+    if (!wifiOk) return { ok: false, verify: 'FAIL_WIFI', serverTime: now.toISOString() };
 
     // 4) Upsert Attendance theo (userId, dateISO, shiftId)
     const dateISO = ws.date;
@@ -114,12 +118,12 @@ export class MobileAttendanceService {
       att.checkIn = hhmm;
       att.status = AttendanceStatus.MISSING; // chưa đủ OUT
     } else {
-      if (!att.checkIn) throw new BadRequestException('NOT_CHECKED_IN');
+      if (!att.checkIn)  throw new BadRequestException('NOT_CHECKED_IN');
       if (att.checkOut) throw new BadRequestException('ALREADY_CHECKED_OUT');
       att.checkOut = hhmm;
 
       // Đánh giá ON_TIME / LATE
-      const grace = 0; // phút nới (nếu muốn), để 0 = chặt
+      const grace = 0;
       const toNum = (t: string) => this.hmToNum(t);
       const startN = toNum(shift.startTime) + grace;
       const endN   = toNum(shift.endTime)   - grace;
@@ -132,16 +136,62 @@ export class MobileAttendanceService {
     }
 
     // Dấu vết mobile
-    att.lat      = dto.lat ?? null;
-    att.lng      = dto.lng ?? null;
-    att.accuracy = dto.accuracy ?? null;
-    att.clientTs = dto.clientTs ?? null;
-    att.netType = dto.netType;
-    att.ssid     = dto.ssid ?? null;
-    att.bssid    = dto.bssid ?? null;
-    att.clientIp = dto.clientIp ?? null;
+    att.lat       = dto.lat ?? null;
+    att.lng       = dto.lng ?? null;
+    att.accuracy  = dto.accuracy ?? null;
+    att.clientTs  = dto.clientTs ?? null;
+    att.netType   = dto.netType;
+    att.ssid      = dto.ssid ?? null;
+    att.bssid     = dto.bssid ?? null;
+    att.clientIp  = dto.clientIp ?? null;
 
     await this.attRepo.save(att);
     return { ok: true, verify: 'PASS' as const, serverTime: now.toISOString() };
   }
+
+
+
+
+
+  private makeLocalDate(dateISO: string, hhmm: string, dayOffset = 0) {
+  const [y, m, d] = dateISO.split('-').map(Number);
+  const [hh, mm] = hhmm.split(':').map(Number);
+  return new Date(y, (m - 1), d + dayOffset, hh, mm, 0, 0); // local time
+}
+
+// Ca qua đêm: nếu end <= start thì end là ngày hôm sau
+private getShiftBounds(dateISO: string, startHHmm: string, endHHmm: string) {
+  const start = this.makeLocalDate(dateISO, startHHmm, 0);
+  let end = this.makeLocalDate(dateISO, endHHmm, 0);
+  if (end.getTime() <= start.getTime()) {
+    // qua 00:00
+    end = this.makeLocalDate(dateISO, endHHmm, 1);
+  }
+  return { start, end };
+}
+
+// Cửa sổ cho từng loại check (điều chỉnh tuỳ ý)
+private inWindowByType(
+  dateISO: string,
+  startHHmm: string,
+  endHHmm: string,
+  now: Date,
+  type: 'IN' | 'OUT',
+  graceInMin = 15,
+  graceOutMin = 15
+) {
+  const { start, end } = this.getShiftBounds(dateISO, startHHmm, endHHmm);
+
+  if (type === 'IN') {
+    // cho phép check IN từ (start - graceIn) đến (end) (hoặc start + vài giờ tuỳ policy)
+    const wStart = new Date(start.getTime() - graceInMin * 60_000);
+    const wEnd   = end; // hoặc new Date(start.getTime() + 4 * 60_60_000)
+    return now >= wStart && now <= wEnd;
+  } else {
+    // cho phép check OUT từ (start) đến (end + graceOut)
+    const wStart = start;
+    const wEnd   = new Date(end.getTime() + graceOutMin * 60_000);
+    return now >= wStart && now <= wEnd;
+  }
+}
 }
