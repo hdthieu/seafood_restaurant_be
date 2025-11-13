@@ -1,81 +1,89 @@
-// src/modules/ai/ai.service.ts
-import { Injectable } from "@nestjs/common";
-import { ToolsService, GetSalesSummaryArgs } from "./tools.service";
-import { ollamaChat } from "../../lib/ollma";
+import { Injectable, Logger } from "@nestjs/common";
+import { ToolsService } from "./tools.service";
+import { RagService } from "../rag/rag.service";
+import { LlmGateway } from "./llm.gateway";
 
 type UiMsg = { role: "user" | "assistant"; content: string };
-function isUiMsg(m: any): m is UiMsg {
-  return m && (m.role === "user" || m.role === "assistant") && typeof m.content === "string";
-}
+const isUi = (m: any): m is UiMsg =>
+  m && (m.role === "user" || m.role === "assistant") && typeof m.content === "string";
 
 @Injectable()
 export class AiService {
-  constructor(private readonly tools: ToolsService) {}
+  private readonly logger = new Logger(AiService.name);
 
-  private todayRange() {
-    const now = new Date();
-    const start = new Date(now); start.setHours(0, 0, 0, 0);
-    const end   = new Date(now); end.setHours(23, 59, 59, 999);
-    return { from: start.toISOString(), to: end.toISOString() };
+  constructor(
+    private readonly tools: ToolsService,
+    private readonly rag: RagService,
+    private readonly llm: LlmGateway,
+  ) {}
+
+  private isDataIntent(q: string) {
+    return /(top|best.?selling|bán.*chạy|phổ\s*biến)/i.test(q)
+        || /(bao\s*nhiêu|mấy|số\s*lượng|tổng|đếm|count|doanh\s*thu|revenue|hôm nay|hôm qua|7\s*ngày|theo\s*giờ|theo\s*ngày)/i.test(q)
+        || /(món|menu|order|invoice|order_items?|hóa\s*đơn|đơn\s*hàng|khách|bàn|nhân\s*viên|ingredient|nguyên\s*liệu)/i.test(q);
   }
 
-  private async explainNatural(kind: string, data: any) {
-    const sys = "Bạn là trợ lý vận hành nhà hàng. Trả lời gọn, đúng số liệu. Định dạng tiền 1.234.000 đ.";
-    const usr = `Tóm tắt dữ liệu (${kind}):\n${JSON.stringify(data).slice(0, 6000)}\n- Viết 3–5 câu, nêu chỉ số chính và khuyến nghị.`;
-    const reply = await ollamaChat(
-      [{ role: "system", content: sys }, { role: "user", content: usr }],
-      process.env.OLLAMA_CHAT_MODEL || "llama3.1:8b"
-    );
-    return reply?.trim() || "Không có dữ liệu.";
-  }
+  async route(messages: UiMsg[]) {
+  const question = (messages || []).filter(m => m?.role === "user").pop()?.content?.trim() || "";
+  if (!question) return { role: "assistant", content: "Xin chào 👋" };
 
-  /** Router: DB Q&A / Sales / SOP & general chat bằng Ollama */
-  private async route(cleaned: UiMsg[]) {
-    const { from, to } = this.todayRange();
-    const last = cleaned.at(-1)?.content || "";
-
-    const askSales = /(doanh thu|revenue|hôm nay|hôm qua|7 ngày|hóa đơn)/i.test(last);
-    const askData =
-      /(bao nhiêu|mấy|số lượng|tổng|đếm|count|best.?selling|bán.*chạy|phổ biến|tôm|shrimp|prawn)/i.test(last) ||
-      /(món|món ăn|bàn|khách hàng|hóa đơn|đơn hàng|payments?|nhân\s*viên|employee|staff|nguyên\s*liệu|ingredient)/i.test(last);
-
-    if (askSales) {
-      const input: GetSalesSummaryArgs = {
-        from,
-        to,
-        by: /ngày|7 ngày|week/i.test(last) ? "day" : "hour",
-      };
-      const data = await this.tools.getSalesSummary(input);
-      const text = await this.explainNatural("sales", {
-        by: data.by, kpi: data.kpi, series: data.series?.slice(0, 12),
-      });
-      return { role: "assistant", content: text, data };
+  // 1️⃣ SmartSQL cho câu hỏi dữ liệu
+  if (this.tools.isDataQuestion(question)) {
+    try {
+      const { sql, rows, explain, sources } = await this.tools.runSmartQuery(question);
+      return { role: "assistant", content: explain, data: { sql, rows, sources } };
+    } catch (e: any) {
+      this.logger.warn(`[SmartSQL failed] ${e}`);
+      // nếu lỗi SQL thì vẫn fallback sang Gemini
     }
-
-    if (askData) {
-      try {
-        const { sql, rows, explain } = await this.tools.runSmartQuery(last);
-        return {
-          role: "assistant",
-          content: `${explain}\n\n_SQL chạy:_\n${"```sql"}\n${sql}\n${"```"}`,
-          data: { sql, rows },
-        };
-      } catch (e: any) {
-        return { role: "assistant", content: `Không chạy được truy vấn: ${e?.message || e}` };
-      }
-    }
-
-    // Chat AI bình thường
-    const reply = await ollamaChat(
-      [{ role: "system", content: "Bạn là trợ lý thân thiện, trả lời ngắn gọn và hữu ích." },
-       ...cleaned.map((m) => ({ role: m.role, content: m.content }))],
-      process.env.OLLAMA_CHAT_MODEL || "llama3.1:8b"
-    );
-    return { role: "assistant", content: reply?.trim() || "Mình chưa rõ câu hỏi." };
   }
 
+  // 2️⃣ RAG cho tài liệu nội bộ
+  let usedRag = false;
+  try {
+    const ragResults = await this.rag.query(question, Number(process.env.RAG_TOPK || 4));
+    const threshold = Number(process.env.RAG_SCORE_THRESHOLD || 0.2);
+    if (ragResults.length && (ragResults[0].score ?? 0) >= threshold) {
+      usedRag = true;
+      const ctx = ragResults
+        .map((r, i) => `#${i + 1} (${(r.score ?? 0).toFixed(3)}) ${r.source || ""}\n${r.text}`)
+        .join("\n\n---\n\n");
+      const answer = await this.llm.chat(
+        "Bạn là trợ lý nội bộ nhà hàng. Chỉ dựa vào tài liệu sau để trả lời.",
+        `Câu hỏi: ${question}\n\nTài liệu:\n${ctx}`,
+        28000,
+      );
+      // Nếu RAG không tạo ra câu trả lời thực tế → fallback Gemini
+      if (answer && !/tài liệu|schema|cấu trúc cơ sở dữ liệu/i.test(answer))
+        return { role: "assistant", content: answer };
+    }
+  } catch (e) {
+    this.logger.warn(`[RAG failed] ${e}`);
+  }
+
+  // 3️⃣ Nếu RAG không có thông tin hoặc câu hỏi không liên quan → Gemini Chat tổng quát
+  this.logger.log(`Fallback to Gemini chat: ${question}`);
+  const text = await this.llm.chat(
+  `Bạn là trợ lý AI thân thiện, biết dùng Markdown để trình bày gọn gàng.
+  - Mở đầu câu trả lời bằng lời chào tự nhiên (ví dụ: "Chào bạn! 😊" hoặc "Xin chào 👋").
+  - Khi trả lời, hãy chia ý bằng đoạn, gạch đầu dòng hoặc **in đậm** nếu phù hợp.
+  - Nếu người dùng hỏi về món ăn, hãy gợi ý chi tiết, nhóm theo loại món (món Việt, món Á, món Âu...).
+  - Nếu câu hỏi chung chung (như lễ hội, kiến thức, văn hóa) thì trả lời ngắn gọn, dễ hiểu, có cảm xúc.`,
+  question,
+  30000,
+);
+
+  return {
+    role: "assistant",
+    content: text || (usedRag
+      ? "Tài liệu nội bộ không có thông tin, nhưng mình có thể giúp bạn tìm hiểu thêm nếu bạn muốn!"
+      : "Mình chưa hiểu rõ câu hỏi, bạn nói lại nhé 😊"),
+  };
+}
+
+
+ 
   async chat(uiMessages: UiMsg[], _ctx: { role: "MANAGER" }) {
-    const cleaned = (uiMessages || []).filter(isUiMsg);
-    return this.route(cleaned);
+    return this.route(uiMessages || []);
   }
 }

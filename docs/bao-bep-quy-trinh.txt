@@ -1,0 +1,41 @@
+# QUY TRÌNH BÁO BẾP (SOP – Nhà hàng hải sản)
+
+## 1. Mục đích
+Hướng dẫn nhân viên thu ngân hoặc phục vụ cách chọn món, nhập số lượng và gửi yêu cầu “Báo bếp” đến hệ thống bếp.
+
+Quy trình này giúp đảm bảo món được gửi xuống bếp chính xác, tránh gửi nhầm hoặc gửi trống số lượng.
+
+---
+
+## 2. Quy trình thao tác
+
+### Bước 1: Chọn món
+- Nhân viên chọn món trong danh sách thực đơn (menu_items).
+- Món được thêm vào danh sách đặt tạm (`orderItems`) với:
+  - Trạng thái ban đầu: `PENDING`
+  - Số lượng (`qty`): mặc định là 0
+
+### Bước 2: Nhập số lượng món
+- Nhân viên nhập số lượng món bằng cách:
+  - Gõ trực tiếp vào ô nhập số lượng, **hoặc**
+  - Nhấn nút “+” / “–” để tăng giảm.
+- Mỗi thay đổi sẽ cập nhật `qty` của món tương ứng.
+
+### Bước 3: Kích hoạt nút “Báo bếp”
+- Hệ thống sẽ **kiểm tra tổng số lượng** của tất cả món trong order.
+- Nếu **tất cả qty = 0** → nút “Báo bếp” **bị vô hiệu (disabled)**.
+- Nếu **có ít nhất 1 món có qty > 0** → nút “Báo bếp” **được kích hoạt (enabled)**.
+
+### Bước 4: Gửi yêu cầu “Báo bếp”
+Khi nhân viên nhấn nút:
+- Hệ thống gửi API:  
+  `POST /kitchen/notify`
+- Payload:
+  ```json
+  {
+    "orderId": "<id_hoá_đơn>",
+    "items": [
+      { "menuItemId": "<id_món>", "qty": 2 },
+      { "menuItemId": "<id_món_khác>", "qty": 1 }
+    ]
+  }

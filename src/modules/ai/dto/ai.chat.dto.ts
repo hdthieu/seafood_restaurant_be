@@ -1,32 +1,31 @@
-// src/ai/dto/chat.dto.ts
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 
-export class ChatMessageDto {
-  @ApiProperty({ enum: ['user', 'assistant'], example: 'user' })
-  role: 'user' | 'assistant';
+export class UiMessageDto {
+  @ApiProperty({ enum: ["user", "assistant"] })
+  role!: "user" | "assistant";
 
-  @ApiProperty({ example: 'Cho tôi doanh thu hôm nay theo giờ' })
-  content: string;
+  @ApiProperty()
+  content!: string;
 }
 
 export class ChatRequestDto {
-  @ApiProperty({
-    type: [ChatMessageDto],
-    example: [
-      { role: 'user', content: 'Cho tôi doanh thu hôm nay theo giờ và hóa đơn trung bình' }
-    ]
-  })
-  messages: ChatMessageDto[];
+  @ApiProperty({ type: [UiMessageDto] })
+  messages!: UiMessageDto[];
 }
 
 export class ChatResponseDto {
-  @ApiProperty({ example: 'assistant' })
-  role: string;
+  @ApiProperty({ enum: ["assistant", "user"] })
+  role!: "assistant" | "user";
 
-  // Trường hợp tool: content là JSON string, name là tên tool
-  @ApiProperty({ example: 'Net: 12,500,000 VND; 32 hóa đơn; Avg ticket: 390k ...' })
-  content: string;
+  @ApiProperty()
+  content!: string;
 
-  @ApiProperty({ required: false, example: 'getSalesSummary' })
-  name?: string;
+  // Cho phép trả về SmartSQL ({ rows, sql }) hoặc Sales payload ({ by, series, kpi }) hoặc RAG ({ sources })
+  @ApiPropertyOptional({
+    type: "object",
+    additionalProperties: true,
+    description:
+      "Kết quả mở rộng: { rows, sql } | { by, series, kpi } | { sources }. Tùy theo route Smart-SQL / RAG / Chat.",
+  })
+  data?: any;
 }
