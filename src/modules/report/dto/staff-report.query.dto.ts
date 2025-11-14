@@ -1,7 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { IsArray, IsDateString, IsEnum, IsOptional, IsString, IsUUID } from 'class-validator';
-import { Channel } from 'src/common/enums';
+import { IsArray, IsDateString, IsInt, IsOptional, IsString, IsUUID, Min } from 'class-validator';
 
 export class StaffReportQueryDto {
     @ApiPropertyOptional()
@@ -14,15 +13,10 @@ export class StaffReportQueryDto {
     @IsDateString()
     dateTo?: string;
 
-    @ApiPropertyOptional({ enum: Channel })
-    @IsOptional()
-    @IsEnum(Channel)
-    channel?: Channel;
-
     @ApiPropertyOptional()
     @IsOptional()
     @IsUUID()
-    receiverId?: string; // lọc 1 nhân viên
+    createdBy?: string;
 
     @ApiPropertyOptional()
     @IsOptional()
@@ -45,6 +39,20 @@ export class StaffReportQueryDto {
     @IsArray()
     @Transform(({ value }) => (Array.isArray(value) ? value : typeof value === 'string' ? value.split(',') : undefined))
     categoryIds?: string[];
+
+    @ApiPropertyOptional({ description: 'Trang (>=1)', default: 1 })
+    @IsOptional()
+    @Transform(({ value }) => (value !== undefined ? Number(value) : undefined))
+    @IsInt()
+    @Min(1)
+    page?: number;
+
+    @ApiPropertyOptional({ description: 'Số dòng mỗi trang', default: 10 })
+    @IsOptional()
+    @Transform(({ value }) => (value !== undefined ? Number(value) : undefined))
+    @IsInt()
+    @Min(1)
+    limit?: number;
 
     // @ApiPropertyOptional()
     // @IsOptional()

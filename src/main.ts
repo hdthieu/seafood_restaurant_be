@@ -71,7 +71,14 @@ app.enableCors({
   app.useWebSocketAdapter(new SocketIoAdapter(app)); 
   await app.listen(configurations.port,'0.0.0.0');
   const appUrl = await app.getUrl();
-
+console.log("[LLM BOOT]", {
+  pref: process.env.CHAT_PROVIDER_PREF,
+  hasGeminiKey: !!process.env.GEMINI_API_KEY,
+  hasOpenAIKey: !!process.env.OPENAI_API_KEY,
+  gemModel: process.env.GEMINI_CHAT_MODEL,
+  gemBackups: process.env.GEMINI_CHAT_BACKUPS,
+  openaiModel: process.env.OPENAI_MODEL,
+});
   console.log(`
   =============================================
   ✅ NestJS Application Started Successfully!
