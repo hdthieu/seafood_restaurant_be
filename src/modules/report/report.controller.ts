@@ -11,6 +11,10 @@ import { SalesDailyQueryDto } from './dto/sales-daily.query.dto';
 import { StaffReportQueryDto } from './dto/staff-report.query.dto';
 import { BaseRangeDto } from './dto/base-range.dto';
 import { CashbookDailyQueryDto } from './dto/cashbook-daily.query.dto';
+import { CustomerSalesQueryDto } from './dto/customer-sales.query.dto';
+import { SupplierReportQueryDto } from '@modules/report/dto/supplier-report.query.dto';
+import { ProfitByInvoiceQueryDto, ProfitDailyQueryDto } from './dto/profit.query.dto';
+import { InvoiceDiscountQueryDto } from './dto/invoice-discount.query.dto';
 
 enum RangeKeyEnum {
   today = 'today',
@@ -90,6 +94,64 @@ export class ReportController {
     return this.svc.cancelItemsDaily(q);
   }
 
+  // ================= BÁO CÁO KHÁCH HÀNG ==================
+  // 1) Bán hàng (theo hóa đơn)
+  @Get('customer-sales')
+  @Roles(UserRole.MANAGER)
+  @ApiOperation({ summary: 'Báo cáo bán hàng theo khách (hóa đơn)' })
+  customerSales(@Query() q: CustomerSalesQueryDto) {
+    return this.svc.customerSales(q);
+  }
+
+  // 2) Hàng bán theo khách (gom theo món)
+  // @Get('customer-sales/items')
+  // @Roles(UserRole.MANAGER)
+  // @ApiOperation({ summary: 'Báo cáo hàng bán theo khách (theo món)' })
+  // customerSalesItems(@Query() q: CustomerSalesQueryDto) {
+  //   return this.svc.customerSalesItems(q);
+  // }
+
+  // ================= BÁO CÁO NHÀ CUNG CẤP ==================
+  // 1) Top nhà cung cấp (đã trừ trả hàng)
+  @Get('suppliers/top')
+  @Roles(UserRole.MANAGER)
+  @ApiOperation({ summary: 'Top nhà cung cấp theo giá trị nhập (Phiếu Nhập Ròng)' })
+  suppliersTop(@Query() q: SupplierReportQueryDto) {
+    return this.svc.suppliersTop(q);
+  }
+
+  // 2) Nhập hàng theo nhà cung cấp (gộp NCC và chi tiết phiếu)
+  @Get('purchases/by-supplier')
+  @Roles(UserRole.MANAGER)
+  @ApiOperation({ summary: 'Báo cáo nhập hàng theo nhà cung cấp (Phiếu Nhập)' })
+  purchasesBySupplier(@Query() q: SupplierReportQueryDto) {
+    return this.svc.purchasesBySupplier(q);
+  }
+
+  // 3) Hàng nhập theo NCC (theo mặt hàng)
+  @Get('purchases/by-supplier/items')
+  @Roles(UserRole.MANAGER)
+  @ApiOperation({ summary: 'Báo cáo mặt hàng nhập theo nhà cung cấp (Phiếu Nhập)' })
+  purchasesBySupplierItems(@Query() q: SupplierReportQueryDto) {
+    return this.svc.purchasesBySupplierItems(q);
+  }
+
+  // 4) Trả hàng theo nhà cung cấp (chi tiết phiếu trả)
+  @Get('purchase-returns/by-supplier')
+  @Roles(UserRole.MANAGER)
+  @ApiOperation({ summary: 'Báo cáo trả hàng theo nhà cung cấp (chi tiết phiếu trả)' })
+  purchaseReturnsBySupplier(@Query() q: SupplierReportQueryDto) {
+    return this.svc.purchaseReturnsBySupplier(q);
+  }
+
+  // 5) Mặt hàng trả theo nhà cung cấp (theo mặt hàng)
+  @Get('purchase-returns/by-supplier/items')
+  @Roles(UserRole.MANAGER)
+  @ApiOperation({ summary: 'Báo cáo mặt hàng trả hàng theo nhà cung cấp (Phiếu trả)' })
+  purchaseReturnItemsBySupplier(@Query() q: SupplierReportQueryDto) {
+    return this.svc.purchaseReturnItemsBySupplier(q);
+  }
+
   // ================= BÁO CÁO BÁN HÀNG THEO NHÂN VIÊN ==================
   /* ====== 1) BÁN HÀNG ====== */
   @Get('sales-by-staff')
@@ -102,6 +164,32 @@ export class ReportController {
   salesByStaffItems(@Query() q: StaffReportQueryDto) {
     return this.svc.staffSalesItems(q);
   }
+
+
+  /* ====== 2) BÁO CÁO HÀNG BÁN HÀNG (MỐI QUAN TÂM: LỢI NHUẬN) ====== */
+  // LỢI NHUẬN
+  @Get('profit/daily')
+  @Roles(UserRole.MANAGER)
+  @ApiOperation({ summary: 'Biểu đồ lợi nhuận theo ngày' })
+  profitDaily(@Query() q: ProfitDailyQueryDto) {
+    return this.svc.profitDaily(q);
+  }
+
+  @Get('profit/by-invoice')
+  @Roles(UserRole.MANAGER)
+  @ApiOperation({ summary: 'Bảng lợi nhuận theo hóa đơn' })
+  profitByInvoice(@Query() q: ProfitByInvoiceQueryDto) {
+    return this.svc.profitByInvoice(q);
+  }
+
+  // GIẢM GIÁ HÓA ĐƠN
+  @Get('invoice-discounts')
+  @Roles(UserRole.MANAGER)
+  @ApiOperation({ summary: 'Báo cáo tổng hợp giảm giá hóa đơn' })
+  invoiceDiscounts(@Query() q: InvoiceDiscountQueryDto) {
+    return this.svc.invoiceDiscounts(q);
+  }
+
   /* ====== 3) BÁO CÁO LỢI NHUẬN THEO NHÂN VIÊN ====== */
   // @Get('profit-by-staff')
   // profitByStaff(@Query() q: StaffReportQueryDto) {
