@@ -14,6 +14,8 @@ import { DataSource } from 'typeorm';
 import { UpdateMenuItemDto } from './dto/update-menuitem.dto';
 import { PageMeta } from 'src/common/common_dto/paginated';
 import { PromotionsService } from '@modules/promotions/promotions.service';
+import { InventoryItem } from '@modules/inventoryitems/entities/inventoryitem.entity';
+import { UomConversion } from '@modules/uomconversion/entities/uomconversion.entity';
 
 @Injectable()
 export class MenuitemsService {
@@ -21,10 +23,24 @@ export class MenuitemsService {
     @InjectRepository(MenuItem) private readonly menuItemRepo: Repository<MenuItem>,
     @InjectRepository(Category) private readonly CategoryRepo: Repository<Category>,
     @InjectRepository(Ingredient) private readonly IngredientRepo: Repository<Ingredient>,
+    @InjectRepository(InventoryItem) private readonly invRepo: Repository<InventoryItem>,
+    @InjectRepository(UomConversion) private readonly convRepo: Repository<UomConversion>,
     private readonly configS3Service: ConfigS3Service,
     private readonly dataSource: DataSource,
     private readonly promosSvc: PromotionsService,
   ) { }
+
+  private async toBaseQty(inventoryItemId: string, qty: number, uomCode?: string): Promise<{ baseQty: number; selectedUomCode?: string | null; selectedQty?: number | null; }> {
+    const inv = await this.invRepo.findOne({ where: { id: inventoryItemId }, relations: ['baseUom'] });
+    if (!inv) throw new ResponseException('Nguyên liệu không tồn tại', 400);
+    const baseCode = inv.baseUom.code;
+    if (!uomCode || uomCode === baseCode) {
+      return { baseQty: qty, selectedUomCode: uomCode ?? baseCode, selectedQty: qty };
+    }
+    const conv = await this.convRepo.findOne({ where: { from: { code: uomCode }, to: { code: baseCode } }, relations: ['from', 'to'] });
+    if (!conv) throw new ResponseException(`Chưa cấu hình quy đổi UOM từ ${uomCode} -> ${baseCode}`, 400);
+    return { baseQty: qty * Number(conv.factor), selectedUomCode: uomCode, selectedQty: qty };
+  }
 
   async createMenuItem(dto: CreateMenuItemDto, file: Express.Multer.File) {
     const category = await this.CategoryRepo.findOneBy({ id: dto.categoryId });
@@ -42,13 +58,19 @@ export class MenuitemsService {
       isAvailable: true,
     }));
 
-    const ingredients = dto.ingredients.map(i => this.IngredientRepo.create({
-      menuItem: savedItem,
-      inventoryItem: { id: i.inventoryItemId },
-      quantity: i.quantity,
-      note: i.note,
-    }));
-    await this.IngredientRepo.save(ingredients);
+    const ingredientsToSave: Ingredient[] = [];
+    for (const i of dto.ingredients) {
+      const { baseQty, selectedUomCode, selectedQty } = await this.toBaseQty(i.inventoryItemId, Number(i.quantity) || 0, i.uomCode);
+      ingredientsToSave.push(this.IngredientRepo.create({
+        menuItem: savedItem,
+        inventoryItem: { id: i.inventoryItemId },
+        quantity: baseQty,
+        selectedUom: selectedUomCode ? ({ code: selectedUomCode } as any) : null,
+        selectedQty: selectedQty ?? null,
+        note: i.note,
+      }));
+    }
+    await this.IngredientRepo.save(ingredientsToSave);
 
     const fullItem = await this.menuItemRepo.findOne({
       where: { id: savedItem.id },
@@ -134,7 +156,7 @@ export class MenuitemsService {
       where: { id },
       relations: {
         category: true,
-        ingredients: { inventoryItem: true }, // <-- thêm
+        ingredients: { inventoryItem: true, selectedUom: true }, // <-- thêm
         components: { item: true },           // nếu có combo
       },
     });
@@ -177,21 +199,23 @@ export class MenuitemsService {
           [existed.id],
         );
 
-        // 3.2 DEDUPE theo inventoryItemId (cộng dồn quantity, giữ note đầu tiên)
-        const byInv = new Map<string, { quantity: number; note?: string }>();
+        // 3.2 Chuẩn hoá về base UOM và DEDUPE theo inventoryItemId (cộng dồn baseQty, giữ note đầu tiên)
+        const byInv = new Map<string, { baseQty: number; note?: string }>();
         for (const i of dto.ingredients) {
           if (!i?.inventoryItemId) continue;
-          const q = Number(i.quantity) || 0;
+          const norm = await this.toBaseQty(i.inventoryItemId, Number(i.quantity) || 0, (i as any).uomCode);
           const cur = byInv.get(i.inventoryItemId);
           byInv.set(i.inventoryItemId, {
-            quantity: (cur?.quantity ?? 0) + q,
+            baseQty: (cur?.baseQty ?? 0) + norm.baseQty,
             note: cur?.note ?? i.note,
           });
         }
         const values = Array.from(byInv.entries()).map(([inventoryItemId, v]) => ({
           menuItem: { id: existed.id } as any,
           inventoryItem: { id: inventoryItemId } as any,
-          quantity: v.quantity,
+          quantity: v.baseQty,
+          selectedUom: null as any, // khi gộp nhiều dòng với đơn vị khác nhau, không lưu đơn vị người dùng để tránh sai lệch
+          selectedQty: null as any,
           note: v.note,
         }));
 
