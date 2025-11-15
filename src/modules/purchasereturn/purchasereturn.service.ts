@@ -136,7 +136,7 @@ export class PurchasereturnService {
           receipt: null,
           receiptItem: null,
           item: inv,
-          quantity: qty,
+          quantity: qty,               // đơn vị user chọn
           conversionToBase: factor,
           baseQty,
           reason: dto.reason ?? undefined,
@@ -147,7 +147,11 @@ export class PurchasereturnService {
           refundAmount: 0,
           inventoryTx: savedTx,
           performedBy: user ?? undefined,
+
+          // ⭐ NEW: lưu đơn vị user chọn
+          uom: { code: receivedUomCode } as any,
         } as any) as unknown as PurchaseReturnLog;
+
         createdLogs.push(log);
       }
 
@@ -161,6 +165,7 @@ export class PurchasereturnService {
         l.refundAmount = l.lineTotalAfterDiscount;
       });
       await em.getRepository(PurchaseReturnLog).save(createdLogs);
+
       const totalAfterDiscount = this.roundMoney(totalGoods - discountAmount);
       const paidInput = this.roundMoney(Number((dto as any).paidAmount ?? 0));
       if (paidInput < 0) throw new ResponseException(null, 400, 'INVALID_PAID_AMOUNT');
@@ -191,6 +196,7 @@ export class PurchasereturnService {
       };
     });
   }
+
 
   async createDraft(userId: string, dto: StandaloneReturnDto) {
     if (!dto.items?.length) throw new ResponseException(null, 400, 'RETURN_ITEM_LIST_EMPTY');
@@ -270,9 +276,14 @@ export class PurchasereturnService {
           refundAmount: 0,
           inventoryTx: null,
           performedBy: user ?? undefined,
+
+          // ⭐ NEW: lưu đơn vị user chọn
+          uom: { code: receivedUomCode } as any,
         } as any) as unknown as PurchaseReturnLog;
+
         createdLogs.push(log);
       }
+
       const discountAmount = this.computeDiscountFromType(totalGoods, (dto as any).discountType, (dto as any).discountValue);
       const allocs = this.allocateDiscount(createdLogs.map(l => this.roundMoney(l.lineTotalBeforeDiscount)), discountAmount);
       createdLogs.forEach((l, i) => {
@@ -283,6 +294,7 @@ export class PurchasereturnService {
       });
 
       await em.getRepository(PurchaseReturnLog).save(createdLogs);
+
       const totalAfterDiscount = this.roundMoney(totalGoods - discountAmount);
       savedHeader.totalGoods = totalGoods;
       savedHeader.discount = discountAmount;
@@ -314,6 +326,7 @@ export class PurchasereturnService {
       };
     });
   }
+
 
   async markRefunded(id: string) {
     const pr = await this.prRepo.findOne({ where: { id } });
@@ -564,8 +577,6 @@ export class PurchasereturnService {
             const unitPrice = this.roundMoney(Number(line.unitPrice ?? 0));
             const lineTotalBeforeDiscount = this.roundMoney(unitPrice * qty);
             totalGoods = this.roundMoney(totalGoods + lineTotalBeforeDiscount);
-
-            // ✅ dùng prTx (managed by em) để set quan hệ
             const log = em.getRepository(PurchaseReturnLog).create({
               purchaseReturn: prTx,
               receipt: null,
@@ -582,10 +593,11 @@ export class PurchasereturnService {
               refundAmount: 0,
               inventoryTx: null,
               performedBy: user ?? undefined,
+              uom: { code: receivedUomCode } as any,
             } as any) as unknown as PurchaseReturnLog;
+
             createdLogs.push(log);
           }
-
           const discountForAlloc = (dto as any).discountType !== undefined || (dto as any).discountValue !== undefined
             ? this.computeDiscountFromType(totalGoods, (dto as any).discountType, (dto as any).discountValue)
             : this.roundMoney(prTx.discount ?? 0);

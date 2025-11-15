@@ -8,9 +8,11 @@ import { Ingredient } from '../ingredient/entities/ingredient.entity';
 import { ConfigS3Module } from 'src/common/AWS/config-s3/config-s3.module';
 import { MenuComboItem } from '@modules/menucomboitem/entities/menucomboitem.entity';
 import { PromotionsModule } from '@modules/promotions/promotions.module';
+import { UomConversion } from '@modules/uomconversion/entities/uomconversion.entity';
+import { InventoryItem } from '@modules/inventoryitems/entities/inventoryitem.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([MenuItem, Category, Ingredient, MenuComboItem]), ConfigS3Module, PromotionsModule],
+  imports: [TypeOrmModule.forFeature([MenuItem, Category, Ingredient, MenuComboItem, UomConversion, InventoryItem]), ConfigS3Module, PromotionsModule],
   controllers: [MenuitemsController],
   providers: [MenuitemsService],
 })

@@ -14,6 +14,11 @@ export class IngredientDto {
   @IsNumber() @Min(0)
   quantity: number;
 
+  @ApiPropertyOptional({ example: 'KG', description: 'Đơn vị nhập số lượng (nếu bỏ trống mặc định là base UOM của nguyên liệu)' })
+  @IsOptional()
+  @IsString()
+  uomCode?: string;
+
   @ApiPropertyOptional({ example: 'Tươi' })
   @IsString() @IsOptional()
   note?: string;
@@ -41,32 +46,22 @@ export class CreateMenuItemDto {
   @IsUUID()
   categoryId: string;
 
-  // ✅ Nhận array<object> hoặc string JSON -> ép về array<object>
   @ApiProperty({
     type: [IngredientDto],
     example: [
-      { inventoryItemId: 'a1b2c3d4-e5f6-7890-1234-567890abcd', quantity: 0.5, note: 'Tươi' },
-      { inventoryItemId: 'b2c3d4e5-f6a1-7890-1234-567890abcd', quantity: 1 }
+      {
+        inventoryItemId: 'a1b2c3d4-e5f6-7890-1234-567890abcd',
+        quantity: 0.5,
+        uomCode: 'KG',
+        note: 'Tôm sú tươi sống'
+      },
+      {
+        inventoryItemId: 'b2c3d4e5-f6a1-7890-1234-567890abcd',
+        quantity: 1,
+        uomCode: 'CAN'
+      }
     ],
   })
-  @Transform(({ value }) => {
-    // nếu Swagger gửi string -> parse
-    if (typeof value === 'string') {
-      try { value = JSON.parse(value); } catch { /* giữ nguyên để validator báo lỗi */ }
-    }
-    // nếu gửi object đơn -> bọc thành mảng
-    if (value && typeof value === 'object' && !Array.isArray(value)) {
-      if ('inventoryItemId' in value || 'quantity' in value) return [value];
-      // dạng indexed { "0": {...}, "1": {...} }
-      const keys = Object.keys(value);
-      if (keys.every(k => /^\d+$/.test(k))) {
-        return keys.sort((a,b) => +a - +b).map(k => value[k]);
-      }
-    }
-    return value;
-  })
-  @IsArray({ message: 'ingredients must be an array' })
-  @ValidateNested({ each: true })
-  @Type(() => IngredientDto)
   ingredients: IngredientDto[];
+
 }

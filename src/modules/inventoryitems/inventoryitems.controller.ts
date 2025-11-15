@@ -6,6 +6,8 @@ import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
 import { ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { ListInventoryItemsQueryDto } from './dto/list-inventory-items.query.dto';
 import { ListIngredientsDto } from './dto/list-ingredients.dto';
+import { Roles } from 'src/common/decorators/roles.decorator';
+import { UserRole } from 'src/common/enums';
 
 @Controller('inventoryitems')
 @ApiBearerAuth()
@@ -13,12 +15,13 @@ export class InventoryitemsController {
   constructor(private readonly inventoryitemsService: InventoryitemsService) { }
 
   // // this endpoint create new inventory item
-  // @Post('/stockin-ingredients')
-  // @UseGuards(JwtAuthGuard)
-  // @ApiOperation({ summary: 'Stock In Ingredients [By MANAGEMENT]' })
-  // async create(@Body() dto: CreateInventoryitemDto) {
-  //   return this.inventoryitemsService.create(dto);
-  // }
+  @Post('/create')
+  @UseGuards(JwtAuthGuard)
+  @Roles(UserRole.MANAGER)
+  @ApiOperation({ summary: 'Create a new inventory item (ingredient)' })
+  async create(@Body() dto: CreateInventoryitemDto) {
+    return this.inventoryitemsService.create(dto);
+  }
 
   @Get('/list-ingredients')
   @UseGuards(JwtAuthGuard)
