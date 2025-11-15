@@ -10,7 +10,7 @@ import { Invoice } from '@modules/invoice/entities/invoice.entity';
 import { PurchaseReceipt } from '@modules/purchasereceipt/entities/purchasereceipt.entity'; // kiểm tra lại path
 import { CashbookType, CounterpartyGroup } from 'src/common/enums';
 import { CashOtherParty } from './cash_other_party';
-
+import { User } from '@modules/user/entities/user.entity';
 @Entity('cashbook_entries')
 @Unique(['code'])
 @Index(['date'])
@@ -71,4 +71,8 @@ export class CashbookEntry {
 
     @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' })
     updatedAt: Date;
+
+    @ManyToOne(() => User, { nullable: true, eager: true })
+  @JoinColumn({ name: 'staff_id' })
+  staff?: User | null;
 }

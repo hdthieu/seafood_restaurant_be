@@ -42,16 +42,19 @@ const fileExists = (p: string) => {
 };
 
 function buildPatterns(cliArgs: string[]): string[] {
-  if (cliArgs?.length) return cliArgs.map((a) => path.resolve(process.cwd(), a));
-  const roots = Array.from(new Set([process.cwd(), path.resolve(__dirname, "../../"), path.resolve(__dirname, "../")]));
-  const baseRoots = roots.filter((r) => dirExists(path.join(r, "docs"))) || [process.cwd()];
-  const patterns: string[] = [];
-  for (const r of baseRoots) {
-    patterns.push(path.join(r, "docs/**/*.sql").replace(/\\/g, "/"));
-    patterns.push(path.join(r, "docs/**/*.{md,txt}").replace(/\\/g, "/"));
+  if (cliArgs?.length) {
+    return cliArgs.map((a) => path.resolve(process.cwd(), a));
   }
-  return patterns;
+
+  const root = process.cwd();
+
+  return [
+    path.join(root, "docs/**/*.sql").replace(/\\/g, "/"),
+    path.join(root, "docs/**/*.txt").replace(/\\/g, "/"),
+    path.join(root, "docs/**/*.md").replace(/\\/g, "/"),
+  ];
 }
+
 
 async function readTargets(cliArgs: string[]) {
   const patterns = buildPatterns(cliArgs);
@@ -72,27 +75,33 @@ async function run() {
   console.log("[RAG-Ingest] Found", files.length, "files");
   if (!files.length) console.log("👉 Ví dụ: node dist/scripts/rag.ingest.js ./docs/schema.sql ./docs/*.md");
 
-  for (const f of files) {
-    const ext = path.extname(f).toLowerCase();
-    if (![".sql", ".md", ".txt"].includes(ext)) continue;
-    const raw = await fs.readFile(f, "utf8");
-    const chunks = splitText(raw, 1600);
-    for (let i = 0; i < chunks.length; i++) {
-      await rag.upsertChunk({
-       id: randomUUID(),     
-        text: chunks[i],
-        meta: {
-          source: path.basename(f),
-          absPath: f,
-          index: i,
-          ext,
-          category: /sop|policy|quy[-\s]?trinh|faq/i.test(path.basename(f)) ? "SOP" : "DOC",
-        },
-      });
+ for (const f of files) {
+  const ext = path.extname(f).toLowerCase();
+  const raw = await fs.readFile(f, "utf8");
+  const chunks = splitText(raw, 1600);
+
+  const isSchema = ext === ".sql";
+  const isDoc = ext === ".txt" || ext === ".md";
+
+  for (let i = 0; i < chunks.length; i++) {
+    const meta = { source: path.basename(f), absPath: f, index: i };
+
+    if (isSchema) {
+      console.log("📘 schema →", f);
+      await rag.upsertSchemaChunk({ id: randomUUID(), text: chunks[i], meta });
+    } else if (isDoc) {
+      console.log("📄 docs →", f);
+      await rag.upsertDocChunk({ id: randomUUID(), text: chunks[i], meta });
+    } else {
+      console.log("⏭ skip:", f);
     }
   }
+}
+
+
   await app.close();
 }
+
 run().catch((e) => {
   console.error(e);
   process.exit(1);

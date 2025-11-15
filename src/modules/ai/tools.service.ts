@@ -46,21 +46,22 @@ export class ToolsService {
   async getSalesSummary(args: GetSalesSummaryArgs) {
     const by = args.by ?? "hour";
     const bucket = by === "hour" ? "date_trunc('hour', i.created_at)" : "date_trunc('day', i.created_at)";
-    const series = await this.ds.query(
-      `
-      SELECT ${bucket} AS bucket,
-             COUNT(*) AS invoices,
-             COALESCE(SUM(COALESCE(i.final_amount, i.total_amount)), 0) AS gross_amount,
-             COALESCE(SUM(i.discount_total), 0) AS discount_amount,
-             COALESCE(SUM(COALESCE(i.final_amount, i.total_amount) - i.discount_total), 0) AS net_amount
-      FROM invoices i
-      WHERE ${bucket} BETWEEN $1 AND $2
-        AND i.status IN ('PAID','UNPAID','PARTIAL')
-      GROUP BY 1
-      ORDER BY 1 ASC
-      `,
-      [args.from, args.to],
-    );
+   const series = await this.ds.query(
+  `
+  SELECT ${bucket} AS bucket,
+         COUNT(*) AS invoices,
+         COALESCE(SUM(COALESCE(i.final_amount, i.total_amount)), 0) AS gross_amount,
+         COALESCE(SUM(i.discount_total), 0) AS discount_amount,
+         COALESCE(SUM(COALESCE(i.final_amount, i.total_amount) - i.discount_total), 0) AS net_amount
+  FROM invoices i
+  WHERE ${bucket} BETWEEN $1 AND $2
+    AND i.status IN ('PAID','UNPAID','PARTIAL')
+  GROUP BY 1
+  ORDER BY 1 ASC
+  `,
+  [args.from, args.to],
+);
+
     const kpi = await this.ds.query(
       `
       SELECT COUNT(*) AS invoices,

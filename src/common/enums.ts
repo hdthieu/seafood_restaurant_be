@@ -220,3 +220,26 @@ export enum PurchaseReturnStatus {
   REFUNDED = 'REFUNDED',
   CANCELLED = 'CANCELLED',
 }
+
+// salary 
+// src/common/enums.ts
+export enum SalaryType {
+  FIXED = 'FIXED',              // Cố định / kỳ
+  PER_SHIFT = 'PER_SHIFT',      // Theo ca
+  PER_HOUR = 'PER_HOUR',        // Theo giờ
+  PER_STANDARD_DAY = 'PER_STANDARD_DAY', // Theo ngày công chuẩn
+}
+
+export enum PayrollStatus {
+  DRAFT = 'DRAFT',        // Đang tạo
+  TEMP = 'TEMP',          // Tạm tính
+  CLOSED = 'CLOSED',      // Đã chốt lương
+  PAID = 'PAID',          // Đã thanh toán hết
+}
+
+export enum PayrollSlipStatus {
+  DRAFT = 'DRAFT',
+  CLOSED = 'CLOSED',
+  PARTIALLY_PAID = 'PARTIALLY_PAID',
+  PAID = 'PAID',
+}
