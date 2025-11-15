@@ -11,6 +11,11 @@ class UpdateIngredientInput {
   @IsNumber()
   quantity!: number;
 
+  @ApiPropertyOptional({ description: 'Đơn vị của quantity (mặc định là base UOM của nguyên liệu)' })
+  @IsOptional()
+  @IsString()
+  uomCode?: string;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
@@ -22,7 +27,7 @@ export class UpdateMenuItemDto {
   @ApiPropertyOptional() @IsOptional() @IsNumber() price?: number;
   @ApiPropertyOptional() @IsOptional() @IsString() description?: string;
   @ApiPropertyOptional() @IsOptional() @IsUUID() categoryId?: string;
-  @ApiPropertyOptional({ enum: ['true','false'] })
+  @ApiPropertyOptional({ enum: ['true', 'false'] })
   @IsOptional() @IsBooleanString()
   isAvailable?: string;
 
@@ -39,6 +44,6 @@ export class UpdateMenuItemDto {
     return value;
   })
   @IsArray() @ValidateNested({ each: true })
-    @Type(() => UpdateIngredientInput) 
+  @Type(() => UpdateIngredientInput)
   ingredients?: UpdateIngredientInput[];
 }
