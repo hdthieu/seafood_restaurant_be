@@ -99,81 +99,90 @@ private async tryGeminiOnce(
 
   // -- CHAT ------------------------------------------------------------------
 
-  async chat(system: string, user: string, timeoutMs = 25000): Promise<string> {
-    if (this.provider === "google" || this.provider === "gemini") {
-      const apiKey = process.env.GEMINI_API_KEY!;
-      const candidates = this.buildDesiredCandidates();
+ async chat(system: string, user: string, timeoutMs = 25000): Promise<string> {
+  // Nếu dùng Gemini
+  if (this.provider === "google" || this.provider === "gemini") {
+    const apiKey = process.env.GEMINI_API_KEY!;
+    const candidates = this.buildDesiredCandidates();
 
-      const body = {
-        contents: [{ role: "user", parts: [{ text: `SYSTEM:\n${system}\n\nUSER:\n${user}` }] }],
-      };
+  const mergedPrompt =
+  system ? `System:\n${system}\n\nUser:\n${user}` : user;
 
-      const ctrl = new AbortController();
-      const to = setTimeout(() => ctrl.abort(), timeoutMs);
+const body = {
+  contents: [
+    {
+      role: "user",
+      parts: [{ text: mergedPrompt }],
+    },
+  ],
+};
 
-      try {
-        // 1) lấy danh sách model hợp lệ ở v1 và v1beta (nếu một bên lỗi vẫn tiếp tục bên kia)
-        let availV1: string[] = [];
-        let availBeta: string[] = [];
-        try { availV1 = await this.listGeminiModels("v1", apiKey); } catch {}
-        try { availBeta = await this.listGeminiModels("v1beta", apiKey); } catch {}
 
-        // 2) ưu tiên thử ở v1 trước, rồi mới đến v1beta
-        const plan: Array<{ ver: "v1" | "v1beta"; list: string[] }> = [
-          { ver: "v1",     list: availV1.length ? candidates.filter(c => availV1.includes(c)) : candidates },
-          { ver: "v1beta", list: availBeta.length ? candidates.filter(c => availBeta.includes(c)) : candidates },
-        ];
 
-        let lastErr: any = null;
-        for (const step of plan) {
-          for (const model of step.list) {
-            try {
-              const text = await this.tryGeminiOnce(step.ver, model, apiKey, body, ctrl.signal);
-              return text || "";
-            } catch (e: any) {
-             if (isAbort(e)) {
-    // log nhẹ rồi cho phép FALLBACK sang OpenAI hoặc model khác
-    lastErr = new Error(`Gemini timeout ${timeoutMs}ms at ${step.ver}/${model}`);
-    continue;
-  }
-  if ((e as any)?._status === 404) { lastErr = e; continue; }
-  lastErr = e; // thử model khác tiếp
-                continue;
-              
-              // các lỗi khác vẫn thử tiếp model khác
+    const ctrl = new AbortController();
+    const to = setTimeout(() => ctrl.abort(), timeoutMs);
+
+    try {
+      // lấy danh sách model
+      let availV1: string[] = [];
+      let availBeta: string[] = [];
+      try { availV1 = await this.listGeminiModels("v1", apiKey); } catch {}
+      try { availBeta = await this.listGeminiModels("v1beta", apiKey); } catch {}
+
+      const plan: Array<{ ver: "v1" | "v1beta"; list: string[] }> = [
+        { ver: "v1",     list: availV1.length ? candidates.filter(c => availV1.includes(c)) : candidates },
+        { ver: "v1beta", list: availBeta.length ? candidates.filter(c => availBeta.includes(c)) : candidates },
+      ];
+
+      let lastErr: any = null;
+
+      for (const step of plan) {
+        for (const model of step.list) {
+          try {
+            const text = await this.tryGeminiOnce(step.ver, model, apiKey, body, ctrl.signal);
+            return text || "";
+          } catch (e: any) {
+            if (isAbort(e)) {
+              lastErr = new Error(`Gemini timeout ${timeoutMs}ms at ${step.ver}/${model}`);
+              continue;
             }
+            if ((e as any)?._status === 404) { lastErr = e; continue; }
+            lastErr = e;
+            continue;
           }
         }
-
-        // Hết đường → ném lỗi chẩn đoán
-        const diag = `Desired=[${candidates.join(", ")}] | v1=[${availV1.join(", ")}] | v1beta=[${availBeta.join(", ")}]`;
-        throw new Error(`No Gemini model succeeded. ${diag}. lastErr=${lastErr?.message || lastErr}`);
-      } finally {
-        clearTimeout(to);
       }
-    }
 
-    // --- OpenAI fallback ---
-    const resp = await this.openai.chat.completions.create(
-      {
-        model: process.env.OPENAI_CHAT_MODEL || process.env.OPENAI_MODEL || "gpt-4o-mini",
-        temperature: 0.2,
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: user },
-        ],
-      },
-      { timeout: timeoutMs },
-    );
-    return resp.choices?.[0]?.message?.content?.trim() || "";
+      throw new Error(
+        `No Gemini model succeeded. lastErr=${lastErr?.message || lastErr}`
+      );
+    } finally {
+      clearTimeout(to);
+    }
   }
+
+  // Fallback OpenAI
+  const resp = await this.openai.chat.completions.create(
+    {
+      model: process.env.OPENAI_CHAT_MODEL || process.env.OPENAI_MODEL || "gpt-4o-mini",
+      temperature: 0.2,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+    },
+    { timeout: timeoutMs }
+  );
+  return resp.choices?.[0]?.message?.content?.trim() || "";
+}
+
 
   /** Luôn trả number[] hoặc number[][] (batch) */
  // LlmGateway.embed — bản đã sửa, gọn & đúng kiểu trả về của Gemini
 async embed(input: string | string[]): Promise<number[] | number[][]> {
   if ((this.provider === "google") || (this.provider === "gemini")) {
     const apiKey = process.env.GEMINI_API_KEY!;
-    const model  = process.env.GEMINI_EMBED_MODEL || "text-embedding-004";
+    const model  = process.env.OPENAI_EMBED_MODE || "text-embedding-004";
     const isBatch = Array.isArray(input);
 
     // Kiểu trả về an toàn cho TS

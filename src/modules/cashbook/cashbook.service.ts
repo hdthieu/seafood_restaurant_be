@@ -265,7 +265,7 @@ export class CashbookService {
       .leftJoinAndSelect('e.purchaseReceipt', 'purchaseReceipt')
       .leftJoinAndSelect('e.customer', 'customer')
       .leftJoinAndSelect('e.supplier', 'supplier')
-
+      .leftJoinAndSelect('e.staff', 'staff')
       .leftJoinAndSelect('e.cashOtherParty', 'other');
 
     if (q.q?.trim()) {
@@ -330,8 +330,11 @@ export class CashbookService {
         .leftJoin('e.customer', 'customer')
         .leftJoin('e.supplier', 'supplier')
         .leftJoin('e.cashOtherParty', 'other')
+          .leftJoin('e.staff', 'staff')
         .select(`COALESCE(SUM(CASE WHEN e.type = 'RECEIPT' THEN e.amount ELSE -e.amount END), 0)`, 'balance')
-        .where('e.date < :from', { from });
+  
+        .where('e.date < :from', { from })
+        
 
       // apply same filters as list
       if (q.q?.trim()) {
@@ -341,7 +344,10 @@ export class CashbookService {
             .orWhere('LOWER(e.sourceCode) LIKE LOWER(:s)', { s: `%${s}%` })
             .orWhere('LOWER(customer.name) LIKE LOWER(:s)', { s: `%${s}%` })
             .orWhere('LOWER(supplier.name) LIKE LOWER(:s)', { s: `%${s}%` })
-            .orWhere('LOWER(other.name) LIKE LOWER(:s)', { s: `%${s}%` });
+            .orWhere('LOWER(other.name) LIKE LOWER(:s)', { s: `%${s}%` })
+            .orWhere('LOWER(staff.profile.fullName) LIKE LOWER(:s)', {
+              s: `%${s}%`,
+            }); 
         }));
       }
       if (q.type) openQ.andWhere('e.type = :type', { type: q.type });
