@@ -61,13 +61,14 @@ export class SuppliergroupController {
   }
 
   // Delete với tuỳ chọn chuyển nhóm
-  // @Delete('/:id')
-  // @Roles(UserRole.MANAGER)
-  // @ApiOperation({
-  //   summary:
-  //     'Delete Supplier Group. Nếu nhóm còn supplier, cần reassignToId để chuyển supplier trước khi xoá',
-  // })
-  // remove(@Param('id') id: string, @Body() body: DeleteSupplierGroupDto) {
-  //   return this.suppliergroupService.remove(id, body?.reassignToId);
-  // }
+  @Delete('/:id')
+  @Roles(UserRole.MANAGER)
+  @ApiOperation({
+    summary:
+      'Delete Supplier Group. Nếu nhóm còn supplier, cần reassignToId để chuyển supplier trước khi xoá',
+  })
+  remove(@Param('id') id: string) {
+    return this.suppliergroupService.remove(id);
+  }
+
 }

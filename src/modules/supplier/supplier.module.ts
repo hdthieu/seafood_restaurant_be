@@ -3,11 +3,12 @@ import { SupplierService } from './supplier.service';
 import { SupplierController } from './supplier.controller';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Supplier } from './entities/supplier.entity';
-import { SuppliergroupModule } from '@modules/suppliergroup/suppliergroup.module';
 import { SupplierGroup } from '@modules/suppliergroup/entities/suppliergroup.entity';
+import { PurchaseReturn } from '@modules/purchasereturn/entities/purchasereturn.entity';
+import { PurchaseReceipt } from '@modules/purchasereceipt/entities/purchasereceipt.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Supplier, SupplierGroup])],
+  imports: [TypeOrmModule.forFeature([Supplier, SupplierGroup, PurchaseReceipt, PurchaseReturn])],
   controllers: [SupplierController],
   providers: [SupplierService],
   exports: [SupplierService],
