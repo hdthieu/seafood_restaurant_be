@@ -9,6 +9,8 @@ import { SupplierStatus } from 'src/common/enums';
 import { QuerySupplierDto } from './dto/query-supplier.dto';
 import { SupplierGroup } from '@modules/suppliergroup/entities/suppliergroup.entity';
 import { PageMeta } from 'src/common/common_dto/paginated';
+import { PurchaseReceipt } from '@modules/purchasereceipt/entities/purchasereceipt.entity';
+import { PurchaseReturn } from '@modules/purchasereturn/entities/purchasereturn.entity';
 
 @Injectable()
 export class SupplierService {
@@ -17,6 +19,12 @@ export class SupplierService {
     private readonly supplierRepo: Repository<Supplier>,
     @InjectRepository(SupplierGroup)
     private readonly groupRepo: Repository<SupplierGroup>,
+
+    @InjectRepository(PurchaseReceipt)
+    private readonly purchaseReceiptRepo: Repository<PurchaseReceipt>,
+
+    @InjectRepository(PurchaseReturn)
+    private readonly purchaseReturnRepo: Repository<PurchaseReturn>,
   ) { }
 
   /** Tạo NCC: check trùng code + validate group */
@@ -147,12 +155,36 @@ export class SupplierService {
     return sup;
   }
 
-  /** Xóa mềm: đặt status=INACTIVE */
+  /**
+   * Xóa NCC theo nghiệp vụ:
+   * - Nếu chưa phát sinh phiếu nhập / phiếu trả → xóa cứng khỏi DB.
+   * - Nếu đã phát sinh chứng từ → chỉ ngừng hợp tác (status = INACTIVE).
+   */
   async remove(id: string) {
-    const sup = await this.findOne(id);
-    sup.status = SupplierStatus.INACTIVE;
-    return this.supplierRepo.save(sup);
+    const sup = await this.findOne(id); // sẽ throw SUPPLIER_NOT_FOUND nếu không có
+
+    // Kiểm tra có phiếu nhập không
+    const hasReceipts = await this.purchaseReceiptRepo.exists({
+      where: { supplier: { id } }, // nếu entity dùng supplierId thì đổi thành { supplierId: id }
+    });
+
+    // Kiểm tra có phiếu trả không
+    const hasReturns = await this.purchaseReturnRepo.exists({
+      where: { supplier: { id } },
+    });
+
+    // ĐÃ có giao dịch -> chỉ ngừng hợp tác
+    if (hasReceipts || hasReturns) {
+      if (sup.status !== SupplierStatus.INACTIVE) {
+        sup.status = SupplierStatus.INACTIVE;
+        await this.supplierRepo.save(sup);
+      }
+      return new ResponseCommon(200, true, 'SUPPLIER_DEACTIVATED_BECAUSE_HAS_TRANSACTIONS', sup);
+    }
+    await this.supplierRepo.delete(id);
+    return new ResponseCommon(200, true, 'SUPPLIER_DELETED_SUCCESSFULLY');
   }
+
 
   /** Đổi trạng thái trực tiếp */
   async setStatus(id: string, status: SupplierStatus) {
