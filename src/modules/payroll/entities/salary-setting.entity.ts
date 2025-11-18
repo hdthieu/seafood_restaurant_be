@@ -1,7 +1,56 @@
 // src/modules/payroll/entities/salary-setting.entity.ts
-import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn, Unique } from 'typeorm';
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  ManyToOne,
+  JoinColumn,
+  Unique,
+} from 'typeorm';
 import { User } from '@modules/user/entities/user.entity';
 import { SalaryType } from 'src/common/enums';
+
+// ====== TYPES cho meta ======
+
+export type BonusRule = {
+  label?: string;       // “Tư vấn bán hàng” (optional)
+  fromRevenue: number;  // Doanh thu từ ...
+  percent: number;      // % doanh thu
+};
+
+export type AllowanceRule = {
+  name: string; // “Phụ cấp ăn trưa”
+  type: 'PER_DAY_FIXED' | 'PER_MONTH_FIXED';
+  amount: number;
+};
+
+export type DeductionRule = {
+  name: string; // “Đi muộn quá 15p”
+  // Loại giảm trừ
+  kind: 'LATE' | 'EARLY' | 'FIXED';
+  // Điều kiện
+  condition: 'BY_TIMES' | 'BY_BLOCK';
+  // dùng khi condition = BY_BLOCK (phạt theo block X phút)
+  blockMinutes?: number | null;
+  // tiền phạt cho 1 lần / 1 block / 1 kỳ (tùy condition + kind)
+  amountPerUnit: number;
+};
+
+export type SalaryMeta = {
+  // === THƯỞNG THEO DOANH THU ===
+  bonusEnabled?: boolean;
+  bonusType?: 'PERSONAL_REVENUE'; // sau này có thể thêm TEAM_REVENUE
+  bonusCalcMode?: 'TOTAL_REVENUE_PERCENT';
+  bonusRules?: BonusRule[];
+
+  // === PHỤ CẤP ===
+  allowanceEnabled?: boolean;
+  allowances?: AllowanceRule[];
+
+  // === GIẢM TRỪ ===
+  deductionEnabled?: boolean;
+  deductions?: DeductionRule[];
+};
 
 @Entity('salary_settings')
 @Unique(['staff'])
@@ -24,41 +73,11 @@ export class SalarySetting {
   @Column('decimal', { precision: 14, scale: 2, default: 0 })
   overtimeRate: string; // tiền / giờ OT
 
-  // sau này bổ sung: default bonus/allowance/deduction template
-   // salary-setting.entity.ts
-@Column({
-  type: 'jsonb',
-  nullable: true,
-  default: () => "'{}'",
-})
-meta?: SalaryMeta | null;
+  // meta: bonus / allowance / deduction
+  @Column({
+    type: 'jsonb',
+    nullable: true,
+    default: () => "'{}'",
+  })
+  meta?: SalaryMeta | null;
 }
-
-// Định nghĩa interface cho meta
-export type SalaryMeta = {
-  // === THƯỞNG THEO DOANH THU ===
-  bonusEnabled?: boolean;
-  bonusType?: 'PERSONAL_REVENUE';    // sau này có thể thêm TEAM_REVENUE
-  bonusCalcMode?: 'TOTAL_REVENUE_PERCENT'; // giống “Tính theo mức tổng doanh thu”
-  bonusRules?: {
-    label: string;       // “Tư vấn bán hàng”
-    fromRevenue: number; // Doanh thu từ ...
-    percent: number;     // % doanh thu
-  }[];
-
-  // === PHỤ CẤP ===
-  allowanceEnabled?: boolean;
-  allowances?: {
-    name: string; // “Phụ cấp ăn trưa”
-    type: 'PER_DAY_FIXED' | 'PER_MONTH_FIXED';
-    amount: number; // số tiền mỗi ngày / mỗi tháng
-  }[];
-
-  // === GIẢM TRỪ ===
-  deductionEnabled?: boolean;
-  deductions?: {
-    name: string; // “Đi muộn”, “Vi phạm nội quy”
-    type: 'BY_TIMES' | 'FIXED_PER_DAY' | 'FIXED_PER_MONTH';
-    amountPerUnit: number; // tiền phạt mỗi lần / mỗi ngày
-  }[];
-};

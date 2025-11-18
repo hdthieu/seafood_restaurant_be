@@ -202,12 +202,21 @@ async cancelItems(dto: CancelItemsDto , userId: string) {
     // ✅ DỌN TICKET BẾP: soft-delete theo orderItemId
     await tRepo.softDelete({ orderItemId: In(itemIds) });
 
-    // ✅ Emit cho bếp ẩn ngay (FE dùng orderItemId làm key)
-    this.gw.emitTicketsVoided({
-      orderId: rows[0].order.id,
-      ticketIds: itemIds,        // <-- quan trọng
-      by: staff,
-    });
+    // // ✅ Emit cho bếp ẩn ngay (FE dùng orderItemId làm key)
+    // this.gw.emitTicketsVoided({
+    //   orderId: rows[0].order.id,
+    //   ticketIds: itemIds,        // <-- quan trọng
+    //  by: "cashier",
+    // });
+for (const it of rows) {
+  this.gw.emitVoidSynced({
+    orderId: it.order.id,
+    menuItemId: it.menuItem.id,
+    qty: it.quantity,
+    reason,
+    by: "cashier",     // phân biệt BẾP / THU NGÂN
+  });
+}
 
     // Recompute order
     const orderIds = Array.from(new Set(rows.map(r => r.order.id)));
@@ -285,7 +294,7 @@ async cancelPartial(dto: CancelPartialDto, userId: string) {
       menuItemId: it.menuItem.id,
       qtyToVoid: dto.qty,
       reason: dto.reason,
-      by: staff,                                 // 👈 truyền tên người huỷ cho bếp
+      by: "cashier",                           // 👈 truyền tên người huỷ cho bếp
     });
 
 
@@ -301,9 +310,16 @@ this.gw.emitTicketStatusChanged({
   }],
 });
 
-this.gw.emitTicketsVoided({
+// this.gw.emitTicketsVoided({
+//   orderId: it.order.id,
+//   items: [{ menuItemId: it.menuItem.id, qty: dto.qty, reason: dto.reason ?? null, by: staff }],
+// });
+this.gw.emitVoidSynced({
   orderId: it.order.id,
-  items: [{ menuItemId: it.menuItem.id, qty: dto.qty, reason: dto.reason ?? null, by: staff }],
+  menuItemId: it.menuItem.id,
+  qty: dto.qty,
+  reason: dto.reason ?? null,
+  by: "cashier",
 });
 
     await this.recomputeOrderStatus(em, it.order.id);

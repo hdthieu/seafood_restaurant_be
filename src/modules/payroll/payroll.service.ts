@@ -7,7 +7,7 @@ import { PayrollSlip } from './entities/payroll-slip.entity';
 import { SalarySetting } from './entities/salary-setting.entity';
 import { CashType } from '@modules/cashbook/entities/cash_types.entity';
 import { CashbookService } from '@modules/cashbook/cashbook.service';
-import { CashbookType, CounterpartyGroup, PayrollStatus, PayrollSlipStatus, SalaryType } from 'src/common/enums';
+import { CashbookType, CounterpartyGroup, PayrollStatus, PayrollSlipStatus, SalaryType, InvoiceStatus } from 'src/common/enums';
 import { CreatePayrollDto } from './dto/create-payroll.dto';
 import { PayPayrollDto } from './dto/pay-payroll.dto';
 import { ResponseCommon, ResponseException } from 'src/common/common_dto/respone.dto';
@@ -37,14 +37,18 @@ export class PayrollService {
     @InjectRepository(CashType) private readonly cashTypeRepo: Repository<CashType>,
   ) {}
 
-  private genPayrollCode() {
-    const d = new Date().toISOString().replace(/\D/g, '').slice(0, 14);
-    return `BL${d}`;
-  }
+ private genPayrollCode() {
+  const d = new Date().toISOString().replace(/\D/g, '').slice(0, 14);
+  const rand = Math.floor(Math.random() * 900) + 100;
+  return `BL${d}${rand}`;
+}
+
   private genSlipCode() {
-    const d = new Date().toISOString().replace(/\D/g, '').slice(0, 14);
-    return `PL${d}`;
-  }
+  const d = new Date().toISOString().replace(/\D/g, '').slice(0, 14);
+  const rand = Math.floor(Math.random() * 900) + 100; // 100–999
+  return `PL${d}${rand}`;
+}
+
 
   // ---- SALARY SETTING ----
   // async upsertSalarySetting(dto: any) {
@@ -137,9 +141,17 @@ export class PayrollService {
   const workingDays = workingUnits; // nếu salaryType PER_STANDARD_DAY
   const allowanceAmount = this.calcAllowance(workingDays, meta);
 
-  // 3) Giảm trừ (ví dụ theo số lần đi trễ – bạn có thể lấy từ attendance sau)
-  const lateTimes = 0; // TODO: query từ bảng attendances
-  const deductionAmount = this.calcDeduction(meta, lateTimes);
+  // 3) Giảm trừ
+  // TODO: sau này bạn query attendance để ra lateTimes / lateMinutes / earlyTimes / earlyMinutes
+  // 3) Giảm trừ: lấy dữ liệu đi muộn / về sớm từ Attendance
+const violations = await this.getLateEarlyViolations(
+  setting.staff.id,
+  from,
+  to,
+);
+
+const deductionAmount = this.calcDeduction(meta, violations);
+
 
   const overtimeAmount = 0;
   const commissionAmount = 0; // nếu bạn muốn tách riêng hoa hồng
@@ -158,7 +170,7 @@ export class PayrollService {
     code: this.genSlipCode(),
     payroll,
     staff: setting.staff,
-     workingUnits,  
+    workingUnits,
     basicSalary: String(basic),
     overtimeAmount: String(overtimeAmount),
     bonusAmount: String(bonusAmount),
@@ -173,6 +185,7 @@ export class PayrollService {
 
   await em.save(slip);
 }
+
 
 
       payroll.totalAmount = String(total);
@@ -439,17 +452,102 @@ private calcAllowance(
   return total;
 }
 
-private calcDeduction(meta?: SalaryMeta, lateTimes = 0): number {
+private calcDeduction(
+  meta?: SalaryMeta,
+  ctx?: {
+    lateTimes?: number;
+    earlyTimes?: number;
+    lateMinutes?: number;
+    earlyMinutes?: number;
+  },
+): number {
   if (!meta?.deductionEnabled || !meta.deductions?.length) return 0;
+
+  const {
+    lateTimes = 0,
+    earlyTimes = 0,
+    lateMinutes = 0,
+    earlyMinutes = 0,
+  } = ctx || {};
+
   let total = 0;
+
   for (const d of meta.deductions) {
-    if (d.type === 'BY_TIMES') {
-      total += d.amountPerUnit * lateTimes;
+    const kind = d.kind ?? 'LATE';
+    const condition = d.condition ?? 'BY_TIMES';
+    const amt = d.amountPerUnit ?? 0;
+    if (!amt) continue;
+
+    if (condition === 'BY_TIMES') {
+      const times =
+        kind === 'LATE'
+          ? lateTimes
+          : kind === 'EARLY'
+          ? earlyTimes
+          : 1; // FIXED → 1 lần / mỗi kỳ lương
+      total += amt * times;
+    } else if (condition === 'BY_BLOCK') {
+      const block = d.blockMinutes && d.blockMinutes > 0 ? d.blockMinutes : 1;
+      const minutes =
+        kind === 'LATE'
+          ? lateMinutes
+          : kind === 'EARLY'
+          ? earlyMinutes
+          : 0;
+      const blocks = Math.floor(minutes / block);
+      if (blocks > 0) total += amt * blocks;
     }
-    // FIXED_PER_DAY / PER_MONTH bạn tự bổ sung
   }
+
   return total;
 }
+// kiểm tra đi muộn về sơm để trừ lương
+// kiểm tra đi muộn về sớm để trừ lương
+private async getLateEarlyViolations(
+  staffId: string,
+  from: Date,
+  to: Date,
+) {
+  const attRepo = this.dataSource.getRepository(Attendance);
+
+  const fromISO = from.toISOString().slice(0, 10);
+  const toISO = to.toISOString().slice(0, 10);
+
+  const records = await attRepo.find({
+    where: {
+      userId: staffId,
+      dateISO: Between(fromISO, toISO),
+    } as any,
+    relations: ['shift'],
+  });
+
+  let lateMinutes = 0;
+  let earlyMinutes = 0;
+  let lateTimes = 0;
+  let earlyTimes = 0;
+
+  for (const r of records) {
+    const checkIn = this.parseTimeToHours(r.checkIn);
+    const shiftStart = this.parseTimeToHours(r.shift?.startTime);
+    const checkOut = this.parseTimeToHours(r.checkOut);
+    const shiftEnd = this.parseTimeToHours(r.shift?.endTime);
+
+    // Đi muộn
+    if (checkIn != null && shiftStart != null && checkIn > shiftStart) {
+      lateMinutes += (checkIn - shiftStart) * 60;
+      lateTimes += 1; // mỗi ca muộn tính 1 lần
+    }
+
+    // Về sớm
+    if (checkOut != null && shiftEnd != null && checkOut < shiftEnd) {
+      earlyMinutes += (shiftEnd - checkOut) * 60;
+      earlyTimes += 1; // mỗi ca về sớm tính 1 lần
+    }
+  }
+
+  return { lateMinutes, earlyMinutes, lateTimes, earlyTimes };
+}
+
 
 
 private async getPersonalRevenue(
@@ -458,21 +556,61 @@ private async getPersonalRevenue(
   to: Date,
   manager: EntityManager,
 ): Promise<number> {
-  // TODO: tùy schema của bạn (orders / invoices...) mà join
-  // ví dụ:
   const qb = manager
     .getRepository(Invoice)
     .createQueryBuilder('inv')
-    .where('inv.staffId = :sid', { sid: staffId })
+    .innerJoin('inv.order', 'ord')
+    .innerJoin('ord.createdBy', 'creator') // 👈 người tạo order
+    .where('creator.id = :sid', { sid: staffId })
     .andWhere('inv.createdAt BETWEEN :from AND :to', { from, to })
-    .andWhere('inv.status = :st', { st: 'PAID' });
+    .andWhere('inv.status = :st', { st: InvoiceStatus.PAID })
+    .select(
+      'COALESCE(SUM(COALESCE(inv.finalAmount, inv.totalAmount)), 0)',
+      'sum',
+    );
 
-  const { sum } = (await qb
-    .select('COALESCE(SUM(inv.finalAmount),0)', 'sum')
-    .getRawOne<{ sum: string }>()) ?? { sum: '0' };
+  const { sum } =
+    (await qb.getRawOne<{ sum: string }>()) ?? { sum: '0' };
 
   return Number(sum || 0);
 }
+
+// private calcDeductionFromViolations(
+//   meta: SalaryMeta,
+//   lateMinutes: number,
+//   earlyMinutes: number
+// ): number {
+//   if (!meta?.deductionEnabled || !meta.deductions?.length) return 0;
+
+//   let total = 0;
+
+//   for (const d of meta.deductions) {
+//     if (d.kind === "FIXED") {
+//       if (d.condition === "FIXED_PER_MONTH") {
+//         total += d.amountPerUnit; // trừ cố định
+//       }
+//       continue;
+//     }
+
+//     let minutes = 0;
+//     if (d.kind === "LATE") minutes = lateMinutes;
+//     if (d.kind === "EARLY") minutes = earlyMinutes;
+
+//     if (minutes <= 0) continue;
+
+//     if (d.condition === "BY_TIMES") {
+//       total += d.amountPerUnit; // mỗi lần vi phạm tính 1 lần
+//     }
+
+//     if (d.condition === "BY_BLOCK") {
+//       const block = d.blockMinutes || 15;
+//       const blocks = Math.ceil(minutes / block);
+//       total += blocks * d.amountPerUnit;
+//     }
+//   }
+
+//   return total;
+// }
 
 private calcCommissionFromRules(
   revenue: number,

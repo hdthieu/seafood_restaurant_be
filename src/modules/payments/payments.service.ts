@@ -49,69 +49,69 @@ export class PaymentService {
 
   /** Tạo URL VNPay + lưu payment PENDING để FE polling */
   /** Tạo URL VNPay + lưu payment PENDING để FE polling */
-async createVNPayUrl(dto: CreateVNPayParams) {
-  // cần payments để tính remaining
-  const inv = await this.invoiceRepo.findOne({ where: { id: dto.invoiceId }, relations: ['payments'] });
-  if (!inv) throw new ResponseException('INVOICE_NOT_FOUND', 400);
+  async createVNPayUrl(dto: CreateVNPayParams) {
+    // cần payments để tính remaining
+    const inv = await this.invoiceRepo.findOne({ where: { id: dto.invoiceId }, relations: ['payments'] });
+    if (!inv) throw new ResponseException('INVOICE_NOT_FOUND', 400);
 
-  const paid = (inv.payments ?? [])
-    .filter(p => p.status === PaymentStatus.SUCCESS)
-    .reduce((s, p) => s + Number(p.amount), 0);
+    const paid = (inv.payments ?? [])
+      .filter(p => p.status === PaymentStatus.SUCCESS)
+      .reduce((s, p) => s + Number(p.amount), 0);
 
-  const total = Number(inv.totalAmount);
-  const remaining = Math.max(0, total - paid);
+    const total = Number(inv.totalAmount);
+    const remaining = Math.max(0, total - paid);
 
-  // amount FE truyền vào (nếu có) nhưng KHÔNG vượt remaining
-  const want = Math.round(Number(dto.amount ?? remaining));
-  const amount = Math.min(want, remaining);
+    // amount FE truyền vào (nếu có) nhưng KHÔNG vượt remaining
+    const want = Math.round(Number(dto.amount ?? remaining));
+    const amount = Math.min(want, remaining);
 
-  if (!amount || amount <= 0) throw new ResponseException('INVALID_AMOUNT', 400);
+    if (!amount || amount <= 0) throw new ResponseException('INVALID_AMOUNT', 400);
 
-  const { tmnCode, hashSecret, vnpUrl, returnUrl, version, locale } = this.config;
+    const { tmnCode, hashSecret, vnpUrl, returnUrl, version, locale } = this.config;
 
-  const vnp_TxnRef = Date.now().toString();
-  const vnp_CreateDate = nowYmdHisGMT7();
-  const expireIn = Number.isFinite(dto.expireInMinutes) ? Math.max(1, Number(dto.expireInMinutes)) : 15;
-  const vnp_ExpireDate = addMinutesYmdHisGMT7(expireIn);
+    const vnp_TxnRef = Date.now().toString();
+    const vnp_CreateDate = nowYmdHisGMT7();
+    const expireIn = Number.isFinite(dto.expireInMinutes) ? Math.max(1, Number(dto.expireInMinutes)) : 15;
+    const vnp_ExpireDate = addMinutesYmdHisGMT7(expireIn);
 
-  const params: Record<string, string | number> = {
-    vnp_Version: version,
-    vnp_Command: 'pay',
-    vnp_TmnCode: tmnCode,
-    vnp_Locale: locale,
-    vnp_CurrCode: 'VND',
-    vnp_TxnRef,
-    vnp_OrderInfo: `INV:${inv.id}`,
-    vnp_OrderType: 'other',
-    vnp_Amount: amount * 100,             // ✅ dùng remaining
-    vnp_ReturnUrl: returnUrl,
-    vnp_IpAddr: dto.ipAddress || '127.0.0.1',
-    vnp_CreateDate,
-    vnp_ExpireDate,
-  };
+    const params: Record<string, string | number> = {
+      vnp_Version: version,
+      vnp_Command: 'pay',
+      vnp_TmnCode: tmnCode,
+      vnp_Locale: locale,
+      vnp_CurrCode: 'VND',
+      vnp_TxnRef,
+      vnp_OrderInfo: `INV:${inv.id}`,
+      vnp_OrderType: 'other',
+      vnp_Amount: amount * 100,             // ✅ dùng remaining
+      vnp_ReturnUrl: returnUrl,
+      vnp_IpAddr: dto.ipAddress || '127.0.0.1',
+      vnp_CreateDate,
+      vnp_ExpireDate,
+    };
 
-  const sorted = sortObject(params);
-  const signData = toQueryString(sorted);
-  const vnp_SecureHash = hmacSHA512(hashSecret, signData);
-  const payUrl = `${vnpUrl}?${signData}&vnp_SecureHash=${vnp_SecureHash}`;
+    const sorted = sortObject(params);
+    const signData = toQueryString(sorted);
+    const vnp_SecureHash = hmacSHA512(hashSecret, signData);
+    const payUrl = `${vnpUrl}?${signData}&vnp_SecureHash=${vnp_SecureHash}`;
 
-  // Lưu payment PENDING với số tiền dự kiến (remaining)
-  await this.paymentRepo.save(
-    this.paymentRepo.create({
-      invoice: inv,
-      amount,
-      method: PaymentMethod.VNPAY,
-      txnRef: vnp_TxnRef,
-      status: PaymentStatus.PENDING,
-      expireAt: vnp_ExpireDate,
-    }),
-  );
+    // Lưu payment PENDING với số tiền dự kiến (remaining)
+    await this.paymentRepo.save(
+      this.paymentRepo.create({
+        invoice: inv,
+        amount,
+        method: PaymentMethod.VIETQR,
+        txnRef: vnp_TxnRef,
+        status: PaymentStatus.PENDING,
+        expireAt: vnp_ExpireDate,
+      }),
+    );
 
-  console.log('[VNPay][createVNPayUrl] payUrl =', payUrl);
-  console.log('[VNPay][createVNPayUrl] params =', params);
+    console.log('[VNPay][createVNPayUrl] payUrl =', payUrl);
+    console.log('[VNPay][createVNPayUrl] params =', params);
 
-  return { payUrl, invoiceId: inv.id, vnp_TxnRef, expireAt: vnp_ExpireDate };
-}
+    return { payUrl, invoiceId: inv.id, vnp_TxnRef, expireAt: vnp_ExpireDate };
+  }
 
 
   /** Return (browser): chỉ xác thực checksum & redirect về FE */
@@ -143,84 +143,84 @@ async createVNPayUrl(dto: CreateVNPayParams) {
 
   /** IPN (server-to-server): xác thực, cập nhật Payment & set Invoice = PAID khi thành công */
   /** IPN (server-to-server): xác thực, cập nhật Payment & set Invoice = PAID khi thành công */
-// payments.service.ts
-async handleVnpIpn(q: any) {
-  const { hashSecret } = this.config;
+  // payments.service.ts
+  async handleVnpIpn(q: any) {
+    const { hashSecret } = this.config;
 
-  try {
-    // 1) Verify checksum như hiện tại
-    const secureHash = String(q.vnp_SecureHash || '').toLowerCase();
-    const clone: any = { ...q };
-    delete clone.vnp_SecureHash;
-    delete clone.vnp_SecureHashType;
+    try {
+      // 1) Verify checksum như hiện tại
+      const secureHash = String(q.vnp_SecureHash || '').toLowerCase();
+      const clone: any = { ...q };
+      delete clone.vnp_SecureHash;
+      delete clone.vnp_SecureHashType;
 
-    const sorted = sortObject(clone);
-    const signData = toQueryString(sorted);
-    const calc = hmacSHA512(hashSecret, signData);
-    if (secureHash !== calc.toLowerCase()) {
-      return { RspCode: '97', Message: 'Invalid Checksum' };
+      const sorted = sortObject(clone);
+      const signData = toQueryString(sorted);
+      const calc = hmacSHA512(hashSecret, signData);
+      if (secureHash !== calc.toLowerCase()) {
+        return { RspCode: '97', Message: 'Invalid Checksum' };
+      }
+
+      // 2) Lấy invoiceId | orderId từ vnp_OrderInfo
+      const rawInfo = String(q.vnp_OrderInfo || '');
+      const info = parseOrderInfo(rawInfo);
+
+      let invoiceId = info.invoiceId;
+      let inv: Invoice | null = null;
+
+      if (invoiceId) {
+        inv = await this.invoiceRepo.findOne({ where: { id: invoiceId } });
+      }
+
+      // 3) Fallback: chưa có invoice → tạo/tìm từ orderId (idempotent)
+      if (!inv && info.orderId) {
+        const created = await this.invoiceService.createFromOrder(info.orderId);
+        inv = created;
+        invoiceId = created.id;
+      }
+
+      if (!inv) {
+        // không có cả invoice lẫn order
+        return { RspCode: '01', Message: 'Order not found' };
+      }
+
+      // 4) Lấy dữ liệu giao dịch
+      const txnRef = String(q.vnp_TxnRef || '');
+      const responseCode = q.vnp_ResponseCode;
+      const amount = Number(q.vnp_Amount || 0) / 100;
+
+      // 5) Cập nhật bản ghi payment theo txnRef (nếu có)
+      const pay = await this.paymentRepo.findOne({ where: { txnRef } });
+      if (pay) {
+        pay.responseCode = responseCode || null;
+        pay.transactionNo = q.vnp_TransactionNo || null;
+        pay.bankCode = q.vnp_BankCode || null;
+        pay.cardType = q.vnp_CardType || null;
+        pay.status = responseCode === '00' ? PaymentStatus.SUCCESS : PaymentStatus.FAILED;
+        await this.paymentRepo.save(pay);
+      }
+
+      // 6) Idempotent: đã PAID thì trả 02
+      if (inv.status === InvoiceStatus.PAID) {
+        return { RspCode: '02', Message: 'Order already confirmed', _meta: { invoiceId, amount, paid: true } };
+      }
+
+      // 7) Thành công → cộng tiền (addPayment tự co về remaining & set Order.PAID)
+      if (responseCode === '00') {
+        await this.invoiceService.addPayment(inv.id, {
+          amount,
+          // method: PaymentMethod.VIETQR,
+          txnRef,
+        });
+        return { RspCode: '00', Message: 'Success', _meta: { invoiceId, amount, paid: true } };
+      }
+
+      // 8) Thất bại vẫn trả 00 (đã nhận IPN)
+      return { RspCode: '00', Message: 'Received (Failed payment)', _meta: { invoiceId, amount, paid: false } };
+    } catch (_e) {
+      return { RspCode: '99', Message: 'Unhandled error' };
     }
-
-    // 2) Lấy invoiceId | orderId từ vnp_OrderInfo
-    const rawInfo = String(q.vnp_OrderInfo || '');
-    const info = parseOrderInfo(rawInfo);
-
-    let invoiceId = info.invoiceId;
-    let inv: Invoice | null = null;
-
-    if (invoiceId) {
-      inv = await this.invoiceRepo.findOne({ where: { id: invoiceId } });
-    }
-
-    // 3) Fallback: chưa có invoice → tạo/tìm từ orderId (idempotent)
-    if (!inv && info.orderId) {
-      const created = await this.invoiceService.createFromOrder(info.orderId);
-      inv = created;
-      invoiceId = created.id;
-    }
-
-    if (!inv) {
-      // không có cả invoice lẫn order
-      return { RspCode: '01', Message: 'Order not found' };
-    }
-
-    // 4) Lấy dữ liệu giao dịch
-    const txnRef = String(q.vnp_TxnRef || '');
-    const responseCode = q.vnp_ResponseCode;
-    const amount = Number(q.vnp_Amount || 0) / 100;
-
-    // 5) Cập nhật bản ghi payment theo txnRef (nếu có)
-    const pay = await this.paymentRepo.findOne({ where: { txnRef } });
-    if (pay) {
-      pay.responseCode  = responseCode || null;
-      pay.transactionNo = q.vnp_TransactionNo || null;
-      pay.bankCode      = q.vnp_BankCode || null;
-      pay.cardType      = q.vnp_CardType || null;
-      pay.status        = responseCode === '00' ? PaymentStatus.SUCCESS : PaymentStatus.FAILED;
-      await this.paymentRepo.save(pay);
-    }
-
-    // 6) Idempotent: đã PAID thì trả 02
-    if (inv.status === InvoiceStatus.PAID) {
-      return { RspCode: '02', Message: 'Order already confirmed', _meta: { invoiceId, amount, paid: true } };
-    }
-
-    // 7) Thành công → cộng tiền (addPayment tự co về remaining & set Order.PAID)
-    if (responseCode === '00') {
-      await this.invoiceService.addPayment(inv.id, {
-        amount,
-        method: PaymentMethod.VNPAY,
-        txnRef,
-      });
-      return { RspCode: '00', Message: 'Success', _meta: { invoiceId, amount, paid: true } };
-    }
-
-    // 8) Thất bại vẫn trả 00 (đã nhận IPN)
-    return { RspCode: '00', Message: 'Received (Failed payment)', _meta: { invoiceId, amount, paid: false } };
-  } catch (_e) {
-    return { RspCode: '99', Message: 'Unhandled error' };
   }
-}
 
 
 
@@ -256,44 +256,44 @@ async handleVnpIpn(q: any) {
     };
   }
   // payment.service.ts
- async tryMarkPaidFromReturn(q: any) {
-  const r = await this.handleVnpReturn(q);
-  if (!r.ok || r.code !== '00' || !r.invoiceId || !r.amount) return false;
+  async tryMarkPaidFromReturn(q: any) {
+    const r = await this.handleVnpReturn(q);
+    if (!r.ok || r.code !== '00' || !r.invoiceId || !r.amount) return false;
 
-  const inv = await this.invoiceRepo.findOne({ where: { id: r.invoiceId }, relations: ['payments'] });
-  if (!inv) return false;
-  if (inv.status === InvoiceStatus.PAID) return true;
+    const inv = await this.invoiceRepo.findOne({ where: { id: r.invoiceId }, relations: ['payments'] });
+    if (!inv) return false;
+    if (inv.status === InvoiceStatus.PAID) return true;
 
-  // nếu có bản ghi PENDING theo txnRef thì mark nó success
-  const p = await this.paymentRepo.findOne({ where: { txnRef: r.txnRef || '' } });
-  if (p) {
-    p.status = PaymentStatus.SUCCESS;
-    p.responseCode = '00';
-    await this.paymentRepo.save(p);
+    // nếu có bản ghi PENDING theo txnRef thì mark nó success
+    const p = await this.paymentRepo.findOne({ where: { txnRef: r.txnRef || '' } });
+    if (p) {
+      p.status = PaymentStatus.SUCCESS;
+      p.responseCode = '00';
+      await this.paymentRepo.save(p);
+    }
+
+    const paid = (inv.payments ?? [])
+      .filter(x => x.status === PaymentStatus.SUCCESS)
+      .reduce((s, x) => s + Number(x.amount), 0);
+    const total = Number(inv.totalAmount);
+    const remaining = Math.max(0, total - paid);
+
+    let amount = Number(r.amount);
+    if (amount > remaining) amount = remaining;
+    if (amount <= 0) return true; // không còn gì để cộng
+
+    await this.invoiceService.addPayment(inv.id, {
+      amount,
+      method: PaymentMethod.VIETQR,
+      txnRef: r.txnRef,
+    });
+
+    return true;
   }
-
-  const paid = (inv.payments ?? [])
-    .filter(x => x.status === PaymentStatus.SUCCESS)
-    .reduce((s, x) => s + Number(x.amount), 0);
-  const total = Number(inv.totalAmount);
-  const remaining = Math.max(0, total - paid);
-
-  let amount = Number(r.amount);
-  if (amount > remaining) amount = remaining;
-  if (amount <= 0) return true; // không còn gì để cộng
-
-  await this.invoiceService.addPayment(inv.id, {
-    amount,
-    method: PaymentMethod.VNPAY,
-    txnRef: r.txnRef,
-  });
-
-  return true;
-}
 
 
   //vietqr 
-    async isTxnProcessed(externalTxnId: string) {
+  async isTxnProcessed(externalTxnId: string) {
     if (!externalTxnId) return false;
     const exist = await this.paymentRepo.findOne({ where: { externalTxnId } });
     return !!exist;
@@ -303,7 +303,7 @@ async handleVnpIpn(q: any) {
     if (!key) throw new Error('Missing PAYOS_CHECKSUM_KEY');
     return key;
   }
-   verifySignature(rawBody: string | Buffer, signature?: string | string[]) {
+  verifySignature(rawBody: string | Buffer, signature?: string | string[]) {
     if (!signature) return false;
     const sig = Array.isArray(signature) ? signature[0] : signature;
     const calc = crypto
@@ -318,65 +318,65 @@ async handleVnpIpn(q: any) {
     }
   }
 
-async findPendingPaymentByOrderCode(orderCode: number) {
-  return this.paymentRepo.findOne({ where: { externalTxnId: String(orderCode), status: PaymentStatus.PENDING } });
-}
+  async findPendingPaymentByOrderCode(orderCode: number) {
+    return this.paymentRepo.findOne({ where: { externalTxnId: String(orderCode), status: PaymentStatus.PENDING } });
+  }
 
-async markPaymentSuccessByOrderCode(orderCode: number, extra?: { transactionId?: string }) {
-  const pay = await this.paymentRepo.findOne({ where: { externalTxnId: String(orderCode) } });
-  if (!pay) return;
+  async markPaymentSuccessByOrderCode(orderCode: number, extra?: { transactionId?: string }) {
+    const pay = await this.paymentRepo.findOne({ where: { externalTxnId: String(orderCode) } });
+    if (!pay) return;
 
-  pay.status = PaymentStatus.SUCCESS;
+    pay.status = PaymentStatus.SUCCESS;
 
-  // chỉ set externalTxnId = transactionId nếu chưa bị dùng
-  if (extra?.transactionId) {
-    const txId = String(extra.transactionId);
-    const dup = await this.paymentRepo.exist({ where: { externalTxnId: txId } });
-    if (!dup) {
-      pay.externalTxnId = txId;
-    } else {
-      // giữ nguyên orderCode, ghi transactionId vào note để đối soát
-      pay.note = [pay.note, `txnId=${txId}`].filter(Boolean).join(' | ');
+    // chỉ set externalTxnId = transactionId nếu chưa bị dùng
+    if (extra?.transactionId) {
+      const txId = String(extra.transactionId);
+      const dup = await this.paymentRepo.exist({ where: { externalTxnId: txId } });
+      if (!dup) {
+        pay.externalTxnId = txId;
+      } else {
+        // giữ nguyên orderCode, ghi transactionId vào note để đối soát
+        pay.note = [pay.note, `txnId=${txId}`].filter(Boolean).join(' | ');
+      }
+    }
+
+    await this.paymentRepo.save(pay);
+  }
+
+  async createPendingPayment(dto: CreatePendingPaymentDto) {
+    const inv = await this.invoiceRepo.findOne({ where: { id: dto.invoiceId } });
+    if (!inv) throw new BadRequestException('INVOICE_NOT_FOUND');
+
+    const p = this.paymentRepo.create({
+      invoice: { id: inv.id } as any,
+      amount: Math.round(Number(dto.amount || 0)),
+      method: dto.method,
+      status: PaymentStatus.PENDING,
+      externalTxnId: dto.externalTxnId ?? null,
+      note: dto.note ?? null,
+      expireAt: dto.expireAt ? new Date(dto.expireAt) : null,
+    } as DeepPartial<Payment>);  // <-- cast để tránh match overload mảng
+
+    return this.paymentRepo.save(p);
+  }
+  // thêm vào PaymentService
+  verifyPayOSSignatureFlexible(rawBody: string, body: any, headerSig?: string | string[]) {
+    // 1) Nếu có header → verify như cũ (raw body)
+    if (headerSig) return this.verifySignature(rawBody, headerSig);
+
+    // 2) Fallback: signature trong body
+    const sig = body?.signature || body?.data?.signature;
+    if (!sig) return false;
+
+    // PayOS thường ký HMAC-SHA256 trên JSON của "data"
+    const payload = JSON.stringify(body?.data ?? body);
+    const calc = crypto.createHmac('sha256', this.checksum).update(payload).digest('hex');
+    try {
+      return crypto.timingSafeEqual(Buffer.from(calc), Buffer.from(sig));
+    } catch {
+      return false;
     }
   }
-
-  await this.paymentRepo.save(pay);
-}
-
-async createPendingPayment(dto: CreatePendingPaymentDto) {
-  const inv = await this.invoiceRepo.findOne({ where: { id: dto.invoiceId } });
-  if (!inv) throw new BadRequestException('INVOICE_NOT_FOUND');
-
- const p = this.paymentRepo.create({
-  invoice: { id: inv.id } as any,
-  amount: Math.round(Number(dto.amount || 0)),
-  method: dto.method,
-  status: PaymentStatus.PENDING,
-  externalTxnId: dto.externalTxnId ?? null,
-  note: dto.note ?? null,
-  expireAt: dto.expireAt ? new Date(dto.expireAt) : null,
-} as DeepPartial<Payment>);  // <-- cast để tránh match overload mảng
-
-return this.paymentRepo.save(p);
-}
-// thêm vào PaymentService
-verifyPayOSSignatureFlexible(rawBody: string, body: any, headerSig?: string | string[]) {
-  // 1) Nếu có header → verify như cũ (raw body)
-  if (headerSig) return this.verifySignature(rawBody, headerSig);
-
-  // 2) Fallback: signature trong body
-  const sig = body?.signature || body?.data?.signature;
-  if (!sig) return false;
-
-  // PayOS thường ký HMAC-SHA256 trên JSON của "data"
-  const payload = JSON.stringify(body?.data ?? body);
-  const calc = crypto.createHmac('sha256', this.checksum).update(payload).digest('hex');
-  try {
-    return crypto.timingSafeEqual(Buffer.from(calc), Buffer.from(sig));
-  } catch {
-    return false;
-  }
-}
 
 }
 function parseOrderInfo(s: string) {

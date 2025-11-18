@@ -91,4 +91,24 @@ async deleteCancelled(@Param('id') id: string) {
   this.svc['gw'].server.to('waiter').emit('kitchen:cancel_ticket_deleted', { id });
   return { ok: true, id };
 }
+
+// kitchen.controller.ts
+
+@Patch("tickets/:id/cancel-from-kitchen")
+cancelFromKitchen(
+  @Param("id") id: string,
+  @Body() body: { qtyToVoid?: number; reason?: string },
+  @Req() req: any,
+) {
+  const by = req.user?.id ?? "kitchen";
+  return this.svc.cancelFromKitchen({
+    ticketId: id,
+    qtyToVoid: body.qtyToVoid,
+    reason: body.reason,
+    by,
+  });
+}
+
+
+
 }
