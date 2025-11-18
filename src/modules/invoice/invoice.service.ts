@@ -16,7 +16,7 @@ import { CashbookService } from '@modules/cashbook/cashbook.service';
 import { InvoicePromotion } from '@modules/promotions/entities/invoicepromotion.entity';
 import { Promotion } from '@modules/promotions/entities/promotion.entity';
 import { ApplyPromotionsDto } from './dto/apply-promotions.dto';
-import {PaymentsGateway} from '@modules/payments/payments.gateway';
+import { PaymentsGateway } from '@modules/payments/payments.gateway';
 @Injectable()
 export class InvoicesService {
   constructor(
@@ -26,7 +26,7 @@ export class InvoicesService {
     @InjectRepository(Payment) private payRepo: Repository<Payment>,
     private readonly cashbookService: CashbookService,
     @InjectRepository(InvoicePromotion) private invPromoRepo: Repository<InvoicePromotion>,
-     private readonly gateway: PaymentsGateway, 
+    private readonly gateway: PaymentsGateway,
   ) { }
 
   /** Tạo invoice từ order (idempotent) */
@@ -210,7 +210,7 @@ export class InvoicesService {
       const net = Number(inv.finalAmount ?? 0) || gross - Number(inv.discountTotal ?? 0);
       const totalToPay = Math.max(0, net);
       const remaining = Math.max(0, totalToPay - paid);
-  const total = Number(inv.finalAmount ?? inv.totalAmount ?? 0);
+      const total = Number(inv.finalAmount ?? inv.totalAmount ?? 0);
       // Nếu đã đủ tiền rồi thì chặn
       if (remaining <= 0) {
         throw new BadRequestException('INVOICE_ALREADY_PAID');
@@ -239,7 +239,7 @@ export class InvoicesService {
 
       // Cập nhật trạng thái invoice
       const paidAfter = paid + take;
-        const still = Math.max(0, total - paidAfter);
+      const still = Math.max(0, total - paidAfter);
       inv.status = paidAfter >= totalToPay ? InvoiceStatus.PAID : InvoiceStatus.PARTIAL;
       await invRepo.save(inv);
 
@@ -249,7 +249,7 @@ export class InvoicesService {
       }
 
       // Ghi vào sổ quỹ đã thu: áp dụng cho CASH, VIETQR, VNPAY, CARD
-      if ([PaymentMethod.CASH, PaymentMethod.VIETQR, PaymentMethod.VNPAY, PaymentMethod.CARD].includes(method)) {
+      if ([PaymentMethod.CASH, PaymentMethod.VIETQR,].includes(method)) {
         await this.cashbookService.postReceiptFromInvoice(em, inv, take);
       }
       if (still <= 0) {
@@ -291,89 +291,120 @@ export class InvoicesService {
   async list(q: QueryInvoicesDto) {
     try {
       const qb = this.invRepo.createQueryBuilder('i')
+        .distinct(true)
         .leftJoinAndSelect('i.order', 'o')
         .leftJoinAndSelect('o.table', 't')
+        .leftJoinAndSelect('t.area', 'a')
         .leftJoinAndSelect('i.customer', 'c')
-        .leftJoinAndSelect('i.payments', 'p'); // lấy để tính paid
+        .leftJoinAndSelect('i.payments', 'p')
+        .leftJoinAndSelect('i.cashier', 'cashier')
+        .leftJoinAndSelect('cashier.profile', 'cashierProfile');
 
+      // ===== SEARCH =====
       if (q.q?.trim()) {
-        const s = `%${q.q.toLowerCase()}%`;
+        const raw = q.q.trim().toLowerCase();
+        const s = `%${raw}%`;
+
         qb.andWhere(new Brackets(w => {
-          w.where('LOWER(i.invoiceNumber) LIKE :s', { s })
-            .orWhere('LOWER(c.name) LIKE :s', { s })
-            .orWhere('LOWER(t.name) LIKE :s', { s });
+          w.where("LOWER(i.invoiceNumber) LIKE :s", { s })
+            .orWhere("LOWER(COALESCE(c.name, '')) LIKE :s", { s })
+            .orWhere("LOWER(COALESCE(c.\"phoneNumber\", '')) LIKE :s", { s })
+            .orWhere("LOWER(COALESCE(i.note, '')) LIKE :s", { s })
+            .orWhere("LOWER(COALESCE(t.name, '')) LIKE :s", { s });
+
+          // ⭐ Nếu người dùng gõ 'khách lẻ' / 'khach le' thì match customer null
+          if (raw === "khách lẻ" || raw === "khach le") {
+            // tuỳ cột khóa ngoại của bạn, thường là i."customerId" IS NULL
+            w.orWhere('i."customerId" IS NULL');
+          }
         }));
       }
 
-      if (q.status) qb.andWhere('i.status = :st', { st: q.status });
 
-      if (q.fromDate) qb.andWhere('i.createdAt >= :from', { from: new Date(q.fromDate) });
-      if (q.toDate) {
-        const to = new Date(q.toDate); to.setHours(23, 59, 59, 999);
-        qb.andWhere('i.createdAt <= :to', { to });
+      // ===== FILTER STATUS =====
+      if (q.status) qb.andWhere("i.status = :st", { st: q.status });
+
+      // ===== FILTER PAYMENT METHOD =====
+      if (q.paymentMethod) {
+        qb.andWhere("p.method = :pm", { pm: q.paymentMethod });
       }
 
-      qb.orderBy('i.createdAt', 'DESC').addOrderBy('i.invoiceNumber', 'DESC');
+      // ===== FILTER TABLE / AREA =====
+      if (q.tableId) qb.andWhere("t.id = :tid", { tid: q.tableId });
+      if (q.areaId) qb.andWhere("a.id = :aid", { aid: q.areaId });
 
-      // chuẩn hóa page/limit
-      const page = Math.max(1, Number(q.page ?? 1));
-      const limit = Math.min(100, Math.max(1, Number(q.limit ?? 20)));
+      // ===== DATE RANGE =====
+      if (q.fromDate) qb.andWhere("i.createdAt >= :from", { from: new Date(q.fromDate) });
+      if (q.toDate) {
+        const to = new Date(q.toDate);
+        to.setHours(23, 59, 59, 999);
+        qb.andWhere("i.createdAt <= :to", { to });
+      }
 
+      qb.orderBy("i.createdAt", "DESC");
+
+      const page = q.page ?? 1;
+      const limit = q.limit ?? 20;
       qb.skip((page - 1) * limit).take(limit);
 
       const [rows, total] = await qb.getManyAndCount();
 
-      // Tính tổng đã trả theo phương thức
-      const items = rows.map((inv) => {
+      // ===== MAP RESULT =====
+      const items = rows.map(inv => {
         const paidCash = (inv.payments ?? [])
-          .filter(x => x.status === PaymentStatus.SUCCESS && x.method === PaymentMethod.CASH)
+          .filter(p => p.status === PaymentStatus.SUCCESS && p.method === PaymentMethod.CASH)
           .reduce((s, p) => s + Number(p.amount), 0);
 
         const paidBank = (inv.payments ?? [])
-          .filter(x => x.status === PaymentStatus.SUCCESS && x.method === PaymentMethod.VNPAY)
+          .filter(p => p.status === PaymentStatus.SUCCESS && p.method === PaymentMethod.VIETQR)
           .reduce((s, p) => s + Number(p.amount), 0);
 
-        // ...
         const paidTotal = paidCash + paidBank;
-        const totalAmount = Number(inv.totalAmount);
-        const discountTotal = Number(inv.discountTotal ?? 0);
-        const finalAmount = Number(inv.finalAmount ?? (totalAmount - discountTotal));
 
         return {
           id: inv.id,
           invoiceNumber: inv.invoiceNumber,
           createdAt: inv.createdAt,
           status: inv.status,
-          table: inv.order?.table ? { id: inv.order.table.id, name: inv.order.table.name } : null,
-          customer: inv.customer ? { id: inv.customer.id, name: inv.customer.name } : null,
-          guestCount: inv.guestCount ?? null,
-          totalAmount,
-          discountTotal,
-          finalAmount,
+          table: inv.order?.table
+            ? { id: inv.order.table.id, name: inv.order.table.name }
+            : null,
+          area: inv.order?.table?.area
+            ? { id: inv.order.table.area.id, name: inv.order.table.area.name }
+            : null,
+          customer: inv.customer
+            ? { id: inv.customer.id, name: inv.customer.name }
+            : null,
+          totalAmount: Number(inv.totalAmount),
+          discountTotal: Number(inv.discountTotal ?? 0),
+          finalAmount: Number(inv.finalAmount ?? 0),
           paidCash,
           paidBank,
           paidTotal,
-          remaining: Math.max(0, finalAmount - paidTotal),
+          remaining: Math.max(0, Number(inv.finalAmount ?? 0) - paidTotal),
+          cashier: inv.cashier
+            ? { id: inv.cashier.id, name: inv.cashier.profile.fullName }
+            : null,
         };
-
       });
 
-      return new ResponseCommon<typeof items, PageMeta>(
+      return new ResponseCommon(
         200,
         true,
-        'Lấy danh sách hóa đơn thành công',
+        "Lấy danh sách hóa đơn thành công",
         items,
         {
           total,
           page,
           limit,
-          pages: Math.ceil(total / limit) || 0,
-        },
+          pages: Math.ceil(total / limit),
+        }
       );
-    } catch (error) {
-      throw new ResponseException(error, 500, 'Không thể lấy danh sách hóa đơn');
+    } catch (e) {
+      throw new ResponseException(e, 500, "Không thể lấy danh sách hóa đơn");
     }
   }
+
 
   /** Chi tiết hóa đơn: items + payments */
   async detail(id: string) {
@@ -406,7 +437,7 @@ export class InvoicesService {
       .reduce((s, p) => s + Number(p.amount), 0);
 
     const paidBank = (inv.payments ?? [])
-      .filter(x => x.status === PaymentStatus.SUCCESS && x.method === PaymentMethod.VNPAY)
+      .filter(x => x.status === PaymentStatus.SUCCESS && x.method === PaymentMethod.VIETQR)
       .reduce((s, p) => s + Number(p.amount), 0);
 
     const paidTotal = paidCash + paidBank;
