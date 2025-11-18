@@ -9,6 +9,9 @@ import { KitchenGateway } from '../socket/kitchen.gateway';
 import { ItemStatus } from 'src/common/enums';
 import { BadRequestException } from '@nestjs/common';
 import { OrderItem } from '@modules/orderitems/entities/orderitem.entity';
+import { OrderItemsService } from '@modules/orderitems/orderitems.service';
+import { forwardRef } from '@nestjs/common';
+import { Inject } from '@nestjs/common';
 
 // thông báo ngược lại bếp 
  type ProgressRow = {
@@ -30,6 +33,15 @@ export type NotifyBatchDTO = {
   priority: boolean;
   items: BatchItemDTO[];
 };
+type KitchenVoidPayload = {
+  orderId: string;
+  menuItemId: string;
+  orderItemId: string | null;
+  qty: number;
+  reason?: string;
+  by?: string;
+  ticketId: string;
+};
 const LIVE_STATUSES = ['PENDING', 'CONFIRMED', 'PREPARING', 'READY', 'SERVED'] as const;
 @Injectable()
 export class KitchenService {
@@ -40,6 +52,9 @@ export class KitchenService {
     @InjectRepository(MenuItem) private readonly menuRepo: Repository<MenuItem>,
     @InjectRepository(OrderItem) private readonly orderItemRepo: Repository<OrderItem>,
     private readonly gw: KitchenGateway,
+    @Inject(forwardRef(() => OrderItemsService))
+    private readonly orderItemsSvc: OrderItemsService,   
+    private readonly dataSource: DataSource,
   ) {}
 
   async notifyItems(payload: {
@@ -117,12 +132,7 @@ const orderItemMap = new Map(
     return { batchId: batch.id, items: saved.map(s => ({ ticketId: s.id, qty: s.qty })), createdAt: batch.createdAt };
   }
 
-// ví dụ trong KitchenService
-// kitchen.service.ts
-// kitchen.service.ts
-// kitchen.service.ts
-// kitchen.service.ts
-// kitchen.service.ts
+
 async listByStatus(status: ItemStatus, page = 1, limit = 200) {
   const qb = this.ticketRepo.createQueryBuilder('kt')
     // Bắt buộc có order & menuItem để khi map không bị undefined
@@ -278,9 +288,7 @@ async getNotifyHistory(orderId: string): Promise<NotifyBatchDTO[]> {
   }
 
 
-// Logic hủy món 1 và nhiều
-// kitchen.service.ts
-// kitchen.service.ts
+
 async voidTicketsByOrderItemIds(params: { orderId: string; itemIds: string[]; reason?: string; by?: string }) {
   const { orderId, itemIds, reason, by } = params;
   if (!itemIds?.length) return { count: 0 };
@@ -323,93 +331,270 @@ async voidTicketsByOrderItemIds(params: { orderId: string; itemIds: string[]; re
 
 
 
-// kitchen.service.ts
-// kitchen.service.ts
-async voidTicketsByMenu(opts: { orderId: string; menuItemId: string; qtyToVoid: number; reason?: string; by?: string; }) {
-  const { orderId, menuItemId, qtyToVoid, reason, by } = opts;
+async voidTicketsByMenu(opts: {
+  orderId: string;
+  menuItemId: string;
+  qtyToVoid: number;
+  reason?: string;
+  by?: string;
+}) {
+  const { orderId, menuItemId, qtyToVoid, reason, by = "cashier" } = opts;
+
+  // số phần khách muốn huỷ
   let need = qtyToVoid;
 
-  const live: ItemStatus[] = [
-    ItemStatus.PENDING, ItemStatus.CONFIRMED, ItemStatus.PREPARING, ItemStatus.READY,
+  // CHỈ được huỷ PENDING + CONFIRMED
+  const cancellable: ItemStatus[] = [
+    ItemStatus.PENDING,
+    ItemStatus.CONFIRMED,
   ];
 
   const tickets = await this.ticketRepo.find({
-    where: { order: { id: orderId }, menuItem: { id: menuItemId }, status: In(live) },
-    order: { createdAt: 'DESC' },
+    where: {
+      order: { id: orderId } as any,
+      menuItem: { id: menuItemId } as any,
+      status: In(cancellable),
+    },
+    order: { createdAt: "DESC" },
   });
 
-  const patches: Array<
-    { ticketId: string; action: 'deleted' | 'updated'; qtyBefore: number; qtyAfter: number }
-  > = [];
-const voids: Array<{ fromTicketId: string; tempId: string; menuItemId: string; qty: number }> = [];
+  const totalCancelable = tickets.reduce((s, t) => s + Number(t.qty), 0);
+
+  // 👉 Không đủ thì co lại, KHÔNG throw nữa
+  if (totalCancelable <= 0) {
+    return { patches: [], remainToVoid: qtyToVoid };
+  }
+  const effectiveQty = Math.min(qtyToVoid, totalCancelable);
+  need = effectiveQty;
+
+  const patches: Array<{
+    ticketId: string;
+    action: "deleted" | "updated";
+    qtyBefore: number;
+    qtyAfter: number;
+  }> = [];
+
+  const voids: Array<{
+    fromTicketId: string;
+    tempId: string;
+    menuItemId: string;
+    qty: number;
+  }> = [];
+
   for (const t of tickets) {
     if (need <= 0) break;
+
     const before = Number(t.qty);
     const take = Math.min(before, need);
     const after = before - take;
 
     if (after <= 0) {
-      await this.ticketRepo.delete(t.id);             // xoá cứng
-      patches.push({ ticketId: t.id, action: 'deleted', qtyBefore: before, qtyAfter: 0 });
-       voids.push({
-      fromTicketId: t.id,
-      tempId: `void_${t.id}_${Date.now()}`, // id tạm cho FE
-      menuItemId,
-      qty: before,
-    });
+      await this.ticketRepo.delete(t.id);
+      patches.push({
+        ticketId: t.id,
+        action: "deleted",
+        qtyBefore: before,
+        qtyAfter: 0,
+      });
+      voids.push({
+        fromTicketId: t.id,
+        tempId: `void_${t.id}_${Date.now()}`,
+        menuItemId,
+        qty: before,
+      });
     } else {
-      t.qty = after as any;
+      (t as any).qty = after;
       await this.ticketRepo.save(t);
-      patches.push({ ticketId: t.id, action: 'updated', qtyBefore: before, qtyAfter: after });
-       voids.push({
-      fromTicketId: t.id,
-      tempId: `void_${t.id}_${Date.now()}`,
-      menuItemId,
-      qty: take,
-    });
+      patches.push({
+        ticketId: t.id,
+        action: "updated",
+        qtyBefore: before,
+        qtyAfter: after,
+      });
+      voids.push({
+        fromTicketId: t.id,
+        tempId: `void_${t.id}_${Date.now()}`,
+        menuItemId,
+        qty: take,
+      });
     }
 
     need -= take;
   }
 
-  // 🔔 Emit “patches” để FE cập nhật ngay không cần F5
-  this.gw.server.to('kitchen').emit('kitchen:tickets_patched', {
+  // thông báo cho bếp patch vé
+  this.gw.server.to("kitchen").emit("kitchen:tickets_patched", {
     orderId,
     menuItemId,
     reason,
     by,
-    patches,    
-    voids              // ← đủ thông tin để đổi x4 → x2 hoặc remove card
+    patches,
+    voids,
   });
 
-  // (giữ lại sự kiện cũ nếu FE đang dùng)
-  this.gw.emitTicketsVoided({
-    orderId,
-    ticketIds: patches.map(p => p.ticketId),
-    items: [{ menuItemId, qty: qtyToVoid, reason, by }],
+  // 👉 DÙNG effectiveQty khi emit ra ngoài
+  // this.gw.emitTicketsVoided({
+  //   orderId,
+  //   ticketIds: patches.map((p) => p.ticketId),
+  //   items: [{ menuItemId, qty: effectiveQty, reason, by }],
+  // });
 
-  });
-
-  // (tuỳ chọn) emit status-changed để 3 cột cập nhật
   this.gw.emitTicketStatusChanged({
     orderId,
-    items: [{ menuItemId, qty: qtyToVoid, fromStatus: ItemStatus.PENDING, toStatus: ItemStatus.CANCELLED, reason }],
+    items: [
+      {
+        menuItemId,
+        qty: effectiveQty,
+        fromStatus: ItemStatus.PENDING,
+        toStatus: ItemStatus.CANCELLED,
+        reason,
+      },
+    ],
   });
 
-  // Nếu không còn vé sống → broadcast clear
   const liveLeft = await this.ticketRepo.count({
-    where: { order: { id: orderId } as any, status: In(live) },
+    where: {
+      order: { id: orderId } as any,
+      status: In([
+        ItemStatus.PENDING,
+        ItemStatus.CONFIRMED,
+        ItemStatus.PREPARING,
+        ItemStatus.READY,
+      ]),
+    },
   });
+
   if (liveLeft === 0) {
     const clear = { orderId, reason, by };
-    this.gw.server.to('kitchen').emit('kitchen:order_voided', clear);
-    this.gw.server.to('waiter').emit('kitchen:order_voided', clear);
-    this.gw.server.to('cashier').emit('kitchen:order_voided', clear);
+    this.gw.server.to("kitchen").emit("kitchen:order_voided", clear);
+    this.gw.server.to("waiter").emit("kitchen:order_voided", clear);
+    this.gw.server.to("cashier").emit("kitchen:order_voided", clear);
   }
 
-  return { patches, remainToVoid: need };
+  return { patches, remainToVoid: qtyToVoid - effectiveQty };
 }
 
+
+
+
+
+
+
+
+
+
+
+// kitchen.service.ts
+async cancelFromKitchen(opts: {
+  ticketId: string;
+  qtyToVoid?: number;
+  reason?: string;
+  by?: string;
+}) {
+ const { ticketId, qtyToVoid, reason, by = "kitchen" } = opts;
+
+  const payload = await this.ds.transaction<KitchenVoidPayload | null>(
+    async (em) => {
+      const tRepo = em.getRepository(KitchenTicket);
+      const oiRepo = em.getRepository(OrderItem);
+
+      const t = await tRepo.findOne({
+        where: { id: ticketId },
+        relations: ["order", "menuItem"],
+      });
+
+      if (!t) throw new NotFoundException("TICKET_NOT_FOUND");
+
+      if (![ItemStatus.PENDING, ItemStatus.CONFIRMED].includes(t.status)) {
+        throw new BadRequestException(
+          `CANNOT_CANCEL_TICKET_IN_STATUS_${t.status}`,
+        );
+      }
+
+      const ticketQty = Number(t.qty) || 0;
+      if (ticketQty <= 0) {
+        throw new BadRequestException("TICKET_QTY_INVALID");
+      }
+
+      // 👉 số lượng thực sự muốn hủy (nếu không gửi thì mặc định hủy hết)
+      const cancelQty = Math.max(
+        1,
+        Math.min(ticketQty, Number(qtyToVoid) || ticketQty),
+      );
+      const remainQty = ticketQty - cancelQty;
+
+      // ----- cập nhật OrderItem -----
+      if (t.orderItemId) {
+        const oi = await oiRepo.findOne({
+          where: { id: t.orderItemId as string },
+        });
+
+        if (oi) {
+          const after = (oi.quantity || 0) - cancelQty;
+          if (after <= 0) {
+            await oiRepo.delete(oi.id);
+          } else {
+            oi.quantity = after;
+            await oiRepo.save(oi);
+          }
+        }
+      }
+
+      // ----- cập nhật KitchenTicket -----
+      if (remainQty <= 0) {
+        // hủy hết ticket
+        t.status = ItemStatus.CANCELLED;
+        t.cancelReason = reason ?? null;
+        t.cancelledAt = new Date();
+        t.cancelledBy = by ?? null;
+        await tRepo.save(t);
+      } else {
+        // chỉ hủy một phần → giảm qty, giữ status
+        (t as any).qty = remainQty;
+        await tRepo.save(t);
+      }
+
+      return {
+        orderId: t.order.id,
+        menuItemId: t.menuItem?.id ?? (t as any).menuItemId,
+        orderItemId: t.orderItemId ?? null,
+        qty: cancelQty,            // 👈 chỉ số lượng vừa hủy
+        reason,
+        by,
+        ticketId: t.id,
+      };
+    },
+  );
+
+if (payload) {
+  // 1) Nếu anh còn cần "tickets_voided" cho chỗ khác thì vẫn giữ:
+  this.gw.server.to("kitchen").emit("kitchen:tickets_voided", {
+    orderId: payload.orderId,
+    ticketIds: [payload.ticketId],
+    items: [
+      {
+        menuItemId: payload.menuItemId,
+        qty: payload.qty,
+        reason: payload.reason,
+        by: payload.by,
+      },
+    ],
+  });
+
+  // 2) QUAN TRỌNG: bắn "kitchen:void_synced" cho cả 3 room,
+  // để FE bếp nhận được và chạy onVoidedFromNewGateway
+  this.gw.server.to("kitchen").emit("kitchen:void_synced", payload);
+  this.gw.server.to("cashier").emit("kitchen:void_synced", payload);
+  this.gw.server.to("waiter").emit("kitchen:void_synced", payload);
+
+  // 3) Nếu còn dùng event này, giữ lại
+  this.gw.server.to("cashier").emit("kitchen:ticket_cancelled", payload);
+  this.gw.server.to("waiter").emit("kitchen:ticket_cancelled", payload);
+}
+
+
+  return { ok: true, ticketId };
+}
 
 
 
@@ -462,7 +647,7 @@ async voidAllByOrder(opts: {
     orderId,
     ticketIds: touched,       // FE bếp remove theo id (đang mapping id = orderItemId/ticketId)
     tableName,
-    by,
+     by: "cashier",
   });
 
   this.gw.server.to('kitchen').emit('kitchen:order_voided', { orderId, reason, by, tableName });
@@ -470,24 +655,20 @@ async voidAllByOrder(opts: {
   this.gw.server.to('cashier').emit('kitchen:order_voided', { orderId, reason, by, tableName });
 
   // (tuỳ chọn) phát luôn ticket_status_changed tổng quát
-  this.gw.emitTicketStatusChanged({
-    orderId,
-    items: tickets.map(t => ({
-      ticketId: t.id,
-      menuItemId: t.menuItem?.id ?? (t as any).menuItemId,
-      qty: Number(t.qty) || 0,
-      fromStatus: ItemStatus.PENDING, // chỉ để FE animate; không quá quan trọng
-      toStatus: ItemStatus.CANCELLED,
-      reason,
-    })),
-  });
+  // this.gw.emitTicketStatusChanged({
+  //   orderId,
+  //   items: tickets.map(t => ({
+  //     ticketId: t.id,
+  //     menuItemId: t.menuItem?.id ?? (t as any).menuItemId,
+  //     qty: Number(t.qty) || 0,
+  //     fromStatus: ItemStatus.PENDING, // chỉ để FE animate; không quá quan trọng
+  //     toStatus: ItemStatus.CANCELLED,
+  //     reason,
+  //   })),
+  // });
 
   return { voidedTicketIds: touched };
 }
-
-
-
-
-
-
 }
+
+

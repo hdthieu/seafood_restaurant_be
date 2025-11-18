@@ -194,6 +194,25 @@ this.server.to('waiter').emit('kitchen:items_cancelled', payload);
   }
 
 
+/** 🔹 Emit huỷ món chuẩn (phân biệt thu ngân / bếp) */
+emitVoidSynced(payload: {
+  orderId: string;
+  menuItemId: string;
+  qty: number;
+  reason?: string | null;
+  by: "cashier" | "kitchen";
+}) {
+  if (payload.by === "cashier") {
+    // 👉 Thu ngân hủy → CHỈ BÁO CHO BẾP
+    this.server.to("kitchen").emit("kitchen:void_synced", payload);
+
+    // 👉 Và đồng bộ UI cho chính thu ngân (không hiển thị toast bếp hủy)
+    this.server.to("cashier").emit("cashier:void_local", payload);
+  } else {
+    // 👉 Bếp hủy → Chỉ thu ngân nhận
+    this.server.to("cashier").emit("kitchen:void_synced", payload);
+  }
+}
 
 
 

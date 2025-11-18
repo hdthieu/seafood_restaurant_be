@@ -1,9 +1,13 @@
+// src/modules/ai/ai.service.ts
 import { Injectable, Logger } from "@nestjs/common";
 import { ToolsService } from "./tools.service";
 import { RagService } from "../rag/rag.service";
 import { LlmGateway } from "./llm.gateway";
 
 type UiMsg = { role: "user" | "assistant"; content: string };
+type QuestionKind = "DATA" | "RAG" | "CHAT" | "SQL" | "TIME";
+
+const TZ_DEFAULT = process.env.TZ || "Asia/Ho_Chi_Minh";
 
 @Injectable()
 export class AiService {
@@ -13,102 +17,286 @@ export class AiService {
     private readonly tools: ToolsService,
     private readonly rag: RagService,
     private readonly llm: LlmGateway,
-  ) {}
+  ) { }
 
-  // -----------------------------
-  // Detect chat mode
-  // -----------------------------
+  // =============================
+  // Detect chat mode bằng prefix
+  // =============================
   private detectMode(question: string) {
     if (question.startsWith("/gemini ")) return "gemini";
     if (question.startsWith("/rag ")) return "rag";
     if (question.startsWith("/sql ")) return "sql";
     return "auto";
   }
-private lastDataContext: null | {
-  question: string;
-  sql: string;
-  rows: any[];
-} = null;
 
-  // -----------------------------
-  // AUTO MODE (SQL → RAG → Gemini)
-  // -----------------------------
-  private async autoRoute(question: string) {
-    this.logger.log(`[AiService] AUTO mode for question="${question}"`);
+  // =============================
+  // Nhận diện câu hỏi THỜI GIAN
+  // =============================
+  private isTimeQuestion(raw: string): boolean {
+    const q = raw.toLowerCase().normalize("NFC");
 
-    // 1) Smart SQL
-    try {
-      if (this.tools.isDataQuestion(question)) {
-        const { sql, rows, explain, sources } = await this.tools.runSmartQuery(question);
-        return { role: "assistant", content: explain, data: { sql, rows, sources } };
-      }
-    } catch (e) {
-      this.logger.warn(`[SmartSQL failed] ${e}`);
-    }
+    const patterns = [
+      /bây giờ mấy giờ/,
+      /mấy giờ rồi/,
+      /thời gian (bây giờ|hiện tại)/,
+      /giờ hiện tại/,
+      /giờ bây giờ/,
+      /ở hcm (mấy giờ|bây giờ là mấy giờ|giờ mấy giờ)/,
+      /hôm nay ngày mấy/,
+      /hôm nay là ngày bao nhiêu/,
+      /hôm nay là ngày gì/,
+      /hôm nay là thứ mấy/,
+      /today.*time/,
+      /what time is it/,
+      /today.*date/,
+      /current time/,
+      /current date/,
+    ];
 
-    // 2) RAG
-    try {
-      const ragHits = await this.rag.query(question);
-      const threshold = Number(process.env.RAG_SCORE_THRESHOLD || 0.2);
-
-      if (ragHits.length && (ragHits[0].score ?? 0) >= threshold) {
-        const rag = await this.rag.ask(question);
-        return { role: "assistant", content: rag.answer, data: { sources: rag.sources } };
-      }
-    } catch (err) {
-      this.logger.warn(`[RAG failed] ${err}`);
-    }
-
-    // 3) Gemini fallback
-    const text = await this.llm.chat(
-      `Bạn là trợ lý AI thân thiện. Trả lời tự nhiên.`,
-      question,
-      25000,
-    );
-
-    return { role: "assistant", content: text };
+    return patterns.some((re) => re.test(q));
   }
 
-  // -----------------------------
+  // =============================
+  // Nhận diện câu hỏi DỮ LIỆU (SQL)
+  // → để KHÔNG cho LLM đẩy sang CHAT
+  // =============================
+  private looksLikeDataQuestion(raw: string): boolean {
+    const q = raw.toLowerCase().normalize("NFC");
+
+    // Từ khóa rất “DB”: doanh thu, hóa đơn, đơn hàng, doanh số...
+    const patterns = [
+      /doanh\s*thu/,
+      /doanh\s*số/,
+      /hóa\s*đơn/,
+      /hoá\s*đơn/,
+      /đơn\s*hàng/,
+      /invoice/,
+      /revenue/,
+      /sales/,
+      /tháng\s*\d{1,2}\s*20\d{2}/, // tháng 9 2025, tháng 12 2024...
+      /tháng\s*\d{1,2}/,
+      /\b20\d{2}\b/,               // có năm
+      /(bao nhiêu|mấy|tổng|đếm)\s+(hóa\s*đơn|hoá\s*đơn|đơn\s*hàng)/,
+    ];
+
+    return patterns.some((re) => re.test(q));
+  }
+
+  // =============================
+  // LLM phân loại câu hỏi
+  // =============================
+  private async classifyQuestion(question: string): Promise<QuestionKind> {
+    const sys = `
+Bạn là bộ phân loại câu hỏi cho trợ lý nhà hàng.
+Nhiệm vụ: CHỈ trả về đúng MỘT từ trong các nhãn sau (viết hoa, không giải thích thêm):
+
+- "DATA": khi người dùng hỏi về số liệu, thống kê, đếm, doanh thu, số hóa đơn, 
+  danh sách dữ liệu trong database (kể cả tháng/năm trong TƯƠNG LAI so với bạn).
+  KHÔNG được suy đoán "tháng đó đã tới hay chưa", chỉ cần biết đó là truy vấn dữ liệu.
+
+- "SQL": khi người dùng muốn xem hoặc viết câu lệnh SQL, debug SQL, hoặc yêu cầu "viết câu SELECT..."...
+
+- "RAG": khi người dùng hỏi về quy trình, nội quy, chính sách, hướng dẫn, SOP, tài liệu txt/md.
+
+- "TIME": khi người dùng hỏi về thời gian/ngày giờ hiện tại
+  (ví dụ: "bây giờ mấy giờ", "thời gian hiện tại ở HCM", "hôm nay ngày mấy").
+
+- "CHAT": các câu hỏi trò chuyện thông thường, giải thích chung, tư vấn,
+  không cần truy vấn DB và không nằm trong tài liệu nội bộ.
+
+CHỈ trả về một trong năm chuỗi: DATA, SQL, RAG, TIME, CHAT.
+`.trim();
+
+    const user = `Câu hỏi: """${question}"""`;
+
+    try {
+      const out = (await this.llm.chat(sys, user, 5_000)).trim().toUpperCase();
+      if (out.includes("TIME")) return "TIME";
+      if (out.includes("DATA")) return "DATA";
+      if (out.includes("SQL")) return "SQL";
+      if (out.includes("RAG")) return "RAG";
+      if (out.includes("CHAT")) return "CHAT";
+    } catch (e) {
+      this.logger.warn(
+        `[AiService] classifyQuestion error: ${e instanceof Error ? e.message : e
+        }`,
+      );
+    }
+    return "CHAT";
+  }
+
+  // =============================
+  // Build câu trả lời thời gian hiện tại (HCM)
+  // =============================
+  private buildNowAnswer(): string {
+    const tz = TZ_DEFAULT;
+    const now = new Date();
+
+    const dateStr = new Intl.DateTimeFormat("vi-VN", {
+      timeZone: tz,
+      year: "numeric",
+      month: "long",
+      day: "2-digit",
+      weekday: "long",
+    }).format(now);
+
+    const timeStr = new Intl.DateTimeFormat("vi-VN", {
+      timeZone: tz,
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    }).format(now);
+
+    return `Hiện tại là ${timeStr}, ${dateStr} (múi giờ ${tz}). ⏰`;
+  }
+
+  // =============================
+  // AUTO MODE
+  // =============================
+  private async autoRoute(question: string) {
+    // 0) TIME bằng regex → trả lời ngay, không hỏi LLM
+    if (this.isTimeQuestion(question)) {
+      this.logger.log(
+        `[AiService] AUTO detect TIME by regex question="${question}"`,
+      );
+      return { role: "assistant", content: this.buildNowAnswer() };
+    }
+
+    // 1) DATA bằng regex → ép DATA luôn, không cho LLM nhầm sang CHAT
+    let kind: QuestionKind;
+    if (this.looksLikeDataQuestion(question)) {
+      kind = "DATA";
+      this.logger.log(
+        `[AiService] AUTO force kind=DATA by regex question="${question}"`,
+      );
+    } else {
+      kind = await this.classifyQuestion(question);
+      this.logger.log(
+        `[AiService] AUTO classify=${kind} question="${question}"`,
+      );
+    }
+
+    // 2) TIME do LLM detect (phòng trường hợp câu phức tạp)
+    if (kind === "TIME") {
+      return { role: "assistant", content: this.buildNowAnswer() };
+    }
+
+    // 3) DATA & SQL → SmartSQL
+    if (kind === "DATA" || kind === "SQL") {
+      try {
+        const { sql, rows, explain, sources } =
+          await this.tools.runSmartQuery(question);
+        return {
+          role: "assistant",
+          content: explain,
+          data: { sql, rows, sources },
+        };
+      } catch (e: any) {
+        this.logger.warn(`[SQL] Lỗi khi chạy SmartSQL: ${e?.message}`);
+        return {
+          role: "assistant",
+          content: "❌ Lỗi khi truy vấn SQL: " + e?.message,
+        };
+      }
+    }
+
+    // 4) RAG → đọc tài liệu
+    if (kind === "RAG") {
+      try {
+        const rag = await this.rag.ask(question);
+        return {
+          role: "assistant",
+          content: rag.answer,
+          data: { sources: rag.sources },
+        };
+      } catch (e: any) {
+        this.logger.warn(`[RAG] Lỗi RAG: ${e?.message}`);
+        return {
+          role: "assistant",
+          content: "❌ Không đọc được tài liệu nội bộ.",
+        };
+      }
+    }
+
+    // 5) CHAT → Gemini
+    const text = await this.llm.chat(
+      `
+Bạn là trợ lý AI thân thiện cho quản lý nhà hàng.
+- Trả lời tiếng Việt tự nhiên, dễ hiểu.
+- Dùng emoji nhẹ nhàng nếu phù hợp.
+- Nếu câu hỏi mơ hồ, hãy hỏi lại cho rõ.
+`.trim(),
+      question,
+      30_000,
+    );
+
+    return {
+      role: "assistant",
+      content:
+        text ||
+        "Mình chưa trả lời được câu này, bạn có thể nói rõ hơn không? 😊",
+    };
+  }
+
+  // =============================
   // MAIN ROUTE
-  // -----------------------------
+  // =============================
   async route(messages: UiMsg[]) {
     const questionRaw =
       messages.filter((m) => m.role === "user").pop()?.content || "";
     if (!questionRaw) return { role: "assistant", content: "Xin chào 👋" };
 
     const mode = this.detectMode(questionRaw);
-    const question = questionRaw.replace(/^\/(gemini|rag|sql)\s+/i, "").trim();
+    const question = questionRaw
+      .replace(/^\/(gemini|rag|sql)\s+/i, "")
+      .trim();
 
     this.logger.log(`[AiService] mode=${mode}, question="${question}"`);
 
-    // --- MODE 1: SQL ---
+    // ép /sql → SmartSQL
     if (mode === "sql") {
       try {
-        const { sql, rows, explain, sources } = await this.tools.runSmartQuery(question);
-        return { role: "assistant", content: explain, data: { sql, rows, sources } };
-      } catch (e) {
-        return { role: "assistant", content: "❌ Lỗi SQL: " + e.message };
+        const { sql, rows, explain, sources } =
+          await this.tools.runSmartQuery(question);
+        return {
+          role: "assistant",
+          content: explain,
+          data: { sql, rows, sources },
+        };
+      } catch (e: any) {
+        return {
+          role: "assistant",
+          content: "❌ Lỗi SQL: " + e?.message,
+        };
       }
     }
 
-    // --- MODE 2: RAG ---
+    // ép /rag → RAG
     if (mode === "rag") {
       const rag = await this.rag.ask(question);
-      return { role: "assistant", content: rag.answer, data: { sources: rag.sources } };
+      return {
+        role: "assistant",
+        content: rag.answer,
+        data: { sources: rag.sources },
+      };
     }
 
-    // --- MODE 3: GEMINI ---
+    // ép /gemini → chat thuần
     if (mode === "gemini") {
       const text = await this.llm.chat(
-        "Bạn là trợ lý AI thân thiện.",
+        "Bạn là trợ lý AI thân thiện cho quản lý nhà hàng.",
         question,
-        25000,
+        25_000,
       );
-      return { role: "assistant", content: text };
+      return {
+        role: "assistant",
+        content:
+          text ||
+          "Mình chưa trả lời được câu này, bạn có thể nói rõ hơn không? 😊",
+      };
     }
 
-    // --- MODE AUTO ---
+    // AUTO
     return this.autoRoute(question);
   }
 
