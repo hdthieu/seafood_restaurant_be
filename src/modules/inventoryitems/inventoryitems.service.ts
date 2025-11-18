@@ -1,17 +1,21 @@
 // inventoryitems.service.ts
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { ILike, In, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
 import { InventoryItem } from './entities/inventoryitem.entity';
+import { InventoryTransaction } from '@modules/inventorytransaction/entities/inventorytransaction.entity';
+import { PurchaseReceiptItem } from '@modules/purchasereceiptitem/entities/purchasereceiptitem.entity';
+import { Ingredient } from '@modules/ingredient/entities/ingredient.entity';
+import { InventoryAction } from 'src/common/enums';
 import { UnitsOfMeasure } from '@modules/units-of-measure/entities/units-of-measure.entity';
-import { Category } from '@modules/category/entities/category.entity';
-import { Supplier } from '@modules/supplier/entities/supplier.entity';
 import { ListInventoryItemsQueryDto } from './dto/list-inventory-items.query.dto';
 import { UomConversion } from '@modules/uomconversion/entities/uomconversion.entity';
 import { ResponseCommon, ResponseException } from 'src/common/common_dto/respone.dto';
 import { PageMeta } from 'src/common/common_dto/paginated';
 import { ListIngredientsDto } from './dto/list-ingredients.dto';
 import { CreateInventoryitemDto } from './dto/create-inventoryitem.dto';
+import { Category } from '@modules/category/entities/category.entity';
+import { UpdateInventoryitemDto } from './dto/update-inventoryitem.dto';
 
 
 @Injectable()
@@ -25,38 +29,89 @@ export class InventoryitemsService {
 
     @InjectRepository(UnitsOfMeasure)
     private readonly uomRepo: Repository<UnitsOfMeasure>,
+    @InjectRepository(InventoryTransaction)
+    private readonly invTxRepo: Repository<InventoryTransaction>,
+    @InjectRepository(PurchaseReceiptItem)
+    private readonly prItemRepo: Repository<PurchaseReceiptItem>,
+    @InjectRepository(Ingredient)
+    private readonly ingredientRepo: Repository<Ingredient>,
+    @InjectRepository(Category)
+    private readonly categoryRepo: Repository<Category>,
   ) { }
+
+  private readonly BASE_BY_DIM: Record<UnitsOfMeasure['dimension'], string> = {
+    mass: 'G',
+    volume: 'ML',
+    count: 'EA',
+    length: 'EA',
+  };
+
+  // 1 from = factor * to => qty_to = qty_from * factor
+  private async convertQty(fromCode: string, toCode: string, qty: number): Promise<number> {
+    if (fromCode === toCode) return qty;
+
+    const conv = await this.convRepo.findOne({
+      where: { from: { code: fromCode }, to: { code: toCode } },
+      relations: ['from', 'to'],
+    });
+
+    if (!conv) {
+      throw new ResponseException(`NO_CONVERSION_${fromCode}_TO_${toCode}`);
+    }
+
+    return qty * Number(conv.factor);
+  }
 
   /** Tạo mới vật tư (nguyên liệu) trong kho */
   async create(dto: CreateInventoryitemDto): Promise<ResponseCommon<any>> {
     try {
       const name = (dto.name || '').trim();
       const uomCode = (dto.unit || '').trim().toUpperCase();
-      if (!name) throw new BadRequestException('NAME_REQUIRED');
-      if (!uomCode) throw new BadRequestException('UOM_REQUIRED');
+      if (!name) throw new ResponseException('NAME_REQUIRED', 400);
+      if (!uomCode) throw new ResponseException('UOM_REQUIRED', 400);
 
-      const baseUom = await this.uomRepo.findOne({ where: { code: uomCode } });
-      if (!baseUom) throw new BadRequestException('UOM_NOT_FOUND');
+      // Đơn vị user chọn ở form (KG, L, CAN...)
+      const inputUom = await this.uomRepo.findOne({ where: { code: uomCode } });
+      if (!inputUom) throw new ResponseException('UOM_NOT_FOUND', 400);
 
-      const quantity = Number(dto.quantity ?? 0);
-      const alertThreshold = Number(dto.alertThreshold ?? 0);
-      if (quantity < 0) throw new BadRequestException('QUANTITY_INVALID');
-      if (alertThreshold < 0) throw new BadRequestException('ALERT_THRESHOLD_INVALID');
+      const alertThresholdRaw = Number(dto.alertThreshold ?? 0);
+      if (alertThresholdRaw < 0) throw new ResponseException('ALERT_THRESHOLD_INVALID', 400);
 
-      // Tạo code đơn giản: ING-yyyymmdd-hhmmss-xxx
+      // === CHỌN baseUom nhỏ nhất theo dimension
+      const baseCode = this.BASE_BY_DIM[inputUom.dimension]; // mass -> 'G', volume -> 'ML', ...
+      const baseUom = await this.uomRepo.findOne({ where: { code: baseCode } });
+      if (!baseUom) throw new ResponseException(`BASE_UOM_NOT_FOUND_${baseCode}`, 400);
+
+      // Nếu bạn cho nhập ngưỡng theo đơn vị người dùng chọn (KG, L, ...),
+      // thì convert sang base (G, ML, ...). Nếu muốn nhập trực tiếp theo base
+      // thì bỏ đoạn convert này đi.
+      const alertThreshold = await this.convertQty(inputUom.code, baseUom.code, alertThresholdRaw);
+
+      // Tồn ban đầu luôn = 0, vì phiếu nhập mới cộng thêm
+      const quantity = 0;
+
+      // Tạo code đơn giản
       const now = new Date();
       const pad = (n: number, l = 2) => n.toString().padStart(l, '0');
-      const code = `ING-${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}-${Math.floor(Math.random() * 900 + 100)}`;
+      const code = `ING-${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(
+        now.getHours(),
+      )}${pad(now.getMinutes())}${pad(now.getSeconds())}-${Math.floor(Math.random() * 900 + 100)}`;
 
       const item = this.inventoryRepo.create({
         name,
         code,
-        baseUom: baseUom,
-        quantity,
-        alertThreshold,
+        baseUom,         // luôn là đơn vị nhỏ nhất
+        quantity,        // = 0
+        alertThreshold,  // đã đổi sang baseUom
         description: dto.description?.trim() || null,
-        // avgCost mặc định = 0, suppliers & category chưa thiết lập ở bước tạo này
       });
+
+      if (dto.categoryId) {
+        const cat = await this.categoryRepo.findOne({ where: { id: dto.categoryId } });
+        if (!cat) throw new ResponseException('CATEGORY_NOT_FOUND', 400);
+        item.category = cat;
+      }
+
       const saved = await this.inventoryRepo.save(item);
 
       return new ResponseCommon(201, true, 'Tạo vật tư thành công', {
@@ -68,12 +123,14 @@ export class InventoryitemsService {
         alertThreshold: Number(saved.alertThreshold),
         avgCost: Number(saved.avgCost ?? 0),
         description: saved.description,
+        category: saved.category ? { id: saved.category.id, name: (saved as any).category?.name } : null,
         createdAt: saved.createdAt,
       });
     } catch (error) {
       throw new ResponseException(error, 400, 'Không thể tạo vật tư mới');
     }
   }
+
 
 
   /** Danh sách tất cả item kèm baseUom/category/suppliers (đủ để FE hiển thị combobox đẹp) */
@@ -87,6 +144,7 @@ export class InventoryitemsService {
         .leftJoinAndSelect('i.baseUom', 'u')
         .leftJoinAndSelect('i.category', 'c')
         .leftJoinAndSelect('i.suppliers', 's')
+        .where('i.isDeleted = :isDeleted', { isDeleted: false })
         .orderBy('i.createdAt', 'DESC')
         .skip(skip)
         .take(limit)
@@ -146,6 +204,7 @@ export class InventoryitemsService {
         suppliers: (r.suppliers ?? []).map(s => ({ id: s.id, name: s.name })),
         createdAt: r.createdAt,
         updatedAt: r.updatedAt,
+        description: r.description,
       }));
 
       return new ResponseCommon<typeof items, PageMeta>(
@@ -156,7 +215,7 @@ export class InventoryitemsService {
         { total, page, limit, pages: Math.ceil(total / limit) || 0 },
       );
     } catch (error) {
-      throw new ResponseException(error, 500, 'Không thể lấy danh sách vật tư');
+      throw new ResponseException(error, 400, 'CANNOT_GET_INVENTORY_ITEMS');
     }
   }
 
@@ -242,4 +301,146 @@ export class InventoryitemsService {
 
     return [baseOption, ...others];
   }
+
+
+  async update(id: string, dto: UpdateInventoryitemDto): Promise<ResponseCommon<any>> {
+    const item = await this.inventoryRepo.findOne({
+      // Chỉ cho phép cập nhật item còn đang hoạt động (chưa bị soft delete)
+      where: { id, isDeleted: false },
+      relations: ['baseUom', 'category', 'suppliers'],
+    });
+    if (!item) {
+      throw new ResponseException('ITEM_NOT_FOUND', 404);
+    }
+
+    // Không cho đổi code & baseUom qua API này
+    // (nếu FE cố gửi thì bỏ qua hoặc báo lỗi)
+    // Ví dụ: nếu dto có field code / unit thì chặn:
+    // if ((dto as any).code || (dto as any).unit) throw new ResponseException('CANNOT_CHANGE_CODE_OR_BASEUOM', 400);
+
+    // name
+    if (dto.name !== undefined) {
+      const name = dto.name.trim();
+      if (!name) throw new ResponseException('NAME_REQUIRED', 400);
+      item.name = name;
+    }
+
+    // alertThreshold (ở đây hiểu là đã theo baseUom)
+    if (dto.alertThreshold !== undefined) {
+      const v = Number(dto.alertThreshold);
+      if (v < 0) throw new ResponseException('ALERT_THRESHOLD_INVALID', 400);
+      item.alertThreshold = v;
+    }
+
+    // description
+    if (dto.description !== undefined) {
+      item.description = dto.description?.trim() || null;
+    }
+
+    // category
+    // category: allow clearing (null) or assigning existing category by id
+    if ((dto as any).categoryId !== undefined) {
+      if ((dto as any).categoryId === null) {
+        item.category = null as any;
+      } else {
+        const cat = await this.categoryRepo.findOne({ where: { id: (dto as any).categoryId } });
+        if (!cat) throw new ResponseException('CATEGORY_NOT_FOUND', 400);
+        item.category = cat;
+      }
+    }
+
+    const saved = await this.inventoryRepo.save(item);
+
+    return new ResponseCommon(200, true, 'Cập nhật vật tư thành công', {
+      id: saved.id,
+      code: saved.code,
+      name: saved.name,
+      baseUom: {
+        code: saved.baseUom.code,
+        name: saved.baseUom.name,
+        dimension: saved.baseUom.dimension,
+      },
+      quantity: Number(saved.quantity),
+      avgCost: Number(saved.avgCost),
+      alertThreshold: Number(saved.alertThreshold),
+      description: saved.description,
+      category: saved.category ? { id: saved.category.id, name: saved.category.name } : null,
+      suppliers: (saved.suppliers ?? []).map(s => ({ id: s.id, name: s.name })),
+      // isActive = !isDeleted để FE dễ dùng
+      isActive: !saved.isDeleted,
+      updatedAt: saved.updatedAt,
+    });
+  }
+
+  // async remove(id: string, force = false): Promise<ResponseCommon<any>> {
+  //   const item = await this.inventoryRepo.findOne({ where: { id } });
+  //   if (!item) {
+  //     throw new ResponseException('ITEM_NOT_FOUND', 404);
+  //   }
+  //   const qty = Number(item.quantity ?? 0);
+
+  //   // Nếu caller muốn force zero stock thì tạo giao dịch WASTE
+  //   if (qty > 0 && force) {
+  //     const unitCost = Number(item.avgCost ?? 0);
+  //     const lineCost = Number((unitCost * qty).toFixed(2));
+
+  //     await this.invTxRepo.save(this.invTxRepo.create({
+  //       item: { id: item.id } as any,
+  //       quantity: qty,
+  //       action: InventoryAction.WASTE,
+  //       unitCost: unitCost,
+  //       lineCost,
+  //       beforeQty: qty,
+  //       afterQty: 0,
+  //       refType: 'ITEM_DEACTIVATE',
+  //       refId: item.id as any,
+  //       note: 'Force deactivate: zeroed stock',
+  //     } as any));
+
+  //     item.quantity = 0;
+  //     item.avgCost = 0;
+  //   }
+
+  //   // Soft delete regardless of qty (we keep history)
+  //   item.isDeleted = true;
+  //   const saved = await this.inventoryRepo.save(item);
+  //   return new ResponseCommon(200, true, 'Ngưng sử dụng vật tư thành công', {
+  //     id: saved.id,
+  //     hadStock: qty > 0,
+  //     remainingQty: Number(saved.quantity),
+  //   });
+  // }
+
+  // /** Permanently remove an item only if safety checks pass
+  //  *  Criteria to allow hard delete:
+  //  *   - quantity === 0
+  //  *   - no inventory_transactions referencing this item
+  //  *   - no purchase_receipt_items and no menu ingredients referencing this item
+  //  *  Returns detailed reason if not allowed.
+  //  */
+  // async hardDelete(id: string): Promise<ResponseCommon<null>> {
+  //   const item = await this.inventoryRepo.findOne({ where: { id } });
+  //   if (!item) throw new ResponseException('ITEM_NOT_FOUND', 404);
+
+  //   const qty = Number(item.quantity ?? 0);
+
+  //   const txCount = await this.invTxRepo.count({ where: { item: { id } as any } });
+  //   const prCount = await this.prItemRepo.count({ where: { item: { id } as any } });
+  //   const ingCount = await this.ingredientRepo.count({ where: { inventoryItem: { id } as any } });
+
+  //   const reasons: string[] = [];
+  //   if (qty !== 0) reasons.push('NON_ZERO_QUANTITY');
+  //   if (txCount > 0) reasons.push('HAS_INVENTORY_TRANSACTIONS');
+  //   if (prCount > 0) reasons.push('HAS_PURCHASE_RECEIPT_ITEMS');
+  //   if (ingCount > 0) reasons.push('USED_IN_MENU_INGREDIENTS');
+
+  //   if (reasons.length > 0) {
+  //     throw new ResponseException({ allowed: false, reasons }, 400, 'CANNOT_HARD_DELETE_ITEM');
+  //   }
+
+  //   // safe to hard delete
+  //   await this.inventoryRepo.remove(item);
+  //   return new ResponseCommon(200, true, 'ITEM_DELETED_PERMANENTLY', null);
+  // }
+
 }

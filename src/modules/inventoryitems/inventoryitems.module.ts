@@ -7,9 +7,12 @@ import { UnitsOfMeasure } from '@modules/units-of-measure/entities/units-of-meas
 import { Category } from '@modules/category/entities/category.entity';
 import { Supplier } from '@modules/supplier/entities/supplier.entity';
 import { UomConversion } from '@modules/uomconversion/entities/uomconversion.entity';
+import { Ingredient } from '@modules/ingredient/entities/ingredient.entity';
+import { InventoryTransaction } from '@modules/inventorytransaction/entities/inventorytransaction.entity';
+import { PurchaseReceiptItem } from '@modules/purchasereceiptitem/entities/purchasereceiptitem.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([InventoryItem, UnitsOfMeasure, Category, Supplier, UomConversion])],
+  imports: [TypeOrmModule.forFeature([InventoryItem, UnitsOfMeasure, Category, Supplier, UomConversion, InventoryTransaction, PurchaseReceiptItem, Ingredient])],
   controllers: [InventoryitemsController],
   providers: [InventoryitemsService],
 })

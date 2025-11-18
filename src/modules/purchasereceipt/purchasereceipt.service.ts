@@ -413,6 +413,17 @@ export class PurchasereceiptService {
         });
         await lineRepo.save(line);
 
+        // Liên kết item với supplier vào bảng join inventory_item_suppliers (nếu chưa tồn tại)
+        await em.query(
+          `INSERT INTO "inventory_item_suppliers"("inventoryItemsId","suppliersId")
+           SELECT $1, $2
+           WHERE NOT EXISTS (
+             SELECT 1 FROM "inventory_item_suppliers"
+             WHERE "inventoryItemsId" = $1 AND "suppliersId" = $2
+           )`,
+          [itemMaster.id, supplier.id],
+        );
+
         // cập nhật tồn theo base
         const baseQty = Number(line.quantity) * Number(line.conversionToBase);
         const unitCostBase = Number(line.unitPrice) / Number(line.conversionToBase);
@@ -707,6 +718,16 @@ export class PurchasereceiptService {
             note: it.note ?? undefined,
           });
           await lineRepo.save(line);
+          // Ghi nhận quan hệ item - supplier vào bảng join nếu chưa có (khi cập nhật DRAFT)
+          await em.query(
+            `INSERT INTO "inventory_item_suppliers"("inventoryItemsId","suppliersId")
+             SELECT $1, $2
+             WHERE NOT EXISTS (
+               SELECT 1 FROM "inventory_item_suppliers"
+               WHERE "inventoryItemsId" = $1 AND "suppliersId" = $2
+             )`,
+            [itemMaster.id, (supplier ?? existed.supplier).id],
+          );
           savedLines.push(line);
         }
       } else {
@@ -774,6 +795,28 @@ export class PurchasereceiptService {
         const itemId = (line.item as any)?.id ?? line.item;
         const inv = await invRepo.findOne({ where: { id: itemId } });
         if (!inv) throw new ResponseException(null, 404, 'ITEM_NOT_FOUND');
+
+        // Đảm bảo quan hệ item - supplier tồn tại khi POST
+        await em.query(
+          `INSERT INTO "inventory_item_suppliers"("inventoryItemsId","suppliersId")
+           SELECT $1, $2
+           WHERE NOT EXISTS (
+             SELECT 1 FROM "inventory_item_suppliers"
+             WHERE "inventoryItemsId" = $1 AND "suppliersId" = $2
+           )`,
+          [inv.id, existed.supplier.id],
+        );
+
+        // Đảm bảo quan hệ item-supplier được lưu trong join table
+        await em.query(
+          `INSERT INTO "inventory_item_suppliers"("inventoryItemsId","suppliersId")
+           SELECT $1, $2
+           WHERE NOT EXISTS (
+             SELECT 1 FROM "inventory_item_suppliers"
+             WHERE "inventoryItemsId" = $1 AND "suppliersId" = $2
+           )`,
+          [inv.id, existed.supplier.id],
+        );
 
         const baseQty = Number(line.quantity) * Number(line.conversionToBase);
         const unitCostBase = Number(line.unitPrice) / Number(line.conversionToBase);

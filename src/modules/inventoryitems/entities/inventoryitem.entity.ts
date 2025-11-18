@@ -50,4 +50,7 @@ export class InventoryItem {
     @ManyToMany(() => Supplier, { cascade: false })
     @JoinTable({ name: 'inventory_item_suppliers' })
     suppliers: Supplier[];
+
+    @Column({ type: 'boolean', default: false })
+    isDeleted: boolean;
 }
