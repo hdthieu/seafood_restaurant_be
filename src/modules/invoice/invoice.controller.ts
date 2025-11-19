@@ -8,8 +8,10 @@ import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
 import { CurrentUser } from 'src/common/decorators/user.decorator';
 import { Roles } from 'src/common/decorators/roles.decorator';
 import { ApplyPromotionsDto } from './dto/apply-promotions.dto';
+import { ApiBearerAuth } from '@nestjs/swagger';
 @UseGuards(JwtAuthGuard)
 @Controller('invoices')
+@ApiBearerAuth()
 export class InvoicesController {
   constructor(private readonly svc: InvoicesService) { }
 

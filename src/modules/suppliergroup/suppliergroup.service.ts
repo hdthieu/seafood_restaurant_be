@@ -3,18 +3,22 @@ import { CreateSupplierGroupDto } from './dto/create-suppliergroup.dto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { SupplierGroup } from './entities/suppliergroup.entity';
 import { ResponseCommon, ResponseException } from 'src/common/common_dto/respone.dto';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { QuerySupplierGroupDto } from './dto/query-supplier-group.dto';
 import { UpdateSuppliergroupDto } from './dto/update-suppliergroup.dto';
 import { SupplierStatus } from 'src/common/enums';
 import { Supplier } from '@modules/supplier/entities/supplier.entity';
 import { PageMeta } from 'src/common/common_dto/paginated';
+import { PurchaseReceipt } from '@modules/purchasereceipt/entities/purchasereceipt.entity';
+import { PurchaseReturn } from '@modules/purchasereturn/entities/purchasereturn.entity';
 
 @Injectable()
 export class SuppliergroupService {
   constructor(
     @InjectRepository(SupplierGroup) private readonly groupRepo: Repository<SupplierGroup>,
     @InjectRepository(Supplier) private readonly supplierRepo: Repository<Supplier>,
+    @InjectRepository(PurchaseReceipt) private readonly purchaseReceiptRepo: Repository<PurchaseReceipt>,
+    @InjectRepository(PurchaseReturn) private readonly purchaseReturnRepo: Repository<PurchaseReturn>,
   ) { }
 
   // Sinh code dạng SG-XXXX (4 ký tự base36)
@@ -148,49 +152,53 @@ export class SuppliergroupService {
   }
 
   /**
-   * Xoá nhóm:
-   * - Nếu còn supplier → BẮT BUỘC có reassignToId (chuyển tất cả supplier sang nhóm đích) rồi mới xoá.
-   * - Nếu không còn supplier → xoá thẳng.
+   * Xoá nhóm nhà cung cấp với các điều kiện nghiệp vụ:
+   * - Case 1: Nhóm không có nhà cung cấp nào -> Xoá trực tiếp.
+   * - Case 2: Nhóm có nhà cung cấp nhưng chưa phát sinh phiếu nhập/trả hàng -> Cho phép xoá, đồng thời cập nhật `supplierGroupId` của các NCC thành `null`.
+   * - Case 3: Nhóm có nhà cung cấp và đã phát sinh phiếu nhập/trả hàng -> Không cho xoá, yêu cầu vô hiệu hoá (deactivate) thay thế.
    */
-  // async remove(id: string, reassignToId?: string) {
-  //   const group = await this.groupRepo.findOne({ where: { id } });
-  //   if (!group) throw new ResponseCommon(404, false, 'SUPPLIER_GROUP_NOT_FOUND');
+  async remove(id: string) {
+    const group = await this.groupRepo.findOne({ where: { id } });
+    if (!group) throw new ResponseException(null, 404, 'SUPPLIER_GROUP_NOT_FOUND');
 
-  //   const supplierCount = await this.supplierRepo.count({ where: { supplierGroupId: id } });
+    const suppliers = await this.supplierRepo.find({ where: { supplierGroupId: id } });
 
-  //   // còn supplier → cần nhóm đích
-  //   if (supplierCount > 0) {
-  //     if (!reassignToId) {
-  //       throw new ResponseCommon(400, false, 'GROUP_HAS_SUPPLIERS_REASSIGN_REQUIRED');
-  //     }
-  //     if (reassignToId === id) {
-  //       throw new ResponseCommon(400, false, 'REASSIGN_TARGET_MUST_DIFFER');
-  //     }
+    // Case 1: Không có NCC nào, xoá luôn
+    if (suppliers.length === 0) {
+      await this.groupRepo.delete(id);
+      return new ResponseCommon(200, true, 'SUPPLIER_GROUP_DELETED_SUCCESSFULLY');
+    }
 
-  //     const target = await this.groupRepo.findOne({ where: { id: reassignToId } });
-  //     if (!target) throw new ResponseCommon(400, false, 'TARGET_GROUP_NOT_FOUND');
-  //     if (target.status === SupplierStatus.INACTIVE) {
-  //       throw new ResponseCommon(400, false, 'TARGET_GROUP_INACTIVE');
-  //     }
+    const supplierIds = suppliers.map(s => s.id);
 
-  //     // transaction: chuyển NCC rồi xoá nhóm
-  //     await this.groupRepo.manager.transaction(async (trx) => {
-  //       await trx.getRepository(Supplier).update(
-  //         { supplierGroupId: id },
-  //         { supplierGroupId: reassignToId },
-  //       );
-  //       await trx.getRepository(SupplierGroup).delete(id);
-  //     });
+    // Kiểm tra xem các NCC này đã có giao dịch (phiếu nhập/trả) chưa
+    const hasPurchaseReceipts = await this.purchaseReceiptRepo.exists({
+      where: { supplier: { id: In(supplierIds) } },
+    });
+    const hasPurchaseReturns = await this.purchaseReturnRepo.exists({
+      where: { supplier: { id: In(supplierIds) } },
+    });
 
-  //     return new ResponseCommon(200, true, 'SUPPLIER_GROUP_DELETED_WITH_REASSIGN', {
-  //       movedSuppliers: supplierCount,
-  //       toGroupId: reassignToId,
-  //     });
-  //   }
+    // Case 3: Đã có giao dịch, không cho xoá
+    if (hasPurchaseReceipts || hasPurchaseReturns) {
+      throw new ResponseException(
+        null,
+        400,
+        'GROUP_HAS_SUPPLIERS_WITH_TRANSACTIONS_DEACTIVATION_RECOMMENDED',
+      );
+    }
 
-  //   // không còn supplier → xoá luôn
-  //   await this.groupRepo.delete(id);
-  //   return new ResponseCommon(200, true, 'SUPPLIER_GROUP_DELETED');
-  // }
+    // Case 2: Có NCC nhưng chưa có giao dịch
+    await this.groupRepo.manager.transaction(async (trx) => {
+      await trx.getRepository(Supplier).update(
+        { supplierGroupId: id },
+        { supplierGroupId: null },
+      );
+      await trx.getRepository(SupplierGroup).delete(id);
+    });
+
+    return new ResponseCommon(200, true, 'SUPPLIER_GROUP_DELETED_AND_SUPPLIERS_UNLINKED');
+  }
+
 
 }
