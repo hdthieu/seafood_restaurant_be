@@ -14,7 +14,7 @@ import { OrdersService } from './order.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { ListOrdersDto } from './dto/list-dtos';
 import { UpdateOrderStatusDto } from './dto/update-order-status';
-import { AddItemsDto } from '../orderitems/dto/create-orderitem.dto'; // <-- DTO có batchId?
+import { AddItemsDto } from '../orderitems/dto/create-orderitem.dto'; 
 import { SetQtyDto } from './dto/set-item-qty.dto';
 import { CancelOrderDto } from './dto/cancel-order.dto';
 import { CurrentUser } from 'src/common/decorators/user.decorator';
@@ -33,6 +33,7 @@ import { OpenTablesQueryDto } from './dto/open-tables.query';
 import { SplitOrderDto } from './dto/split-order.dto';
 import {RestaurantTable} from '../restauranttable/entities/restauranttable.entity';
 import { KitchenGateway } from '../socket/kitchen.gateway';
+import {UpdateOrderMetaDto} from './dto/update-order-meta.dto';
 class MergeOrderDto {
   toOrderId!: string; // id đơn đích
 }
@@ -40,6 +41,7 @@ class MergeOrderDto {
 @ApiTags('orders')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
+
 @Controller('orders')
 export class OrdersController {
   constructor(private readonly ordersService: OrdersService,
@@ -297,6 +299,9 @@ async split(
     return this.ordersService.mergeOrders(fromId, body.toOrderId);
   }
 
-
+@Patch(':id/meta')
+updateMeta(@Param('id') id: string, @Body() dto: UpdateOrderMetaDto) {
+  return this.ordersService.updateMeta(id, dto);
+}
 }
 

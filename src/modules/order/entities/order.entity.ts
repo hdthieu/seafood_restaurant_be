@@ -6,7 +6,7 @@ import { Column, CreateDateColumn, Entity, ManyToOne, OneToMany, PrimaryGenerate
 import { Invoice } from "src/modules/invoice/entities/invoice.entity";
 import { OneToOne } from "typeorm";
 import { JoinColumn } from "typeorm";
-import { DeleteDateColumn } from "typeorm";
+import { Customer } from "src/modules/customers/entities/customers.entity";
 @Entity('orders')
 export class Order {
     @PrimaryGeneratedColumn('uuid')
@@ -36,9 +36,14 @@ export class Order {
     @OneToOne(() => Invoice, (inv) => inv.order)
     invoice?: Invoice;
 
-    // @ManyToOne(() => Customer, { nullable: true, eager: true })
-    // @JoinColumn({ name: 'customer_id' })
-    // customer?: Customer | null;
+    // 🔹 KHÁCH HÀNG CỦA ĐƠN
+  @ManyToOne(() => Customer, { nullable: true, eager: true })
+  @JoinColumn({ name: 'customer_id' })
+  customer?: Customer | null;
+
+  // 🔹 SỐ LƯỢNG KHÁCH CHO ĐƠN
+  @Column({ name: 'guest_count', type: 'int', nullable: true })
+  guestCount?: number | null;
       @ManyToOne(() => Order, (o) => o.mergedChildren, { nullable: true })
   @JoinColumn({ name: 'merged_into_id' })
   mergedInto?: Order | null;

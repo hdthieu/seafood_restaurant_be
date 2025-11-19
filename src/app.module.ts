@@ -93,7 +93,7 @@ envFilePath: ['.env'], // tùy path
     password: process.env.DB_PASSWORD as string,
     database: process.env.DB_DATABASE as string,
     // entities: [__dirname + '/**/*.entity{.ts,.js}'],
-    synchronize: true,
+    // synchronize: true,
      ssl: { rejectUnauthorized: false }, 
     autoLoadEntities: true,
     // logging: ['error', 'warn', 'query'],

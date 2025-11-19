@@ -216,6 +216,24 @@ emitVoidSynced(payload: {
 
 
 
+  emitOrderMetaUpdated(payload: {
+    orderId: string;
+    tableId: string;
+    guestCount: number | null;
+    customer: { id: string; name: string; phone?: string | null } | null;
+  }) {
+    // Gửi cho thu ngân + phục vụ
+    this.server.to('cashier').emit('orders:meta_updated', payload);
+    this.server.to('waiter').emit('orders:meta_updated', payload);
+
+    // Nếu có join room theo order / table thì bắn thêm
+    if (payload.orderId) {
+      this.server.to(`order:${payload.orderId}`).emit('orders:meta_updated', payload);
+    }
+    if (payload.tableId) {
+      this.server.to(`table:${payload.tableId}`).emit('orders:meta_updated', payload);
+    }
+  }
 
 
 
