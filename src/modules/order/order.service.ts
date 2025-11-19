@@ -40,6 +40,7 @@ import { KitchenTicket } from '@modules/kitchen/entities/kitchen-ticket.entity';
 import { SplitOrderDto } from './dto/split-order.dto';
 import { DeepPartial } from 'typeorm';
 import { KitchenService } from '@modules/kitchen/kitchen.service';
+import {UpdateOrderMetaDto} from './dto/update-order-meta.dto';
 const ALLOWED_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   [OrderStatus.PENDING]: [OrderStatus.CONFIRMED, OrderStatus.CANCELLED],
   [OrderStatus.CONFIRMED]: [OrderStatus.PREPARING, OrderStatus.CANCELLED],
@@ -76,6 +77,7 @@ export class OrdersService {
     @InjectRepository(RestaurantTable) private readonly tableRepo: Repository<RestaurantTable>,
     @InjectRepository(KitchenTicket) private readonly ticketRepo: Repository<KitchenTicket>,
     private readonly kitchenSvc: KitchenService,
+    @InjectRepository(Customer) private readonly customerRepo: Repository<Customer>,
   ) { }
 
 
@@ -302,50 +304,51 @@ export class OrdersService {
 
   /** LIST (paging + optional status / excludeStatus) */
   async list(params: { page: number; limit: number; status?: OrderStatus; excludeStatus?: string }) {
-    const qb = this.orderRepo
-      .createQueryBuilder('o')
-      .leftJoinAndSelect('o.table', 'table')
-      // ✅ chỉ join items chưa CANCELLED
-      .leftJoinAndSelect(
-        'o.items',
-        'items',
-        'items.status != :cancelled',
-        { cancelled: 'CANCELLED' },
-      )
-      .leftJoinAndSelect('items.menuItem', 'menuItem');
+  const qb = this.orderRepo
+    .createQueryBuilder('o')
+    .leftJoinAndSelect('o.table', 'table')
+    .leftJoinAndSelect('o.customer', 'customer') // 👈 THÊM DÒNG NÀY
+    .leftJoinAndSelect(
+      'o.items',
+      'items',
+      'items.status != :cancelled',
+      { cancelled: 'CANCELLED' },
+    )
+    .leftJoinAndSelect('items.menuItem', 'menuItem');
 
-    if (params.status) {
-      qb.andWhere('o.status = :st', { st: params.status });
-    }
-
-    if (params.excludeStatus) {
-      const arr = params.excludeStatus.split(',') as OrderStatus[];
-      qb.andWhere('o.status NOT IN (:...ex)', { ex: arr });
-    }
-
-    qb.orderBy('o.createdAt', 'DESC')
-      .skip((params.page - 1) * params.limit)
-      .take(params.limit);
-
-    const [rows, total] = await qb.getManyAndCount();
-
-    // ✅ Phòng hờ filter thêm lần nữa (nếu items bị null)
-    for (const o of rows) {
-      if (Array.isArray(o.items)) {
-        o.items = o.items.filter((it) => it.status !== 'CANCELLED');
-      }
-    }
-
-    return {
-      data: rows,
-      meta: {
-        page: params.page,
-        limit: params.limit,
-        total,
-        totalPages: Math.ceil(total / params.limit),
-      },
-    };
+  if (params.status) {
+    qb.andWhere('o.status = :st', { st: params.status });
   }
+
+  if (params.excludeStatus) {
+    const arr = params.excludeStatus.split(',') as OrderStatus[];
+    qb.andWhere('o.status NOT IN (:...ex)', { ex: arr });
+  }
+
+  qb.orderBy('o.createdAt', 'DESC')
+    .skip((params.page - 1) * params.limit)
+    .take(params.limit);
+
+  const [rows, total] = await qb.getManyAndCount();
+
+  // lọc lại items CANCELLED cho chắc
+  for (const o of rows) {
+    if (Array.isArray(o.items)) {
+      o.items = o.items.filter((it) => it.status !== 'CANCELLED');
+    }
+  }
+
+  return {
+    data: rows,
+    meta: {
+      page: params.page,
+      limit: params.limit,
+      total,
+      totalPages: Math.ceil(total / params.limit),
+    },
+  };
+}
+
 
   /** DETAIL */
   async detail(id: string) {
@@ -1091,5 +1094,47 @@ export class OrdersService {
       return { from: fromAfter, to: toAfter };
     });
   }
+
+
+
+  async updateMeta(id: string, dto: UpdateOrderMetaDto) {
+  const order = await this.orderRepo.findOne({
+    where: { id },
+    relations: ['customer'],
+  });
+  if (!order) throw new NotFoundException('Order not found');
+
+  if (dto.customerId !== undefined) {
+    if (dto.customerId === null || dto.customerId === '') {
+      order.customer = null;
+    } else {
+      const customer = await this.customerRepo.findOneBy({ id: dto.customerId });
+      if (!customer) throw new NotFoundException('Customer not found');
+      order.customer = customer;
+    }
+  }
+
+  if (dto.guestCount !== undefined) {
+    order.guestCount = dto.guestCount;
+  }
+
+  await this.orderRepo.save(order);
+
+   this.gw.emitOrderMetaUpdated({
+      orderId: order.id,
+      tableId: order.table?.id,
+      guestCount: order.guestCount ?? null,
+      customer: order.customer
+        ? {
+            id: order.customer.id,
+            name: order.customer.name,
+            phone: order.customer.phone ?? null,
+          }
+        : null,
+    });
+
+  return order;
+}
+
 
 }

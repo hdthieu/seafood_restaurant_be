@@ -17,6 +17,7 @@ import { InvoicePromotion } from '@modules/promotions/entities/invoicepromotion.
 import { Promotion } from '@modules/promotions/entities/promotion.entity';
 import { ApplyPromotionsDto } from './dto/apply-promotions.dto';
 import {PaymentsGateway} from '@modules/payments/payments.gateway';
+import { KitchenGateway } from '@modules/socket/kitchen.gateway';
 @Injectable()
 export class InvoicesService {
   constructor(
@@ -27,6 +28,7 @@ export class InvoicesService {
     private readonly cashbookService: CashbookService,
     @InjectRepository(InvoicePromotion) private invPromoRepo: Repository<InvoicePromotion>,
      private readonly gateway: PaymentsGateway, 
+      private readonly kitchenGateway: KitchenGateway, 
   ) { }
 
   /** Tạo invoice từ order (idempotent) */
@@ -246,6 +248,11 @@ export class InvoicesService {
       // Nếu đã PAID thì đóng Order
       if (inv.status === InvoiceStatus.PAID && inv.order?.id) {
         await oRepo.update({ id: inv.order.id }, { status: OrderStatus.PAID });
+         this.kitchenGateway.emitOrderChanged({
+        orderId: inv.order.id,
+        tableId: inv.order.table?.id || '',
+        reason: 'ORDER_STATUS', 
+      });
       }
 
       // Ghi vào sổ quỹ đã thu: áp dụng cho CASH, VIETQR, VNPAY, CARD
@@ -276,6 +283,11 @@ export class InvoicesService {
 
       if (inv.order?.id) {
         await oRepo.update({ id: inv.order.id }, { status: OrderStatus.PAID });
+         this.kitchenGateway.emitOrderChanged({
+        orderId: inv.order.id,
+        tableId: inv.order.table?.id || '',
+        reason: 'ORDER_STATUS',
+      });
       }
       return inv;
     });
