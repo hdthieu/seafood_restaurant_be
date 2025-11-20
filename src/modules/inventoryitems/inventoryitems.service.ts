@@ -39,12 +39,12 @@ export class InventoryitemsService {
     private readonly categoryRepo: Repository<Category>,
   ) { }
 
-  private readonly BASE_BY_DIM: Record<UnitsOfMeasure['dimension'], string> = {
-    mass: 'G',
-    volume: 'ML',
-    count: 'EA',
-    length: 'EA',
-  };
+  // private readonly BASE_BY_DIM: Record<UnitsOfMeasure['dimension'], string> = {
+  //   mass: 'G',
+  //   volume: 'ML',
+  //   count: 'EA',
+  //   length: 'EA',
+  // };
 
   // 1 from = factor * to => qty_to = qty_from * factor
   private async convertQty(fromCode: string, toCode: string, qty: number): Promise<number> {
@@ -70,27 +70,25 @@ export class InventoryitemsService {
       if (!name) throw new ResponseException('NAME_REQUIRED', 400);
       if (!uomCode) throw new ResponseException('UOM_REQUIRED', 400);
 
-      // Đơn vị user chọn ở form (KG, L, CAN...)
+      // Đơn vị người dùng chọn khi khai báo vật tư (KG, GOI500G, CASE24,...)
       const inputUom = await this.uomRepo.findOne({ where: { code: uomCode } });
       if (!inputUom) throw new ResponseException('UOM_NOT_FOUND', 400);
 
       const alertThresholdRaw = Number(dto.alertThreshold ?? 0);
       if (alertThresholdRaw < 0) throw new ResponseException('ALERT_THRESHOLD_INVALID', 400);
 
-      // === CHỌN baseUom nhỏ nhất theo dimension
-      const baseCode = this.BASE_BY_DIM[inputUom.dimension]; // mass -> 'G', volume -> 'ML', ...
+      // === Lấy baseCode từ chính UOM
+      const baseCode = (inputUom.baseCode || inputUom.code).toUpperCase();
       const baseUom = await this.uomRepo.findOne({ where: { code: baseCode } });
       if (!baseUom) throw new ResponseException(`BASE_UOM_NOT_FOUND_${baseCode}`, 400);
 
-      // Nếu bạn cho nhập ngưỡng theo đơn vị người dùng chọn (KG, L, ...),
-      // thì convert sang base (G, ML, ...). Nếu muốn nhập trực tiếp theo base
-      // thì bỏ đoạn convert này đi.
+      // Ngưỡng cảnh báo user nhập theo đơn vị họ chọn (KG, GOI500G,...)
+      // => convert sang base (G) để lưu
       const alertThreshold = await this.convertQty(inputUom.code, baseUom.code, alertThresholdRaw);
 
-      // Tồn ban đầu luôn = 0, vì phiếu nhập mới cộng thêm
       const quantity = 0;
 
-      // Tạo code đơn giản
+      // Generate code như bạn đang làm
       const now = new Date();
       const pad = (n: number, l = 2) => n.toString().padStart(l, '0');
       const code = `ING-${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(
@@ -100,9 +98,9 @@ export class InventoryitemsService {
       const item = this.inventoryRepo.create({
         name,
         code,
-        baseUom,         // luôn là đơn vị nhỏ nhất
-        quantity,        // = 0
-        alertThreshold,  // đã đổi sang baseUom
+        baseUom,
+        quantity,
+        alertThreshold,
         description: dto.description?.trim() || null,
       });
 
@@ -130,8 +128,6 @@ export class InventoryitemsService {
       throw new ResponseException(error, 400, 'Không thể tạo vật tư mới');
     }
   }
-
-
 
   /** Danh sách tất cả item kèm baseUom/category/suppliers (đủ để FE hiển thị combobox đẹp) */
   async findAll(dto: ListIngredientsDto): Promise<ResponseCommon<any[], PageMeta>> {

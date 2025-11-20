@@ -4,7 +4,8 @@ import {
   Query,
   Get,
   ParseUUIDPipe,
-  Param
+  Param,
+  Delete
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiConsumes, ApiOkResponse, ApiOperation, ApiParam } from '@nestjs/swagger';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -31,25 +32,56 @@ export class MenuitemsController {
     limits: { fileSize: 5 * 1024 * 1024 },
     fileFilter: (_req, file, cb: FileFilterCallback) => {
       const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
-      if (!allowed.includes(file.mimetype)) 
+      if (!allowed.includes(file.mimetype))
         return cb(new BadRequestException('IMAGE_TYPE_NOT_ALLOWED') as any, false);
       cb(null, true);
     },
   }))
   async create(
     @UploadedFile() file: Express.Multer.File,
-    @Body() body: CreateMenuItemDto,
+    @Body() body: any,
   ) {
     if (!file) throw new BadRequestException('IMAGE_FILE_REQUIRED');
 
-    // body.ingredients đã là array nhờ @Transform
+    let rawIngs: any = body.ingredients;
+
+    // ------- Chuẩn hoá ingredients từ multipart ------- //
+    if (typeof rawIngs === 'string') {
+      const text = rawIngs.trim();
+
+      // Thử parse trực tiếp
+      try {
+        rawIngs = JSON.parse(text);
+      } catch {
+        // Thử thêm [] bọc ngoài: {...},{...} -> [{...},{...}]
+        try {
+          rawIngs = JSON.parse(`[${text}]`);
+        } catch {
+          throw new BadRequestException('INGREDIENTS_INVALID_JSON');
+        }
+      }
+    }
+
+    // Nếu sau khi parse vẫn không phải array thì bọc thành array
+    if (!Array.isArray(rawIngs)) {
+      rawIngs = [rawIngs];
+    }
+
+    // Map ra format chuẩn cho service
+    const ingredients = rawIngs.map((i: any) => ({
+      inventoryItemId: i.inventoryItemId,
+      quantity: Number(i.quantity),
+      uomCode: i.uomCode,
+      note: i.note,
+    }));
+
     return this.menuitemsService.createMenuItem(
       {
         name: body.name,
-        price: body.price,
+        price: Number(body.price),
         description: body.description,
         categoryId: body.categoryId,
-        ingredients: body.ingredients,
+        ingredients,
       },
       file,
     );
@@ -91,26 +123,32 @@ export class MenuitemsController {
 
 
 
-@Patch(':id')
-@ApiOperation({ summary: 'Cập nhật món (ảnh tùy chọn)' })
-@ApiConsumes('multipart/form-data')
-@UseInterceptors(FileInterceptor('image', {
-  storage: memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024 },
-  fileFilter: (_req, file, cb: FileFilterCallback) => {
-    const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
-    if (file && !allowed.includes(file.mimetype))
-      return cb(new BadRequestException('IMAGE_TYPE_NOT_ALLOWED') as any, false);
-    cb(null, true);
-  },
-}))
-async update(
-  @Param('id', new ParseUUIDPipe()) id: string,
-  @UploadedFile() file: Express.Multer.File | undefined,
-  @Body() body: UpdateMenuItemDto,
-) {
-  return this.menuitemsService.updateMenuItem(id, body, file);
-}
+  @Patch(':id')
+  @ApiOperation({ summary: 'Cập nhật món (ảnh tùy chọn)' })
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(FileInterceptor('image', {
+    storage: memoryStorage(),
+    limits: { fileSize: 5 * 1024 * 1024 },
+    fileFilter: (_req, file, cb: FileFilterCallback) => {
+      const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+      if (file && !allowed.includes(file.mimetype))
+        return cb(new BadRequestException('IMAGE_TYPE_NOT_ALLOWED') as any, false);
+      cb(null, true);
+    },
+  }))
+  async update(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @UploadedFile() file: Express.Multer.File | undefined,
+    @Body() body: UpdateMenuItemDto,
+  ) {
+    return this.menuitemsService.updateMenuItem(id, body, file);
+  }
 
+  @Delete(':id')
+  @ApiOperation({ summary: 'Xóa món ăn khỏi thực đơn' })
+  @ApiParam({ name: 'id', description: 'UUID của món', type: 'string' })
+  async delete(@Param('id', new ParseUUIDPipe()) id: string) {
+    return this.menuitemsService.deleteMenuItem(id);
+  }
 
 }

@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Query, Param, Patch, Delete } from '@nestjs/common';
+import { Controller, Get, Post, Body, Query, Param, Patch, Delete, ParseUUIDPipe } from '@nestjs/common';
 import { UnitsOfMeasureService } from './units-of-measure.service';
 import { CreateUnitsOfMeasureDto } from './dto/create-units-of-measure.dto';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
@@ -46,8 +46,29 @@ export class UnitsOfMeasureController {
 
   @Delete(':code')
   @Roles(UserRole.MANAGER)
-  @ApiOperation({ summary: 'Xóa UOM (khi chưa được sử dụng)' })
+  @ApiOperation({ summary: 'Xóa UOM (chỉ khi chưa được sử dụng ở đâu)' })
   remove(@Param('code') code: string) {
     return this.unitsOfMeasureService.remove(code);
+  }
+
+  @Patch(':code/deactivate')
+  @Roles(UserRole.MANAGER)
+  @ApiOperation({ summary: 'Ngừng sử dụng UOM' })
+  deactivate(@Param('code') code: string) {
+    return this.unitsOfMeasureService.deactivate(code);
+  }
+
+  @Patch(':code/activate')
+  @Roles(UserRole.MANAGER)
+  @ApiOperation({ summary: 'Kích hoạt lại UOM' })
+  activate(@Param('code') code: string) {
+    return this.unitsOfMeasureService.activate(code);
+  }
+
+  @Get('find-by-inventory-item/:id')
+  @Roles(UserRole.MANAGER, UserRole.CASHIER, UserRole.KITCHEN, UserRole.WAITER)
+  @ApiOperation({ summary: 'Lấy danh sách UOM cho 1 vật tư (nguyên liệu)' })
+  findByInventoryItem(@Param('id', new ParseUUIDPipe()) id: string) {
+    return this.unitsOfMeasureService.findByInventoryItem(id);
   }
 }

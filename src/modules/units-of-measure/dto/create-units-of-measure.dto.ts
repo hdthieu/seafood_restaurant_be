@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsIn, IsNotEmpty, IsString, Length } from 'class-validator';
+import { IsIn, IsNotEmpty, IsOptional, IsString, Length } from 'class-validator';
 
 export class CreateUnitsOfMeasureDto {
     @ApiProperty({ example: 'VI', description: 'Mã đơn vị (viết tắt), duy nhất, ví dụ: VI = vỉ trứng' })
@@ -18,4 +18,9 @@ export class CreateUnitsOfMeasureDto {
     @IsString()
     @IsIn(['mass', 'volume', 'count', 'length'])
     dimension: 'mass' | 'volume' | 'count' | 'length';
+
+    @ApiProperty({ example: 'EA', description: 'Mã đơn vị cơ bản (nếu có), ví dụ: EA = each (cái)' })
+    @IsOptional()
+    @IsString()
+    baseCode?: string;
 }
