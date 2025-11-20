@@ -20,10 +20,6 @@ export class ListCashbookEntryDto {
     @ApiPropertyOptional() @IsOptional() @IsUUID()
     cashTypeId?: string;
 
-    @ApiPropertyOptional() @IsOptional() @IsBoolean()
-    @Transform(({ value }) => (value === 'true' || value === true ? true : value === 'false' || value === false ? false : undefined))
-    isPostedToBusinessResult?: boolean;
-
     @ApiPropertyOptional() @IsOptional() @IsString()
     dateFrom?: string; // ISO date
 

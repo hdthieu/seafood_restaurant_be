@@ -19,11 +19,6 @@ export class CreateCashbookEntryDto {
     @IsNumberString()
     amount: string;
 
-    @ApiPropertyOptional({ default: true })
-    @IsOptional()
-    @IsBoolean()
-    isPostedToBusinessResult?: boolean = true;
-
     @ApiProperty({ enum: CounterpartyGroup })
     @IsEnum(CounterpartyGroup)
     counterpartyGroup: CounterpartyGroup;

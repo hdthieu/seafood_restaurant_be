@@ -16,7 +16,6 @@ import { PageMeta } from 'src/common/common_dto/paginated';
 import { CreateCashOtherPartyDto } from './dto/create-cash-other-party.dto';
 import { ListCashOtherPartyDto } from './dto/list-cash-other-party.dto';
 import { UpdateCashOtherPartyDto } from './dto/update-cash-other-party.dto';
-import { CashbookSummaryDto } from './dto/summary.dto';
 import { ListCashbookEntryDto } from './dto/list-cashbook.dto';
 import { CreateCashTypeDto } from './dto/create-cash-type.dto';
 import { User } from '@modules/user/entities/user.entity';
@@ -66,7 +65,6 @@ export class CashbookService {
       date: new Date(),
       cashType: type,
       amount: String(amount),
-      isPostedToBusinessResult: true,
       counterpartyGroup: CounterpartyGroup.CUSTOMER,
       customer: customerRef as any,
       invoice: { id: (inv as any).id } as any,
@@ -96,7 +94,6 @@ export class CashbookService {
       date: (pr as any)?.createdAt ? new Date((pr as any).createdAt) : new Date(),
       cashType: type,
       amount: String(amount),
-      isPostedToBusinessResult: true,
       counterpartyGroup: CounterpartyGroup.SUPPLIER,
       supplier: supplierRef as any,
       sourceCode: (pr as any)?.code ?? null,
@@ -127,7 +124,6 @@ export class CashbookService {
       date: (pr as any)?.receiptDate ? new Date((pr as any).receiptDate) : new Date(),
       cashType: type,
       amount: String(amount),
-      isPostedToBusinessResult: true,
       counterpartyGroup: CounterpartyGroup.SUPPLIER,
       supplier: supplierRef as any,
       purchaseReceipt: { id: (pr as any).id } as any,
@@ -155,7 +151,6 @@ export class CashbookService {
       date: (pr as any)?.cancelledAt ? new Date((pr as any).cancelledAt) : new Date(),
       cashType: type,
       amount: String(amount),
-      isPostedToBusinessResult: true,
       counterpartyGroup: CounterpartyGroup.SUPPLIER,
       supplier: supplierRef as any,
       sourceCode: (pr as any)?.code ?? null,
@@ -187,7 +182,6 @@ export class CashbookService {
       date: new Date(dto.date),
       cashType,
       amount: dto.amount,
-      isPostedToBusinessResult: dto.isPostedToBusinessResult ?? true,
       counterpartyGroup: dto.counterpartyGroup,
       sourceCode: dto.sourceCode ?? null,
     } as DeepPartial<CashbookEntry>);
@@ -279,11 +273,8 @@ export class CashbookService {
       }));
     }
     if (q.type) qb.andWhere('e.type = :type', { type: q.type });
-    if (q.counterpartyGroup) qb.andWhere('e.counterpartyGroup = :cg', { cg: q.counterpartyGroup });
-    if (q.cashTypeId) qb.andWhere('e.cashTypeId = :ct', { ct: q.cashTypeId });
-    if (typeof q.isPostedToBusinessResult === 'boolean') {
-      qb.andWhere('e.isPostedToBusinessResult = :pbr', { pbr: q.isPostedToBusinessResult });
-    }
+    if (q.counterpartyGroup) qb.andWhere('e.counterparty_group = :cg', { cg: q.counterpartyGroup });
+    if (q.cashTypeId) qb.andWhere('e.cash_type_id = :ct', { ct: q.cashTypeId });
     if (from) qb.andWhere('e.date >= :from', { from });
     if (to) qb.andWhere('e.date <= :to', { to });
 
@@ -330,11 +321,11 @@ export class CashbookService {
         .leftJoin('e.customer', 'customer')
         .leftJoin('e.supplier', 'supplier')
         .leftJoin('e.cashOtherParty', 'other')
-          .leftJoin('e.staff', 'staff')
+        .leftJoin('e.staff', 'staff')
         .select(`COALESCE(SUM(CASE WHEN e.type = 'RECEIPT' THEN e.amount ELSE -e.amount END), 0)`, 'balance')
-  
+
         .where('e.date < :from', { from })
-        
+
 
       // apply same filters as list
       if (q.q?.trim()) {
@@ -347,15 +338,12 @@ export class CashbookService {
             .orWhere('LOWER(other.name) LIKE LOWER(:s)', { s: `%${s}%` })
             .orWhere('LOWER(staff.profile.fullName) LIKE LOWER(:s)', {
               s: `%${s}%`,
-            }); 
+            });
         }));
       }
       if (q.type) openQ.andWhere('e.type = :type', { type: q.type });
       if (q.counterpartyGroup) openQ.andWhere('e.counterpartyGroup = :cg', { cg: q.counterpartyGroup });
-      if (q.cashTypeId) openQ.andWhere('e.cashTypeId = :ct', { ct: q.cashTypeId });
-      if (typeof q.isPostedToBusinessResult === 'boolean') {
-        openQ.andWhere('e.isPostedToBusinessResult = :pbr', { pbr: q.isPostedToBusinessResult });
-      }
+      if (q.cashTypeId) openQ.andWhere('e.cash_type_id = :ct', { ct: q.cashTypeId });
       const openRes = (await openQ.getRawOne<{ balance: string }>()) || { balance: '0' };
       opening = Number(openRes.balance || 0);
     }
@@ -383,10 +371,7 @@ export class CashbookService {
     }
     if (q.type) sumQ.andWhere('e.type = :type', { type: q.type });
     if (q.counterpartyGroup) sumQ.andWhere('e.counterpartyGroup = :cg', { cg: q.counterpartyGroup });
-    if (q.cashTypeId) sumQ.andWhere('e.cashTypeId = :ct', { ct: q.cashTypeId });
-    if (typeof q.isPostedToBusinessResult === 'boolean') {
-      sumQ.andWhere('e.isPostedToBusinessResult = :pbr', { pbr: q.isPostedToBusinessResult });
-    }
+    if (q.cashTypeId) sumQ.andWhere('e.cash_type_id = :ct', { ct: q.cashTypeId });
 
     const sumRes = (await sumQ.getRawOne<{ receipt: string; payment: string }>()) || { receipt: '0', payment: '0' };
     const totalReceipt = Number(sumRes.receipt || 0);
