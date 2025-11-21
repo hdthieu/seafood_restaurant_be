@@ -24,20 +24,19 @@ export class CategoryService {
 
   async create(dto: CreateCategoryDto) {
     const name = this.normalizeName(dto.name);
-    if (!name) throw new ResponseException('CATEGORY_NAME_REQUIRED', 400);
+    if (!name) throw new ResponseException(false, 400, 'CATEGORY_NAME_REQUIRED');
 
     // Unique (name,type) không phân biệt hoa thường
     const existed = await this.categoryRepo.findOne({
       where: { name: ILike(name), type: dto.type },
     });
-    if (existed) throw new ResponseException('CATEGORY_NAME_DUPLICATED', 400);
+    if (existed) throw new ResponseException(false, 400, 'CATEGORY_NAME_DUPLICATED');
 
     const entity = this.categoryRepo.create({
       name,
       description: dto.description?.trim(),
       type: dto.type,
       isActive: true,
-      sortOrder: dto.sortOrder ?? 0,
     });
 
     return this.categoryRepo.save(entity);
@@ -94,37 +93,54 @@ export class CategoryService {
 
   async findOne(id: string) {
     const entity = await this.categoryRepo.findOne({ where: { id } });
-    if (!entity) throw new ResponseException('Không tìm thấy danh mục', 404);
+    if (!entity) throw new ResponseException(false, 404, 'CATEGORY_NOT_FOUND');
     return entity;
   }
 
   async update(id: string, dto: UpdateCategoryDto) {
     const entity = await this.categoryRepo.findOne({ where: { id } });
-    if (!entity) throw new ResponseException('Không tìm thấy danh mục', 404);
+    if (!entity) throw new ResponseException(false, 404, 'CATEGORY_NOT_FOUND');
 
-    // Nếu đổi type, kiểm tra tham chiếu
-    if (dto.type && dto.type !== entity.type) {
-      await this.ensureNoReferences(id, entity.type); // chỉ cho đổi type nếu không bị tham chiếu
-      entity.type = dto.type;
+    // 1. Xác định trạng thái đích (Target State)
+    // Nếu DTO không gửi lên thì dùng giá trị cũ
+    const targetType = dto.type ?? entity.type;
+    const targetName = dto.name ? this.normalizeName(dto.name) : entity.name;
+
+    // 2. Kiểm tra thay đổi Type hoặc Deactivate
+    const isTypeChanged = dto.type && dto.type !== entity.type;
+    const isDeactivating = dto.isActive === false;
+
+    // Nếu đổi Type hoặc Tắt hoạt động -> Phải đảm bảo Type CŨ không bị tham chiếu
+    if (isTypeChanged || isDeactivating) {
+      await this.ensureNoReferences(id, entity.type);
     }
 
-    if (dto.name) {
-      const name = this.normalizeName(dto.name);
-      // unique (name,type) khác id hiện tại
+    // 3. Kiểm tra trùng lặp Name + Type (nếu có thay đổi)
+    const isNameChanged = dto.name && targetName !== entity.name;
+
+    // Chỉ check DB khi có sự thay đổi về Name hoặc Type
+    if (isNameChanged || isTypeChanged) {
       const dup = await this.categoryRepo.createQueryBuilder('c')
-        .where('LOWER(c.name) = LOWER(:name)', { name })
-        .andWhere('c.type = :type', { type: entity.type })
+        .where('LOWER(c.name) = LOWER(:name)', { name: targetName })
+        .andWhere('c.type = :type', { type: targetType })
         .andWhere('c.id <> :id', { id })
         .getOne();
-      if (dup) throw new ResponseException(`Danh mục "${name}" (${entity.type}) đã tồn tại`, 400);
 
-      entity.name = name;
+      if (dup) {
+        throw new ResponseException(false, 400, 'CATEGORY_NAME_DUPLICATED');
+      }
     }
+
+    // 4. Apply thay đổi (Chỉ gán khi mọi check đã pass)
+    entity.type = targetType;
+    entity.name = targetName;
 
     if (dto.description !== undefined) {
       entity.description = dto.description?.trim();
     }
-    if (dto.sortOrder !== undefined) entity.sortOrder = dto.sortOrder;
+    if (dto.isActive !== undefined) {
+      entity.isActive = dto.isActive;
+    }
 
     return this.categoryRepo.save(entity);
   }
@@ -134,7 +150,7 @@ export class CategoryService {
     if (type === 'MENU') {
       const countMenu = await this.menuItemRepo.count({ where: { category: { id: categoryId } as any } });
       if (countMenu > 0) {
-        throw new ResponseException('Không thể thực hiện: Danh mục đang được sử dụng bởi món ăn', 400);
+        throw new ResponseException(false, 400, 'CATEGORY_IN_USE_BY_MENU_ITEMS');
       }
     }
     if (type === 'INGREDIENT') {
@@ -142,9 +158,15 @@ export class CategoryService {
       if (this.inventoryItemRepo) {
         const countInv = await this.inventoryItemRepo.count({ where: { category: { id: categoryId } as any } });
         if (countInv > 0) {
-          throw new ResponseException('Không thể thực hiện: Danh mục đang được sử dụng bởi nguyên liệu', 400);
+          throw new ResponseException(false, 400, 'CATEGORY_IN_USE_BY_INVENTORY_ITEMS');
         }
       }
     }
+  }
+
+  async delete(id: string) {
+    const entity = await this.findOne(id);
+    await this.ensureNoReferences(id, entity.type); // Kiểm tra không có tham chiếu
+    return this.categoryRepo.remove(entity);
   }
 }

@@ -14,8 +14,6 @@ export class Category {
     type: CategoryType;
 
     @Column({ default: true }) isActive: boolean;
-    @Column({ default: 0 }) sortOrder: number;
-
     @CreateDateColumn({ type: 'timestamptz' }) createdAt: Date;
     @UpdateDateColumn({ type: 'timestamptz' }) updatedAt: Date;
 }
