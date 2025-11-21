@@ -26,13 +26,38 @@ function splitText(text: string, max = 1600): string[] {
   if (buf.length) out.push(buf.join("\n"));
   return out;
 }
-const dirExists = (p: string) => {
-  try {
-    return fss.statSync(p).isDirectory();
-  } catch {
-    return false;
+
+// Chia docs .txt/.md theo heading "##" cho dễ truy vấn RAG
+function splitDocBySection(text: string, max = 1200): string[] {
+  // Tách theo heading level 2
+  const parts = text.split(/^##\s+/m);
+  const out: string[] = [];
+
+  // Phần trước heading đầu tiên (nếu có)
+  if (parts[0]?.trim()) {
+    out.push(...splitText(parts[0].trim(), max));
   }
-};
+
+  for (let i = 1; i < parts.length; i++) {
+    const body = parts[i];
+
+    const nl = body.indexOf("\n");
+    const heading = (nl === -1 ? body : body.slice(0, nl)).trim();
+    const rest = nl === -1 ? "" : body.slice(nl + 1);
+
+    let sectionText = `## ${heading}\n${rest}`.trim();
+    if (!sectionText) continue;
+
+    if (sectionText.length <= max) {
+      out.push(sectionText);
+    } else {
+      // nếu section quá dài thì lại chia nhỏ bằng splitText
+      out.push(...splitText(sectionText, max));
+    }
+  }
+
+  return out;
+}
 const fileExists = (p: string) => {
   try {
     return fss.statSync(p).isFile();
@@ -68,39 +93,72 @@ async function readTargets(cliArgs: string[]) {
 }
 
 async function run() {
-  const app = await NestFactory.createApplicationContext(AppModule, { logger: ["log", "warn", "error"] });
+  const app = await NestFactory.createApplicationContext(AppModule, {
+    logger: ["log", "warn", "error"],
+  });
   const rag = app.get(RagService);
+
   const args = process.argv.slice(2);
   const files = await readTargets(args);
   console.log("[RAG-Ingest] Found", files.length, "files");
-  if (!files.length) console.log("👉 Ví dụ: node dist/scripts/rag.ingest.js ./docs/schema.sql ./docs/*.md");
+  if (!files.length) {
+    console.log(
+      " Ví dụ: node dist/scripts/rag.ingest.js ./docs/schema.sql ./docs/*.md",
+    );
+  }
 
- for (const f of files) {
+  // 🔥 BƯỚC 1: XÓA HẾT collection rồi tạo lại (chỉ cần khi bạn muốn reset)
+  // Bật bằng env để tránh lỡ tay xóa nhầm
+  if (String(process.env.RAG_RESET || "0") === "1") {
+    console.log("🔥 RAG_RESET=1 → reset schema & docs collections...");
+    await rag.resetSchemaCollection();
+    await rag.resetDocCollection();
+  } else {
+    console.log(
+      "ℹ️ RAG_RESET!=1 → giữ nguyên dữ liệu cũ, chỉ upsert thêm/ghi đè.",
+    );
+  }
+ 
+  // 🔁 BƯỚC 2: Ingest lại toàn bộ file
+for (const f of files) {
   const ext = path.extname(f).toLowerCase();
   const raw = await fs.readFile(f, "utf8");
-  const chunks = splitText(raw, 1600);
 
-  const isSchema = ext === ".sql";
   const isDoc = ext === ".txt" || ext === ".md";
+  if (!isDoc) {
+    console.log("⏭ skip (not doc):", f);
+    continue;
+  }
+
+  const chunks = splitDocBySection(raw, 1200);
+
+  // 👉 map file → role (như bạn đã làm)
+  let role: string | undefined;
+  const base = path.basename(f).toLowerCase();
+  if (base.includes("sop_bep")) role = "KITCHEN";
+  else if (base.includes("sop_phuc_vu")) role = "WAITER";
+  else if (base.includes("sop_thu_ngan")) role = "CASHIER";
+  else if (base.includes("sop_quan_ly")) role = "MANAGER";
+  else if (base.includes("sop_tong_quat")) role = "ALL";
 
   for (let i = 0; i < chunks.length; i++) {
-    const meta = { source: path.basename(f), absPath: f, index: i };
+    const meta: any = {
+      source: path.basename(f),
+      absPath: f,
+      index: i,
+    };
+    if (role) meta.role = role;
 
-    if (isSchema) {
-      console.log("📘 schema →", f);
-      await rag.upsertSchemaChunk({ id: randomUUID(), text: chunks[i], meta });
-    } else if (isDoc) {
-      console.log("📄 docs →", f);
-      await rag.upsertDocChunk({ id: randomUUID(), text: chunks[i], meta });
-    } else {
-      console.log("⏭ skip:", f);
-    }
+    console.log(`📄 docs → ${f} chunk ${i}`);
+    await rag.upsertDocChunk({ id: randomUUID(), text: chunks[i], meta });
   }
 }
 
 
+
   await app.close();
 }
+
 
 run().catch((e) => {
   console.error(e);

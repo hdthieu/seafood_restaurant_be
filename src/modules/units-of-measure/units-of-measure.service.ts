@@ -2,10 +2,13 @@ import { Injectable, BadRequestException, NotFoundException } from '@nestjs/comm
 import { CreateUnitsOfMeasureDto } from './dto/create-units-of-measure.dto';
 import { UpdateUnitsOfMeasureDto } from './dto/update-units-of-measure.dto';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { UnitsOfMeasure } from './entities/units-of-measure.entity';
 import { UomConversion } from '@modules/uomconversion/entities/uomconversion.entity';
 import { InventoryItem } from '@modules/inventoryitems/entities/inventoryitem.entity';
+import { PurchaseReceiptItem } from '@modules/purchasereceiptitem/entities/purchasereceiptitem.entity';
+import { PurchaseReturnLog } from '@modules/purchasereturn/entities/purchasereturnlog.entity';
+import { Ingredient } from '@modules/ingredient/entities/ingredient.entity';
 import { ResponseCommon, ResponseException } from 'src/common/common_dto/respone.dto';
 import { ListUnitsOfMeasureQueryDto } from './dto/list-units-of-measure.query.dto';
 
@@ -18,39 +21,83 @@ export class UnitsOfMeasureService {
         private readonly convRepo: Repository<UomConversion>,
         @InjectRepository(InventoryItem)
         private readonly invRepo: Repository<InventoryItem>,
+        @InjectRepository(PurchaseReceiptItem)
+        private readonly priRepo: Repository<PurchaseReceiptItem>,
+        @InjectRepository(PurchaseReturnLog)
+        private readonly prlRepo: Repository<PurchaseReturnLog>,
+        @InjectRepository(Ingredient)
+        private readonly ingRepo: Repository<Ingredient>,
     ) { }
+
+    // async create(dto: CreateUnitsOfMeasureDto) {
+    //     const code = (dto.code || '').trim().toUpperCase();
+    //     const name = (dto.name || '').trim();
+    //     const dimension = dto.dimension;
+    //     if (!code) throw new ResponseException('UOM_CODE_REQUIRED', 400);
+    //     if (!name) throw new ResponseException('UOM_NAME_REQUIRED', 400);
+
+    //     const exists = await this.uomRepo.findOne({ where: { code } });
+    //     if (exists) throw new ResponseException('UOM_CODE_EXISTS', 400);
+    //     const u = this.uomRepo.create({ code, name, dimension });
+    //     await this.uomRepo.save(u);
+    //     return new ResponseCommon(201, true, 'UOM_CREATED', u);
+    // }
 
     async create(dto: CreateUnitsOfMeasureDto) {
         const code = (dto.code || '').trim().toUpperCase();
         const name = (dto.name || '').trim();
         const dimension = dto.dimension;
+
         if (!code) throw new ResponseException('UOM_CODE_REQUIRED', 400);
         if (!name) throw new ResponseException('UOM_NAME_REQUIRED', 400);
 
         const exists = await this.uomRepo.findOne({ where: { code } });
         if (exists) throw new ResponseException('UOM_CODE_EXISTS', 400);
-        const u = this.uomRepo.create({ code, name, dimension });
+
+        let baseCode = (dto.baseCode || '').trim().toUpperCase() || code;
+
+        // Nếu baseCode khác code -> verify
+        if (baseCode !== code) {
+            const base = await this.uomRepo.findOne({ where: { code: baseCode } });
+            if (!base) throw new ResponseException('BASE_UOM_NOT_FOUND', 400);
+            if (base.dimension !== dimension) {
+                throw new ResponseException('BASE_DIMENSION_MISMATCH', 400);
+            }
+        }
+
+        const u = this.uomRepo.create({ code, name, dimension, baseCode });
         await this.uomRepo.save(u);
         return new ResponseCommon(201, true, 'UOM_CREATED', u);
     }
 
+
+
     async list(dto: ListUnitsOfMeasureQueryDto) {
         const page = Math.max(1, Number(dto.page) || 1);
         const limit = Math.min(200, Math.max(1, Number(dto.limit) || 20));
-        const qb = this.uomRepo.createQueryBuilder('u');
+        const qb = this.uomRepo.createQueryBuilder('u')
+            .leftJoin('units_of_measure', 'base', 'u.base_code = base.code')
+            .addSelect('base.name', 'baseName');
 
         if (dto.code) qb.andWhere('u.code = :code', { code: dto.code.toUpperCase().trim() });
         if (dto.name) qb.andWhere('u.name ILIKE :name', { name: `%${dto.name.trim()}%` });
         if (dto.dimension) qb.andWhere('u.dimension = :dimension', { dimension: dto.dimension });
         if (dto.q) qb.andWhere('(u.code ILIKE :q OR u.name ILIKE :q)', { q: `%${dto.q.trim()}%` });
+        if (dto.isActive !== undefined) qb.andWhere('u.isActive = :isActive', { isActive: dto.isActive });
 
         const sortBy = (dto.sortBy || 'code');
         const sortDir = ((dto.sortDir || 'ASC').toUpperCase() === 'DESC' ? 'DESC' : 'ASC');
         qb.orderBy(`u.${sortBy}`, sortDir as any);
 
         qb.skip((page - 1) * limit).take(limit);
-        const [rows, total] = await qb.getManyAndCount();
-        return new ResponseCommon(200, true, 'OK', rows, {
+        const resultData = await qb.getRawAndEntities();
+        const rows = resultData.entities;
+        const total = await qb.getCount();
+        const result = rows.map((u, i) => ({
+            ...u,
+            baseName: resultData.raw[i].baseName,
+        }));
+        return new ResponseCommon(200, true, 'OK', result, {
             total,
             page,
             limit,
@@ -59,42 +106,141 @@ export class UnitsOfMeasureService {
     }
 
     async getOne(code: string) {
-        const u = await this.uomRepo.findOne({ where: { code: code.toUpperCase() } });
-        if (!u) throw new ResponseException('UOM_NOT_FOUND', 404);
-        return new ResponseCommon(200, true, 'OK', u);
+        const u = await this.uomRepo.createQueryBuilder('u')
+            .leftJoin('units_of_measure', 'base', 'u.base_code = base.code')
+            .addSelect('base.name', 'baseName')
+            .where('u.code = :code', { code: code.toUpperCase() })
+            .getRawAndEntities();
+        if (!u.entities[0]) throw new ResponseException('UOM_NOT_FOUND', 404);
+        const result = {
+            ...u.entities[0],
+            baseName: u.raw[0].baseName,
+        };
+        return new ResponseCommon(200, true, 'OK', result);
     }
 
     async update(code: string, dto: UpdateUnitsOfMeasureDto) {
         const u = await this.uomRepo.findOne({ where: { code: code.toUpperCase() } });
         if (!u) throw new ResponseException('UOM_NOT_FOUND', 404);
+
         const nextName = (dto.name ?? u.name).trim();
         const nextDim = (dto.dimension ?? u.dimension) as any;
+        let nextBaseCode = (dto.baseCode ?? u.baseCode ?? u.code).toUpperCase();
+
+        // Nếu đổi dimension -> check đang được dùng (code bạn đã có)
         if (dto.dimension && dto.dimension !== u.dimension) {
             const usedInInv = await this.invRepo.createQueryBuilder('i')
                 .where('i.base_uom_code = :code', { code: u.code }).getCount();
             const usedInConv = await this.convRepo.createQueryBuilder('c')
                 .leftJoin('c.from', 'f').leftJoin('c.to', 't')
                 .where('f.code = :code OR t.code = :code', { code: u.code }).getCount();
-            if (usedInInv > 0 || usedInConv > 0) throw new ResponseException('UOM_IN_USE_CANNOT_CHANGE_DIMENSION', 400);
+            if (usedInInv > 0 || usedInConv > 0) {
+                throw new ResponseException('UOM_IN_USE_CANNOT_CHANGE_DIMENSION', 400);
+            }
+        }
+
+        // Nếu đổi baseCode -> validate base
+        if (dto.baseCode && dto.baseCode.toUpperCase() !== u.baseCode) {
+            const base = await this.uomRepo.findOne({ where: { code: nextBaseCode } });
+            if (!base) throw new ResponseException('BASE_UOM_NOT_FOUND', 400);
+            if (base.dimension !== nextDim) {
+                throw new ResponseException('BASE_DIMENSION_MISMATCH', 400);
+            }
         }
 
         u.name = nextName;
         u.dimension = nextDim;
+        u.baseCode = nextBaseCode;
+
         await this.uomRepo.save(u);
         return new ResponseCommon(200, true, 'UPDATED', u);
     }
 
+
     async remove(code: string) {
         const u = await this.uomRepo.findOne({ where: { code: code.toUpperCase() } });
         if (!u) throw new ResponseException('UOM_NOT_FOUND', 404);
+
+        // Check if UOM is in use
         const usedInInv = await this.invRepo.createQueryBuilder('i')
             .where('i.base_uom_code = :code', { code: u.code }).getCount();
         const usedInConv = await this.convRepo.createQueryBuilder('c')
             .leftJoin('c.from', 'f').leftJoin('c.to', 't')
             .where('f.code = :code OR t.code = :code', { code: u.code }).getCount();
-        if (usedInInv > 0 || usedInConv > 0) throw new ResponseException('UOM_IN_USE_CANNOT_DELETE', 400);
-        await this.uomRepo.delete({ code: u.code });
-        return new ResponseCommon(200, true, 'DELETED', { code: u.code });
+        const usedInPri = await this.priRepo.createQueryBuilder('pri')
+            .where('pri.received_uom_code = :code', { code: u.code }).getCount();
+        const usedInPrl = await this.prlRepo.createQueryBuilder('prl')
+            .where('prl.uom_code = :code', { code: u.code }).getCount();
+        const usedInIng = await this.ingRepo.createQueryBuilder('ing')
+            .where('ing.selected_uom_code = :code', { code: u.code }).getCount();
+
+        const isInUse = usedInInv > 0 || usedInConv > 0 || usedInPri > 0 || usedInPrl > 0 || usedInIng > 0;
+
+        if (isInUse) {
+            // Soft delete: set inactive
+            u.isActive = false;
+            await this.uomRepo.save(u);
+            return new ResponseCommon(200, true, 'UOM_DEACTIVATED', { code: u.code });
+        } else {
+            // Hard delete
+            await this.uomRepo.delete({ code: u.code });
+            return new ResponseCommon(200, true, 'UOM_DELETED', { code: u.code });
+        }
     }
 
+    async deactivate(code: string) {
+        const u = await this.uomRepo.findOne({ where: { code: code.toUpperCase() } });
+        if (!u) throw new ResponseException('UOM_NOT_FOUND', 404);
+        if (!u.isActive) throw new ResponseException('UOM_ALREADY_INACTIVE', 400);
+        u.isActive = false;
+        await this.uomRepo.save(u);
+        return new ResponseCommon(200, true, 'UOM_DEACTIVATED', { code: u.code });
+    }
+
+    async activate(code: string) {
+        const u = await this.uomRepo.findOne({ where: { code: code.toUpperCase() } });
+        if (!u) throw new ResponseException('UOM_NOT_FOUND', 404);
+        if (u.isActive) throw new ResponseException('UOM_ALREADY_ACTIVE', 400);
+        u.isActive = true;
+        await this.uomRepo.save(u);
+        return new ResponseCommon(200, true, 'UOM_ACTIVATED', { code: u.code });
+    }
+
+    async findByInventoryItem(inventoryItemId: string) {
+        const inv = await this.invRepo.findOne({
+            where: { id: inventoryItemId },
+            relations: ['baseUom'],
+        });
+        if (!inv) {
+            throw new ResponseException('INVENTORY_ITEM_NOT_FOUND', 404);
+        }
+
+        const base = inv.baseUom;
+        const convs = await this.convRepo.find({
+            where: [
+                { to: { code: base.code } },
+                { from: { code: base.code } },
+            ],
+            relations: ['from', 'to'],
+        });
+
+        const codes = new Set<string>();
+        codes.add(base.code);
+        for (const c of convs) {
+            codes.add(c.from.code);
+            codes.add(c.to.code);
+        }
+
+        const uoms = await this.uomRepo.find({
+            where: { code: In(Array.from(codes)) },
+            order: { name: 'ASC' },
+        });
+
+        return uoms.map(u => ({
+            code: u.code,
+            name: u.name,
+            dimension: u.dimension,
+            isBase: u.code === base.code,
+        }));
+    }
 }

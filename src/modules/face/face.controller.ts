@@ -1,9 +1,17 @@
 // src/modules/face/face.controller.ts
-import { Body, Controller, Get, Logger, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Logger, Post, Req, UseGuards,Param,Delete } from '@nestjs/common';
 import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
 import { RekogService, FaceAttrs } from './rekog.service';
 import { ImgDto } from './dto/img.dto';
 import { randomUUID } from 'crypto';
+import { Roles } from 'src/common/decorators/roles.decorator';
+import {UserRole } from 'src/common/enums';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { FaceSnapshot } from './dto/face-snapshot.entity';
+import path from 'path/win32';
+import * as fs from 'node:fs/promises';
+import {BadRequestException} from "@nestjs/common";
 
 /** Bạn có thể import từ constants riêng; ở đây khai báo trực tiếp cho tiện */
 const POSE_THRESH = {
@@ -21,16 +29,97 @@ const STEPS_POOL: LivenessStep[] = ['LEFT', 'RIGHT', 'BLINK'];
 const challengeStore = new Map<string, Challenge>();
 const logger = new Logger('FaceController');
 
+
+
+
+
 @UseGuards(JwtAuthGuard)
 @Controller('face')
 export class FaceController {
-  constructor(private readonly rk: RekogService) {}
+  constructor(private readonly rk: RekogService,
 
+     @InjectRepository(FaceSnapshot)
+  private readonly snapRepo: Repository<FaceSnapshot>,
+  ) {}
+ private async saveBase64ToStorage(imageBase64: string, userId: string): Promise<string> {
+    // bỏ prefix data:image/...
+    const clean = imageBase64.replace(/^data:image\/\w+;base64,/, '');
+    const buf = Buffer.from(clean, 'base64');
+
+    // thư mục lưu, ví dụ: <root>/uploads/faces/<userId>/
+    const dir = path.resolve(process.cwd(), 'uploads', 'faces', userId);
+    await fs.mkdir(dir, { recursive: true });
+
+    const filename = `${Date.now()}.jpg`;
+    const fullPath = path.join(dir, filename);
+    await fs.writeFile(fullPath, buf);
+
+    // tuỳ cách bạn serve static, ví dụ:
+    // AppModule dùng: app.useStaticAssets(join(process.cwd(), 'uploads'), { prefix: '/uploads/' });
+    // thì URL của ảnh sẽ là:
+    const url = `/uploads/faces/${userId}/${filename}`;
+    return url;
+  }
   /** (Debug) Đăng ký nhanh từng ảnh một */
   @Post('enroll')
   enroll(@Req() req: any, @Body() dto: ImgDto) {
     return this.rk.enroll(req.user.id, dto.imageBase64);
   }
+ @Get('admin/user/:userId')
+  @Roles(UserRole.MANAGER)
+  async getUserFaces(@Param('userId') userId: string) {
+    const snaps = await this.snapRepo.find({
+      where: { userId },
+      order: { createdAt: 'DESC' }, // nếu FaceSnapshot có createdAt
+      take: 10,                     // tuỳ bạn, lấy 10 hình gần nhất
+    });
+
+    return {
+      userId,
+      count: snaps.length,
+      snapshots: snaps.map((s) => ({
+        id: s.id,
+        imageUrl: s.imageUrl,
+        createdAt: s.createdAt,
+      })),
+    };
+  }
+
+  @Post('admin/reset')
+  @Roles(UserRole.MANAGER)
+  async adminReset(@Body() body: { userId: string }) {
+    // Xoá vector mặt trong Rekognition
+    const r = await this.rk.deleteAllForUser(body.userId);
+
+    // Xoá toàn bộ snapshot lưu URL
+    await this.snapRepo.delete({ userId: body.userId });
+
+    return { ok: true, deletedFaces: r.deleted };
+  }
+
+  // (tuỳ chọn) ✅ API xoá 1 snapshot lẻ nếu muốn
+@Delete('admin/snapshot/:id')
+@Roles(UserRole.MANAGER)
+async deleteSnapshot(@Param('id') id: string) {
+  const snap = await this.snapRepo.findOne({ where: { id } });
+  if (!snap) {
+    throw new BadRequestException('SNAPSHOT_NOT_FOUND');
+  }
+
+  // Nếu có rekogFaceId thì xoá trên Rekognition
+  if (snap.rekogFaceId) {
+    await this.rk.deleteByFaceIds([snap.rekogFaceId]);
+  }
+
+  // Xoá record trong DB
+  await this.snapRepo.delete(id);
+
+  // (tuỳ chọn) nếu bạn muốn xoá luôn file vật lý trong uploads:
+  // try { await fs.unlink(path.resolve(process.cwd(), snap.imageUrl.replace('/uploads/', 'uploads/'))); } catch {}
+
+  return { ok: true };
+}
+
 
   /** (Debug) Verify nhanh một ảnh */
   @Post('verify')
@@ -51,6 +140,48 @@ export class FaceController {
     const r = await this.rk.deleteAllForUser(req.user.id);
     return { ok: true, deleted: r.deleted };
   }
+
+  @Get('admin/user/:userId/stats')
+@Roles(UserRole.MANAGER)
+async getUserFaceStats(@Param('userId') userId: string) {
+  const aws = await this.rk.enrollStatus(userId);                  // số face bên AWS
+  const local = await this.snapRepo.count({ where: { userId } });  // số snapshot local
+  return { userId, awsFaces: aws.count, localSnapshots: local };
+}
+
+@Post('admin/enroll')
+@Roles(UserRole.MANAGER)
+async adminEnroll(@Body() body: { userId: string; imageBase64: string }) {
+  const r = await this.rk.enroll(body.userId, body.imageBase64);
+
+  if (!r.ok || !r.faces.length) {
+    throw new BadRequestException('NO_FACE_DETECTED');
+  }
+
+  const first = r.faces[0]; // thường MaxFaces=1 nên chỉ có 1
+
+  // Lưu file ảnh ra storage như cũ
+  const url = await this.saveBase64ToStorage(body.imageBase64, body.userId);
+
+  // Lưu snapshot kèm rekogFaceId
+  const snap = this.snapRepo.create({
+    userId: body.userId,
+    imageUrl: url,
+    rekogFaceId: first.faceId ?? null,
+  });
+
+  await this.snapRepo.save(snap);
+
+  return {
+    ok: true,
+    face: {
+      rekogFaceId: first.faceId,
+      confidence: first.confidence,
+      snapshotId: snap.id,
+      imageUrl: snap.imageUrl,
+    },
+  };
+}
 
   /** B1: phát challenge 3 pose (LEFT/RIGHT/BLINK) */
   @Post('enroll-start')

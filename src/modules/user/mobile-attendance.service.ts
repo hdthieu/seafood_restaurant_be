@@ -68,6 +68,7 @@ export class MobileAttendanceService {
       15, // graceInMin
       15  // graceOutMin
     );
+    // ràng buộc giờ
     if (!okWindow) {
       throw new BadRequestException('OUT_OF_SHIFT_WINDOW');
     }

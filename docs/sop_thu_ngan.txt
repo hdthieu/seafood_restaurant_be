@@ -1,0 +1,97 @@
+# SOP THU NGÂN NHÀ HÀNG
+
+## 1. Mục đích vị trí
+- Thu ngân là người chịu trách nhiệm:
+  - Tạo và quản lý hóa đơn.
+  - Ghi nhận món khách order (nếu order từ quầy thu ngân).
+  - Báo món cho bếp đúng, đủ, kịp thời.
+  - Thu tiền khách, in hóa đơn, hỗ trợ xuất hóa đơn VAT (nếu có).
+  - Phối hợp với phục vụ, bếp và quản lý khi có vấn đề phát sinh.
+
+## 2. Nguyên tắc chung
+- Luôn kiểm tra kỹ thông tin bàn, số khách, món, số lượng trước khi báo bếp.
+- Không tự ý chỉnh sửa, hủy món, giảm giá nếu không có lý do hợp lệ hoặc không có sự đồng ý của quản lý (khi cần).
+- Luôn lịch sự, nhẹ nhàng với khách, ưu tiên giải thích trước khi xử lý.
+- Tuân thủ các quy định về tiền mặt, thanh toán và bàn giao ca.
+
+## 3. Quy trình trước ca làm việc
+1. Đăng nhập vào hệ thống thu ngân bằng tài khoản được cấp.
+2. Kiểm tra:
+   - Ca làm việc hiện tại (ca sáng/trưa/tối).
+   - Số tiền đầu ca (nếu có quy định quỹ tiền mặt).
+   - Tình trạng máy in hóa đơn, giấy in, kết nối mạng.
+3. Báo với quản lý nếu có vấn đề về thiết bị hoặc kết nối.
+
+## 4. Quy trình nhận order và báo bếp
+1. Khi khách đến:
+   - Phối hợp với phục vụ để nắm số bàn, số khách.
+2. Nhập món:
+   - Chọn đúng bàn/số phiếu.
+   - Nhập đúng món, số lượng, ghi chú đặc biệt (ít cay, không hành, v.v.) nếu khách yêu cầu.
+3. Kiểm tra lại:
+   - Tổng số món.
+   - Ghi chú món đặc biệt.
+4. Báo bếp:
+   - Nhấn nút báo bếp/báo chế biến trên hệ thống.
+   - Đảm bảo trạng thái món đã chuyển sang bếp (theo UI hệ thống).
+5. Thông báo cho phục vụ:
+   - Thông báo đã báo bếp xong để phục vụ yên tâm chăm bàn.
+
+## 5. Quy trình chỉnh sửa/hủy món
+1. Chỉ được chỉnh sửa/hủy món khi:
+   - Khách đổi ý.
+   - Món hết hàng/không thể phục vụ.
+   - Có yêu cầu từ quản lý.
+2. Trước khi hủy:
+   - Kiểm tra trạng thái món trong hệ thống:
+     - Nếu bếp chưa bắt đầu làm: có thể hủy trực tiếp.
+     - Nếu bếp đã làm hoặc đang chế biến: phải báo bếp và/hoặc quản lý để xác nhận.
+3. Thao tác trên hệ thống:
+   - Chọn món cần hủy/chỉnh số lượng.
+   - Nhập lý do hủy/giảm số lượng (bắt buộc, rõ ràng).
+   - Xác nhận thao tác.
+4. Thông báo:
+   - Thông báo cho bếp (nếu món đã báo bếp).
+   - Thông báo cho phục vụ để giải thích cho khách (nếu cần).
+
+## 6. Quy trình tính tiền và in hóa đơn
+1. Khi khách yêu cầu tính tiền:
+   - Xác nhận lại số bàn, kiểm tra có món nào chưa được cập nhật không.
+   - Đảm bảo tất cả món phục vụ thực tế đã được nhập lên hệ thống.
+2. Áp dụng khuyến mãi/giảm giá (nếu có):
+   - Chỉ áp dụng đúng chương trình đang chạy.
+   - Nhập mã khuyến mãi hoặc chọn khuyến mãi đúng quy định.
+3. Kiểm tra hóa đơn:
+   - Tên món, số lượng, đơn giá, giảm giá, tổng tiền.
+4. In hóa đơn tạm (nếu quy trình yêu cầu) để khách kiểm tra.
+5. Chốt hóa đơn:
+   - Chọn hình thức thanh toán: tiền mặt, chuyển khoản, thẻ, ví điện tử...
+   - Ghi nhận số tiền khách đưa và tiền thừa trả lại (nếu có).
+   - In hóa đơn thanh toán cho khách.
+
+## 7. Quy trình xuất hóa đơn VAT (nếu nhà hàng hỗ trợ)
+1. Hỏi khách có nhu cầu xuất hóa đơn VAT không.
+2. Nếu có:
+   - Thu thập thông tin: tên công ty, MST, địa chỉ, email nhận hóa đơn.
+   - Nhập đầy đủ, chính xác vào hệ thống theo hướng dẫn.
+3. Thông báo thời gian dự kiến khách nhận được hóa đơn (theo quy định nhà hàng).
+4. Ghi chú lại trên hệ thống hoặc sổ theo dõi (nếu có).
+
+## 8. Quy trình cuối ca, bàn giao ca
+1. In báo cáo cuối ca (doanh thu, số hóa đơn, hình thức thanh toán...).
+2. Kiểm đếm tiền mặt thực tế so với hệ thống (nếu quản lý yêu cầu).
+3. Ghi chú:
+   - Các hóa đơn đặc biệt (giảm giá mạnh, hủy nhiều, khách VIP...).
+   - Các vấn đề chưa xử lý xong cần ca sau/ quản lý tiếp tục.
+4. Bàn giao:
+   - Bàn giao tiền, báo cáo cho người nhận ca/ quản lý.
+   - Đăng xuất khỏi hệ thống.
+
+## 9. Phối hợp với bếp, phục vụ, quản lý
+- Với bếp:
+  - Báo món rõ ràng, kịp thời.
+  - Thông báo nhanh khi có hủy món, đổi món, món gấp.
+- Với phục vụ:
+  - Cập nhật kịp thời tình trạng hóa đơn, khuyến mãi, ghi chú món.
+- Với quản lý:
+  - Báo ngay khi phát hiện chênh lệch tiền, lỗi hệ thống, khách khiếu nại lớn, hay trường hợp gian lận nghi ngờ.

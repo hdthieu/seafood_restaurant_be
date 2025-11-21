@@ -1,8 +1,8 @@
 // dto/create-menuitem.dto.ts
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Type, Transform } from 'class-transformer';
+import { Transform } from 'class-transformer';
 import {
-  IsArray, IsNotEmpty, IsNumber, IsOptional, IsString, IsUUID, Min, ValidateNested
+  IsBoolean, IsNotEmpty, IsNumber, IsOptional, IsString, IsUUID, Min
 } from 'class-validator';
 
 export class IngredientDto {
@@ -11,7 +11,8 @@ export class IngredientDto {
   inventoryItemId: string;
 
   @ApiProperty({ example: 0.5 })
-  @IsNumber() @Min(0)
+  @IsNumber()
+  @Min(0.001, { message: 'Số lượng nguyên liệu phải lớn hơn 0' })
   quantity: number;
 
   @ApiPropertyOptional({ example: 'KG', description: 'Đơn vị nhập số lượng (nếu bỏ trống mặc định là base UOM của nguyên liệu)' })
@@ -45,6 +46,15 @@ export class CreateMenuItemDto {
   @ApiProperty({ example: '9c0a8e3c-0d4f-4b21-b6d7-123456789abc' })
   @IsUUID()
   categoryId: string;
+
+  @ApiPropertyOptional({
+    example: false,
+    description: 'Cho phép khách trả lại món này (ví dụ: bia chai chưa mở, nước uống đóng gói). Mặc định: false'
+  })
+  @IsOptional()
+  @IsBoolean()
+  @Transform(({ value }) => value === 'true' || value === true)
+  isReturnable?: boolean;
 
   @ApiProperty({
     type: [IngredientDto],

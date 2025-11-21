@@ -54,7 +54,7 @@ app.enableCors({
   }
   initialSwagger(app);
 
-  app.use('/upload', express.static(join(__dirname, '..', 'upload'))); 
+  app.use('/uploads', express.static(join(__dirname, '..', 'uploads'))); 
   app.useGlobalPipes(
     new ValidationPipe({
       transform: true,
@@ -65,8 +65,8 @@ app.enableCors({
   );
   app.useGlobalInterceptors(new LoggingInterceptor());
 
-  app.use(express.json({ limit: '10mb' }));
-  app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+  app.use(express.json({ limit: '20mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '20mb' }));
 
   app.useWebSocketAdapter(new SocketIoAdapter(app)); 
   await app.listen(configurations.port,'0.0.0.0');

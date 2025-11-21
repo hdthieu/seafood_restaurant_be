@@ -94,7 +94,7 @@ export class MenucomboitemService {
         const s = `%${kw.toLowerCase()}%`;
         qb.andWhere('(LOWER(m.name) LIKE :s OR LOWER(c.name) LIKE :s)', { s });
       }
-      
+
       if (categoryId) {
         qb.andWhere('c.id = :cid', { cid: categoryId });
       }
@@ -119,7 +119,7 @@ export class MenucomboitemService {
         { total, page, limit, pages: Math.ceil(total / limit) || 0 },
       );
     } catch (error) {
-      throw new ResponseException(error, 500, 'Không thể lấy danh sách combo');
+      throw new ResponseException(error, 500, 'GET_COMBOS_FAILED');
     }
   }
 

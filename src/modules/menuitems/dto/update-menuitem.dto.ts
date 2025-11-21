@@ -24,12 +24,25 @@ class UpdateIngredientInput {
 
 export class UpdateMenuItemDto {
   @ApiPropertyOptional() @IsOptional() @IsString() name?: string;
-  @ApiPropertyOptional() @IsOptional() @IsNumber() price?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  price?: number;
   @ApiPropertyOptional() @IsOptional() @IsString() description?: string;
   @ApiPropertyOptional() @IsOptional() @IsUUID() categoryId?: string;
+
   @ApiPropertyOptional({ enum: ['true', 'false'] })
   @IsOptional() @IsBooleanString()
   isAvailable?: string;
+
+  @ApiPropertyOptional({
+    enum: ['true', 'false'],
+    description: 'Cho phép khách trả lại món này'
+  })
+  @IsOptional() @IsBooleanString()
+  isReturnable?: string;
 
   // ingredients có thể là JSON string khi multipart
   @ApiPropertyOptional({
