@@ -32,58 +32,59 @@ import * as Joi from 'joi';
 import { PromotionsModule } from './modules/promotions/promotions.module';
 import { FaceModule } from './modules/face/face.module';
 import { CashbookModule } from './modules/cashbook/cashbook.module';
-import {SocketModule} from "@modules/socket/socket.module";
-import {KitchenModule} from "./modules/kitchen/kitchen.module";
+import { SocketModule } from "@modules/socket/socket.module";
+import { KitchenModule } from "./modules/kitchen/kitchen.module";
 import { PurchasereturnModule } from './modules/purchasereturn/purchasereturn.module';
-import {AiModule} from "@modules/ai/ai.module";
-import {RagModule} from "@modules/rag/rag.module";
-import {LlmGateway} from "@modules/ai/llm.gateway";
-import {PayrollModule} from "@modules/payroll/payroll.module";
+import { AiModule } from "@modules/ai/ai.module";
+import { RagModule } from "@modules/rag/rag.module";
+import { LlmGateway } from "@modules/ai/llm.gateway";
+import { PayrollModule } from "@modules/payroll/payroll.module";
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true,
+  imports: [ConfigModule.forRoot({
+    isGlobal: true,
 
 
-envFilePath: ['.env'], // tùy path
-      validationSchema: Joi.object({
-        NODE_ENV: Joi.string().valid('development','production','test').default('development'),
-        APP_PORT: Joi.number().default(8000),
+    envFilePath: ['.env'], // tùy path
+    validationSchema: Joi.object({
+      NODE_ENV: Joi.string().valid('development', 'production', 'test').default('development'),
+      APP_PORT: Joi.number().default(8000),
 
-        // --- PayOS ---
-        PAYOS_CLIENT_ID: Joi.string().required(),
-        PAYOS_API_KEY: Joi.string().required(),
-        PAYOS_CHECKSUM_KEY: Joi.string().required(),
-        PAYOS_RETURN_URL: Joi.string().uri().required(),
-        PAYOS_CANCEL_URL: Joi.string().uri().required(),
+      // --- PayOS ---
+      PAYOS_CLIENT_ID: Joi.string().required(),
+      PAYOS_API_KEY: Joi.string().required(),
+      PAYOS_CHECKSUM_KEY: Joi.string().required(),
+      PAYOS_RETURN_URL: Joi.string().uri().required(),
+      PAYOS_CANCEL_URL: Joi.string().uri().required(),
 
-        // --- VietQR (img.vietqr.io) ---
-        VIETQR_BANK_BIN: Joi.string().required(),
-        VIETQR_ACCOUNT_NO: Joi.string().required(),
-        VIETQR_ACCOUNT_NAME: Joi.string().optional(),
+      // --- VietQR (img.vietqr.io) ---
+      VIETQR_BANK_BIN: Joi.string().required(),
+      VIETQR_ACCOUNT_NO: Joi.string().required(),
+      VIETQR_ACCOUNT_NAME: Joi.string().optional(),
 
-        // --- Webhook HMAC cho “casso/payos-like” (nếu dùng) ---
-        WEBHOOK_SECRET: Joi.string().optional(),
+      // --- Webhook HMAC cho “casso/payos-like” (nếu dùng) ---
+      WEBHOOK_SECRET: Joi.string().optional(),
 
-        // --- VNPay (nếu vẫn dùng) ---
-        VNP_TMN_CODE: Joi.string().optional(),
-        VNP_HASH_SECRET: Joi.string().optional(),
-        VNP_URL: Joi.string().uri().optional(),
-        VNP_RETURN_URL: Joi.string().uri().optional(),
-        VNP_LOCALE: Joi.string().optional(),
-        VNP_VERSION: Joi.string().optional(),
+      // --- VNPay (nếu vẫn dùng) ---
+      VNP_TMN_CODE: Joi.string().optional(),
+      VNP_HASH_SECRET: Joi.string().optional(),
+      VNP_URL: Joi.string().uri().optional(),
+      VNP_RETURN_URL: Joi.string().uri().optional(),
+      VNP_LOCALE: Joi.string().optional(),
+      VNP_VERSION: Joi.string().optional(),
 
-        // --- JWT ---
-        JWT_ACCESS_SECRET: Joi.string().required(),
-        JWT_REFRESH_SECRET: Joi.string().required(),
-        JWT_ACCESS_EXPIRES: Joi.string().default('120m'),
-        JWT_REFRESH_EXPIRES: Joi.string().default('30d'),
- REKOG_COLLECTION_ID: Joi.string().required(),
+      // --- JWT ---
+      JWT_ACCESS_SECRET: Joi.string().required(),
+      JWT_REFRESH_SECRET: Joi.string().required(),
+      JWT_ACCESS_EXPIRES: Joi.string().default('120m'),
+      JWT_REFRESH_EXPIRES: Joi.string().default('30d'),
+      REKOG_COLLECTION_ID: Joi.string().required(),
 
 
 
-        FRONTEND_URL: Joi.string().uri().optional(),
-        TZ: Joi.string().optional(),
-      }),
+      FRONTEND_URL: Joi.string().uri().optional(),
+      TZ: Joi.string().optional(),
     }),
+  }),
 
   TypeOrmModule.forRoot({
     type: 'postgres',

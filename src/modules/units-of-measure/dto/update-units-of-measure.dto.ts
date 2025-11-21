@@ -12,4 +12,9 @@ export class UpdateUnitsOfMeasureDto {
     @IsString()
     @IsIn(['mass', 'volume', 'count', 'length'])
     dimension: 'mass' | 'volume' | 'count' | 'length';
+
+    @ApiProperty({ example: 'EA', description: 'Mã đơn vị cơ bản (nếu có), ví dụ: EA = each (cái)' })
+    @IsString()
+    @IsNotEmpty()
+    baseCode: string;
 }

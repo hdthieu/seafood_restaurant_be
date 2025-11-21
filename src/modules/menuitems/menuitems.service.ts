@@ -32,19 +32,19 @@ export class MenuitemsService {
 
   private async toBaseQty(inventoryItemId: string, qty: number, uomCode?: string): Promise<{ baseQty: number; selectedUomCode?: string | null; selectedQty?: number | null; }> {
     const inv = await this.invRepo.findOne({ where: { id: inventoryItemId }, relations: ['baseUom'] });
-    if (!inv) throw new ResponseException('Nguyên liệu không tồn tại', 400);
+    if (!inv) throw new ResponseException('INVENTORY_ITEM_NOT_FOUND', 400);
     const baseCode = inv.baseUom.code;
     if (!uomCode || uomCode === baseCode) {
       return { baseQty: qty, selectedUomCode: uomCode ?? baseCode, selectedQty: qty };
     }
     const conv = await this.convRepo.findOne({ where: { from: { code: uomCode }, to: { code: baseCode } }, relations: ['from', 'to'] });
-    if (!conv) throw new ResponseException(`Chưa cấu hình quy đổi UOM từ ${uomCode} -> ${baseCode}`, 400);
+    if (!conv) throw new ResponseException(`UOM_CONVERSION_NOT_CONFIGURED`, 400);
     return { baseQty: qty * Number(conv.factor), selectedUomCode: uomCode, selectedQty: qty };
   }
 
   async createMenuItem(dto: CreateMenuItemDto, file: Express.Multer.File) {
     const category = await this.CategoryRepo.findOneBy({ id: dto.categoryId });
-    if (!category) throw new ResponseException('Danh mục không tồn tại', 400);
+    if (!category) throw new ResponseException('CATEGORY_NOT_FOUND', 400);
 
     const key = await this.configS3Service.uploadBuffer(file.buffer, file.mimetype, 'menu-items');
     const imageUrl = this.configS3Service.makeS3Url(key);
@@ -56,11 +56,16 @@ export class MenuitemsService {
       image: imageUrl,
       category,
       isAvailable: true,
+      isReturnable: dto.isReturnable ?? false,
     }));
 
     const ingredientsToSave: Ingredient[] = [];
     for (const i of dto.ingredients) {
-      const { baseQty, selectedUomCode, selectedQty } = await this.toBaseQty(i.inventoryItemId, Number(i.quantity) || 0, i.uomCode);
+      const qty = Number(i.quantity) || 0;
+      // Bỏ qua nguyên liệu có quantity <= 0
+      if (qty <= 0) continue;
+
+      const { baseQty, selectedUomCode, selectedQty } = await this.toBaseQty(i.inventoryItemId, qty, i.uomCode);
       ingredientsToSave.push(this.IngredientRepo.create({
         menuItem: savedItem,
         inventoryItem: { id: i.inventoryItemId },
@@ -70,13 +75,18 @@ export class MenuitemsService {
         note: i.note,
       }));
     }
+
+    if (ingredientsToSave.length === 0) {
+      throw new ResponseException('MENU_ITEM_MUST_HAVE_INGREDIENTS', 400);
+    }
+
     await this.IngredientRepo.save(ingredientsToSave);
 
     const fullItem = await this.menuItemRepo.findOne({
       where: { id: savedItem.id },
       relations: ['ingredients', 'ingredients.inventoryItem', 'category'],
     });
-    if (!fullItem) throw new ResponseException('Không tìm thấy món sau khi tạo');
+    if (!fullItem) throw new ResponseException('MENU_ITEM_NOT_FOUND_AFTER_CREATION');
     return fullItem;
   }
 
@@ -161,7 +171,7 @@ export class MenuitemsService {
       },
     });
 
-    if (!item) throw new ResponseException('Không tìm thấy món', 404);
+    if (!item) throw new ResponseException('MENU_ITEM_NOT_FOUND', 404);
     return item;
   }
 
@@ -170,7 +180,7 @@ export class MenuitemsService {
       where: { id },
       relations: ['category', 'ingredients', 'ingredients.inventoryItem'],
     });
-    if (!existed) throw new ResponseException('Không tìm thấy món', 404);
+    if (!existed) throw new ResponseException('MENU_ITEM_NOT_FOUND', 404);
 
     return this.dataSource.transaction(async (manager) => {
       // 1) Ảnh (tùy chọn)
@@ -184,9 +194,10 @@ export class MenuitemsService {
       if (typeof dto.description === 'string') existed.description = dto.description;
       if (typeof dto.price === 'number') existed.price = dto.price;
       if (typeof dto.isAvailable !== 'undefined') existed.isAvailable = dto.isAvailable === 'true';
+      if (typeof dto.isReturnable !== 'undefined') existed.isReturnable = dto.isReturnable === 'true';
       if (dto.categoryId) {
         const cat = await manager.getRepository(Category).findOneBy({ id: dto.categoryId });
-        if (!cat) throw new ResponseException('Danh mục không tồn tại', 400);
+        if (!cat) throw new ResponseException('CATEGORY_NOT_FOUND', 400);
         existed.category = cat;
       }
       await manager.getRepository(MenuItem).save(existed);
@@ -241,12 +252,76 @@ export class MenuitemsService {
           'components.item',
         ],
       });
-      if (!full) throw new ResponseException('Cập nhật xong nhưng không thấy dữ liệu', 500);
+      if (!full) throw new ResponseException('MENU_ITEM_NOT_FOUND_AFTER_UPDATE', 500);
       return full;
     });
   }
 
+  async deleteMenuItem(id: string) {
+    return this.dataSource.transaction(async (manager) => {
+      // 1. Kiểm tra menu item tồn tại
+      const menuItem = await manager.findOne(MenuItem, {
+        where: { id },
+        relations: ['category']
+      });
+      if (!menuItem) {
+        throw new ResponseException('MENU_ITEM_NOT_FOUND', 404);
+      }
 
+      // 2. Kiểm tra có order items nào đang sử dụng menu item này không
+      const orderItemCount = await manager.count('OrderItem', {
+        where: { menuItem: { id } }
+      });
 
+      if (orderItemCount > 0) {
+        throw new ResponseException('MENU_ITEM_IN_USE_BY_ORDERS', 400);
+      }
+
+      // 3. Kiểm tra có kitchen tickets nào đang sử dụng menu item này không
+      const kitchenTicketCount = await manager.count('KitchenTicket', {
+        where: { menuItem: { id } }
+      });
+
+      if (kitchenTicketCount > 0) {
+        throw new ResponseException('MENU_ITEM_IN_USE_BY_KITCHEN_TICKETS', 400);
+      }
+
+      // 4. Kiểm tra có promotion nào đang áp dụng cho menu item này không
+      const promotionItemCount = await manager.query(
+        `SELECT COUNT(*) as count FROM "promotion_items" WHERE "item_id" = $1`,
+        [id]
+      );
+
+      if (parseInt(promotionItemCount[0].count) > 0) {
+        throw new ResponseException('MENU_ITEM_IN_USE_BY_PROMOTIONS', 400);
+      }
+
+      // 5. Kiểm tra có phải là combo cha không (có menu combo items)
+      const comboItemCount = await manager.count('MenuComboItem', {
+        where: { combo: { id } }
+      });
+
+      if (comboItemCount > 0) {
+        throw new ResponseException('MENU_ITEM_HAS_COMBO_CHILDREN', 400);
+      }
+
+      // 6. Kiểm tra có phải là item con trong combo nào khác không
+      const parentComboCount = await manager.count('MenuComboItem', {
+        where: { item: { id } }
+      });
+
+      if (parentComboCount > 0) {
+        throw new ResponseException('MENU_ITEM_IS_COMBO_COMPONENT', 400);
+      }
+
+      // 7. Xóa ingredients liên quan
+      await manager.query(`DELETE FROM "ingredients" WHERE "menuItemId" = $1`, [id]);
+
+      // 8. Xóa menu item
+      await manager.delete(MenuItem, { id });
+
+      return { message: 'Xóa món ăn thành công' };
+    });
+  }
 
 }
