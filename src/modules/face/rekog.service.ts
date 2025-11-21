@@ -123,71 +123,129 @@ export class RekogService {
   /* ---------- Public APIs ---------- */
 
   /** Enroll: thêm ảnh làm mẫu cho user (nên gọi 3–5 ảnh) */
-  async enroll(userId: string, imageBase64: string) {
-    await this.ensureCollection();
-    const b64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
-    const img = Buffer.from(b64, 'base64');
+  // src/modules/face/rekog.service.ts
+private toBuffer(imageBase64: string): Uint8Array {
+    const clean = imageBase64.replace(/^data:image\/\w+;base64,/, '');
+    return Buffer.from(clean, 'base64');
+  }
 
-    const r = await this.client.send(
-      new IndexFacesCommand({
+  /** Enroll: thêm ảnh làm mẫu cho user (nên gọi 3–5 ảnh) */
+  async enroll(userId: string, base64: string) {
+    try {
+      // dùng lại helper để chịu được cả base64 thuần lẫn dataURL
+      const bytes = this.toBuffer(base64);
+
+      const cmd = new IndexFacesCommand({
         CollectionId: this.collectionId,
-        Image: { Bytes: img },
+        Image: { Bytes: bytes },
         ExternalImageId: userId,
+        MaxFaces: 1,
         QualityFilter: 'AUTO',
-        DetectionAttributes: [],
-      }),
-    );
+      });
 
-    const ok = (r.FaceRecords?.length ?? 0) > 0;
-    this.logger.log(`Enroll user=${userId} → faces=${r.FaceRecords?.length ?? 0}`);
+      const res = await this.client.send(cmd);
 
-    return {
-      ok,
-      faces: (r.FaceRecords ?? []).map((fr) => ({
-        faceId: fr.Face?.FaceId,
-        confidence: fr.Face?.Confidence,
-      })),
-    };
+      if (!res.FaceRecords || res.FaceRecords.length === 0) {
+        return { ok: false, faces: [] };
+      }
+
+      const faces = res.FaceRecords.map((f) => ({
+        faceId: f.Face?.FaceId,
+        confidence: f.Face?.Confidence,
+      }));
+
+      return { ok: true, faces };
+    } catch (e) {
+      this.logger.error('REKOG ENROLL ERR:', e as any);
+      return { ok: false, faces: [] };
+    }
   }
 
   /** Verify: so khớp selfie hiện tại với mẫu đã enroll của userId */
-  async verify(userId: string, imageBase64: string, threshold = 90) {
-    await this.ensureCollection();
 
-    const b64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
-    const buf = Buffer.from(b64, 'base64');
+ 
+  // * So khớp khuôn mặt hiện tại với collection
+  //  * Trả về:
+  //  *  - ok: true/false
+  //  *  - score: similarity %
+  //  *  - reason:
+  //  *      - NO_FACE      : AWS không detect mặt
+  //  *      - NO_MATCH     : có mặt nhưng không có match nào trên collection
+  //  *      - DIFF_USER    : match là userId khác
+  //  *      - LOW_SCORE    : đúng user nhưng score < threshold
+  //  *      - ERROR        : lỗi runtime
+  //  */
 
-    try {
-      const r = await this.client.send(
-        new SearchFacesByImageCommand({
-          CollectionId: this.collectionId,
-          Image: { Bytes: buf },
-          FaceMatchThreshold: threshold,
-          MaxFaces: 5,
-        }),
-      );
-
-      const matches = (r.FaceMatches ?? []).map((m) => ({
-        similarity: m.Similarity ?? 0,
-        externalId: m.Face?.ExternalImageId,
-        faceId: m.Face?.FaceId,
-      }));
-
-      const top = matches.sort((a, b) => b.similarity - a.similarity)[0];
-      const ok = !!top && top.externalId === userId && top.similarity >= threshold;
-
-      return { ok, top, matches, reason: ok ? 'PASS' : ('NO_MATCH' as const) };
-    } catch (e: any) {
-      if (e?.name === 'InvalidParameterException' && /no faces in the image/i.test(e?.message ?? '')) {
-        return { ok: false, top: undefined, matches: [], reason: 'NO_FACE' as const };
-      }
-      if (e?.name === 'ImageTooLargeException') {
-        return { ok: false, reason: 'IMAGE_TOO_LARGE' as const };
-      }
-      this.logger.error('SearchFacesByImage failed', e);
-      throw e;
-    }
+async verify(
+  userId: string,
+  imageBase64: string,
+  appThreshold = 85,    // ngưỡng chấm công của bạn
+): Promise<{ ok: boolean; score: number | null; reason?: string }> {
+  
+   if (!imageBase64) {
+    this.logger.warn('VERIFY EMPTY_IMAGE', { userId });
+    return { ok: false, score: null, reason: 'IMAGE_EMPTY' };
   }
+  const awsMin = 70; // cho phép AWS trả về kết quả từ 70% trở lên
+
+  try {
+    const bytes = this.toBuffer(imageBase64);
+    const cmd = new SearchFacesByImageCommand({
+      CollectionId: this.collectionId,
+      Image: { Bytes: bytes },
+      FaceMatchThreshold: awsMin,
+      MaxFaces: 5,
+    });
+
+    const res = await this.client.send(cmd);
+
+    const matches = res.FaceMatches ?? [];
+    if (!matches.length) {
+      this.logger.warn('VERIFY NO_MATCH', {
+        userId,
+        awsMin,
+        appThreshold,
+      });
+      return { ok: false, score: 0, reason: 'NO_MATCH' };
+    }
+
+    const best = matches[0];
+    const score = best.Similarity ?? 0;
+    const face = best.Face;
+    const externalId = face?.ExternalImageId;
+
+    this.logger.log({
+      tag: 'VERIFY_RESULT',
+      userId,
+      awsMin,
+      appThreshold,
+      score,
+      matchedExternalId: externalId,
+      matchedFaceId: face?.FaceId,
+    });
+
+    if (externalId && externalId !== userId) {
+      return { ok: false, score, reason: 'DIFF_USER' };
+    }
+
+    if (score < appThreshold) {
+      return { ok: false, score, reason: 'LOW_SCORE' };
+    }
+
+    return { ok: true, score };
+  } catch (err) {
+    this.logger.error(`VERIFY ERROR user=${userId}`, {
+      name: (err as any)?.name,
+      message: (err as any)?.message,
+    });
+    return { ok: false, score: null, reason: 'ERROR' };
+  }
+}
+
+
+
+
+
 
   /** Đếm số mẫu hiện có của user (lọc theo ExternalImageId) */
   async enrollStatus(userId: string) {
@@ -279,4 +337,23 @@ export class RekogService {
       return { ok: false, reason: 'IMAGE_BAD' };
     }
   }
+
+
+
+    /** Xoá các face cụ thể theo FaceId (dùng khi xoá 1 snapshot lẻ) */
+  async deleteByFaceIds(faceIds: string[]) {
+    if (!faceIds.length) return { deleted: 0 };
+
+    await this.ensureCollection();
+
+    const d = await this.client.send(
+      new DeleteFacesCommand({
+        CollectionId: this.collectionId,
+        FaceIds: faceIds,
+      }),
+    );
+
+    return { deleted: d?.DeletedFaces?.length ?? 0 };
+  }
+
 }

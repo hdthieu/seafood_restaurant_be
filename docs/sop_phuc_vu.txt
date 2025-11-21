@@ -1,0 +1,77 @@
+# SOP PHỤC VỤ NHÀ HÀNG
+
+## 1. Mục đích vị trí
+- Phục vụ là người trực tiếp chăm sóc khách tại bàn:
+  - Chào đón, sắp xếp chỗ ngồi.
+  - Tư vấn món, ghi nhận order.
+  - Theo dõi món từ bếp ra, phục vụ đúng bàn.
+  - Chăm sóc khách trong suốt bữa ăn và hỗ trợ các yêu cầu phát sinh.
+  - Phối hợp với thu ngân, bếp, quản lý để đảm bảo trải nghiệm khách tốt.
+
+## 2. Nguyên tắc chung
+- Luôn chào khách lịch sự, nụ cười thân thiện.
+- Lắng nghe kỹ yêu cầu khách, nhắc lại order nếu cần.
+- Không tranh luận với khách, ưu tiên xin lỗi và tìm cách giải quyết.
+- Giữ khu vực phục vụ gọn gàng, sạch sẽ.
+
+## 3. Quy trình đón khách
+1. Chào khách ngay khi khách bước vào trong phạm vi phục vụ.
+2. Hỏi số lượng khách, nhu cầu đặc biệt (trẻ em, người già, cần không gian yên tĩnh...).
+3. Sắp xếp bàn phù hợp, đưa menu và giới thiệu ngắn gọn về:
+   - Món đặc trưng.
+   - Combo/khuyến mãi đang có (nếu có).
+
+## 4. Quy trình nhận order
+1. Lắng nghe và tư vấn:
+   - Gợi ý món phù hợp số lượng người, khẩu vị (cay/không cay...).
+2. Ghi order:
+   - Ghi rõ món, số lượng, ghi chú đặc biệt.
+   - Nếu dùng app phục vụ: nhập trực tiếp lên hệ thống, chọn đúng bàn.
+3. Xác nhận lại order với khách:
+   - Nhắc lại món, số lượng, ghi chú để khách đồng ý.
+4. Gửi order:
+   - Bấm gửi order lên hệ thống để thu ngân/bếp nhận được (tùy flow nhà hàng).
+
+## 5. Theo dõi món và phục vụ món
+1. Theo dõi trạng thái món:
+   - Dựa vào app hoặc thông báo từ bếp/thu ngân.
+2. Khi món “READY” hoặc đã ra pass bar/bàn pass:
+   - Kiểm tra lại tên món.
+   - Đem đến đúng bàn, giới thiệu món ngắn gọn.
+3. Hỏi thăm:
+   - Sau vài phút, quay lại hỏi khách món có hợp khẩu vị không, cần hỗ trợ gì thêm không.
+
+## 6. Xử lý yêu cầu thêm món, đổi món, hủy món
+1. Thêm món:
+   - Ghi nhận và gửi thêm order qua hệ thống.
+2. Đổi/hủy món:
+   - Giải thích nhẹ nhàng cho khách về tình trạng món (đã làm hay chưa).
+   - Báo ngay cho thu ngân và bếp:
+     - Nếu món chưa làm: đề nghị hủy/đổi món trên hệ thống.
+     - Nếu món đang chế biến hoặc gần xong: xin ý kiến quản lý.
+3. Luôn thông báo lại kết quả xử lý cho khách để khách nắm được.
+
+## 7. Quy trình hỗ trợ tính tiền
+1. Khi khách ra hiệu tính tiền:
+   - Xác nhận lại số bàn.
+   - Thông báo cho thu ngân để in hóa đơn.
+2. Hỗ trợ giải thích hóa đơn cho khách (nếu khách hỏi):
+   - Số lượng món, combo, khuyến mãi.
+3. Cảm ơn khách:
+   - Cảm ơn và mời khách quay lại.
+
+## 8. Quy trình dọn bàn và chuẩn bị cho khách mới
+1. Sau khi khách rời đi:
+   - Dọn chén đĩa, lau sạch bàn.
+   - Kiểm tra xem có đồ bị bỏ quên không.
+2. Sắp xếp lại:
+   - Chén, đũa, khăn giấy… theo tiêu chuẩn nhà hàng.
+3. Báo bàn sẵn sàng cho khách mới.
+
+## 9. Phối hợp với các bộ phận
+- Với thu ngân:
+  - Báo khi khách đổi bàn, tách/gộp bàn, hủy món, phàn nàn về hóa đơn.
+- Với bếp:
+  - Thông tin rõ ràng về các món đặc biệt, món gấp, ghi chú khẩu vị.
+- Với quản lý:
+  - Báo ngay nếu khách phàn nàn lớn, gây gổ, hoặc có tình huống khó xử.

@@ -1,0 +1,86 @@
+# SOP QUẢN LÝ NHÀ HÀNG
+
+## 1. Mục đích vị trí
+- Quản lý chịu trách nhiệm chung về:
+  - Vận hành hàng ngày của nhà hàng.
+  - Giám sát thu ngân, phục vụ, bếp và các bộ phận liên quan.
+  - Đảm bảo quy trình, chất lượng dịch vụ và doanh số theo mục tiêu.
+  - Xử lý các tình huống phát sinh, khiếu nại, sự cố.
+
+## 2. Vai trò và phạm vi trách nhiệm
+- Lập kế hoạch ca làm việc, phân công nhân sự.
+- Kiểm soát quy trình phục vụ khách, từ đón khách đến thanh toán.
+- Phê duyệt/kiểm soát các nghiệp vụ nhạy cảm:
+  - Giảm giá lớn, hủy hóa đơn, hủy nhiều món.
+  - Miễn phí món cho khách, xử lý khiếu nại nghiêm trọng.
+- Theo dõi báo cáo trong ngày (doanh thu, số hóa đơn, món bán chạy...) thông qua hệ thống (khi cần).
+- Đào tạo nhân viên mới về SOP và nội quy.
+
+## 3. Quy trình trước giờ mở cửa
+1. Kiểm tra:
+   - Tình trạng nhà hàng: sạch sẽ, gọn gàng, trang thiết bị hoạt động.
+   - Tình trạng hệ thống: mạng, máy POS, máy in, màn hình bếp.
+2. Họp ngắn đầu ca (nếu cần):
+   - Thông báo chương trình khuyến mãi, món mới, món tạm ngừng bán.
+   - Phân chia khu vực phục vụ, phân công nhiệm vụ cụ thể.
+3. Đảm bảo đầy đủ:
+   - Vật tư cần thiết: giấy in, hóa đơn, vật dụng phục vụ, nguyên liệu chủ lực.
+
+## 4. Giám sát hoạt động trong ca
+1. Theo dõi khu vực khách:
+   - Đảm bảo khách được chào đón nhanh, không phải chờ quá lâu.
+2. Theo dõi bếp:
+   - Kiểm tra tốc độ ra món, xử lý khi món bị chậm nhiều.
+3. Theo dõi thu ngân:
+   - Kiểm tra việc áp dụng khuyến mãi, hủy món/hủy hóa đơn có hợp lý không.
+4. Xử lý tình huống:
+   - Khi có khách phàn nàn, quản lý trực tiếp lắng nghe và tìm phương án giải quyết.
+   - Ghi nhận các sự cố để rút kinh nghiệm.
+
+## 5. Quy trình phê duyệt giảm giá, hủy hóa đơn, tặng món
+1. Giảm giá:
+   - Chỉ chấp nhận giảm giá ngoài quy định khi có lý do chính đáng (sự cố phục vụ, phàn nàn lớn...).
+   - Ghi rõ lý do giảm giá trong hệ thống hoặc sổ theo dõi.
+2. Hủy hóa đơn:
+   - Kiểm tra trạng thái: đã in, đã thu tiền hay chưa.
+   - Chỉ phê duyệt hủy khi mọi thông tin rõ ràng, có xác nhận của thu ngân.
+3. Tặng món:
+   - Cân nhắc mức độ ảnh hưởng (chi phí, doanh thu).
+   - Ghi nhận lại để theo dõi các trường hợp tặng món cho khách.
+
+## 6. Quy trình xử lý khiếu nại khách hàng
+1. Lắng nghe khách trình bày đầy đủ, không ngắt lời.
+2. Xin lỗi khách trước, dù lỗi thuộc về ai.
+3. Xác minh thông tin:
+   - Hỏi thêm phục vụ, thu ngân, bếp.
+   - Kiểm tra lại order/hóa đơn trên hệ thống.
+4. Đưa ra phương án xử lý:
+   - Thay món, làm lại món, giảm giá, tặng món... tùy mức độ.
+5. Ghi nhận sự việc:
+   - Ghi vào sổ hoặc hệ thống nội bộ để rút kinh nghiệm.
+
+## 7. Quy trình cuối ca và cuối ngày
+1. Xem báo cáo:
+   - Doanh thu trong ca/ngày.
+   - Số hóa đơn, số món bị hủy, các trường hợp đặc biệt.
+2. Kiểm tra bàn giao:
+   - Thu ngân bàn giao tiền, biên bản/phiếu nếu có.
+3. Đánh giá ca làm việc:
+   - Ghi chú nhân viên làm tốt, nhân viên cần nhắc nhở.
+4. Chốt tồn kho sơ bộ (nếu quy định):
+   - Đối chiếu những nguyên liệu chính, báo bếp và bộ phận kho.
+
+## 8. Quản lý nhân sự và đào tạo
+1. Chấm công, theo dõi đi trễ, về sớm.
+2. Đánh giá thái độ phục vụ, kỹ năng của từng bộ phận.
+3. Lên kế hoạch đào tạo:
+   - SOP mới.
+   - Kỹ năng phục vụ, bán hàng, xử lý tình huống.
+4. Hỗ trợ nhân viên mới:
+   - Giới thiệu quy định chung.
+   - Hướng dẫn cách dùng hệ thống cơ bản (theo từng vị trí).
+
+## 9. Phối hợp với chủ/quản lý cấp cao (nếu có)
+- Báo cáo định kỳ theo yêu cầu (doanh thu, chi phí, vấn đề vận hành).
+- Đề xuất cải tiến quy trình phục vụ, menu, khuyến mãi.
+- Đề xuất khen thưởng, kỷ luật nhân viên dựa trên quan sát thực tế.

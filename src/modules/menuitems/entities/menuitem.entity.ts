@@ -33,6 +33,10 @@ export class MenuItem {
     @Column({ default: true })
     isAvailable: boolean;
 
+    // Cho phép trả lại món (ví dụ: bia chai chưa mở, nước uống đóng gói)
+    @Column({ default: false })
+    isReturnable: boolean;
+
     // nguyên liệu của món lẻ
     @OneToMany(() => Ingredient, (ingredient) => ingredient.menuItem, { cascade: true })
     ingredients: Ingredient[];

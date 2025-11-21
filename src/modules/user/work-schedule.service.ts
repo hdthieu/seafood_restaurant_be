@@ -8,7 +8,7 @@ import { Shift } from './entities/shift.entity';
 import { CreateScheduleDto, UpdateScheduleDto } from './dto/create-schedule.dto';
 import { ResponseCommon, ResponseException } from 'src/common/common_dto/respone.dto';
 import { randomUUID } from 'node:crypto';
-
+import { Attendance } from './entities/attendance';
 function toMinutes(hhmm: string) {
   const [h, m] = hhmm.split(':').map(Number);
   return h * 60 + m;
@@ -20,8 +20,10 @@ export class WorkScheduleService {
     @InjectRepository(WorkSchedule) private readonly repo: Repository<WorkSchedule>,
     @InjectRepository(User) private readonly userRepo: Repository<User>,
     @InjectRepository(Shift) private readonly shiftRepo: Repository<Shift>,
+     @InjectRepository(Attendance) private readonly attRepo: Repository<Attendance>,
   ) { }
   /** Lấy các ca của 1 user trong 1 ngày (YYYY-MM-DD) */
+   /** Lấy các ca của 1 user trong 1 ngày (YYYY-MM-DD) */
   async listByDate(userId: string, date?: string) {
     function ymdLocal(now = new Date()) {
       const y = now.getFullYear();
@@ -31,23 +33,53 @@ export class WorkScheduleService {
     }
     const d = date ?? ymdLocal();
 
+    // 1) Lấy WorkSchedule + shift trong ngày đó
     const rows = await this.repo.find({
       where: { user: { id: userId }, date: d },
       relations: { shift: true },
       order: { date: 'ASC' },
     });
 
-    // Chuẩn hoá về DTO gọn cho mobile
-    return rows.map(r => ({
-      scheduleId: r.id,                 // id của lịch (quan trọng để chấm công)
-      shiftId: r.shift.id,
-      name: r.shift.name,               // ví dụ: "Ca sáng"
-      date: r.date,                     // "YYYY-MM-DD"
-      start: r.shift.startTime,         // "HH:mm"
-      end: r.shift.endTime,             // "HH:mm"
-      note: r.note ?? undefined,
-    }));
+    if (!rows.length) return [];
+
+    // 2) Lấy Attendance tương ứng theo (userId, dateISO=d, shiftId)
+    const shiftIds = Array.from(new Set(rows.map(r => (r.shift as any).id)));
+
+    const atts = await this.attRepo.find({
+      where: {
+        userId,
+        dateISO: d,
+        shiftId: In(shiftIds),
+      },
+    });
+
+    const attKey = (shiftId: string | number) => String(shiftId);
+    const attMap = new Map(
+      atts.map(a => [attKey(a.shiftId), a]),
+    );
+
+    // 3) Chuẩn hoá về DTO gọn cho mobile + kèm trạng thái chấm công
+    return rows.map(r => {
+      const s = r.shift as any;
+      const a = attMap.get(attKey(s.id));
+
+      return {
+        scheduleId: r.id,           // id của lịch (quan trọng để chấm công)
+        shiftId: s.id,
+        name: s.name,               // ví dụ: "Ca sáng"
+        date: r.date,               // "YYYY-MM-DD"
+        start: s.startTime,         // "HH:mm"
+        end: s.endTime,             // "HH:mm"
+        note: r.note ?? undefined,
+
+        // 🔥 thêm 3 field cho FE
+        attCheckIn: a?.checkIn ?? null,
+        attCheckOut: a?.checkOut ?? null,
+        attStatus: a?.status ?? null, // AttendanceStatus enum → FE nhận string
+      };
+    });
   }
+
   /** kiểm tra chồng lấn trong cùng ngày của 1 user */
   private async validateOverlap(userId: string, date: string, shift: Shift, ignoreId?: string) {
     const sameDay = await this.repo.find({

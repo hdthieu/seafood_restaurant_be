@@ -6,6 +6,7 @@ import { LlmGateway } from "./llm.gateway";
 
 type UiMsg = { role: "user" | "assistant"; content: string };
 type QuestionKind = "DATA" | "RAG" | "CHAT" | "SQL" | "TIME";
+type RagRole = "KITCHEN" | "WAITER" | "CASHIER" | "MANAGER" | "ALL";
 
 const TZ_DEFAULT = process.env.TZ || "Asia/Ho_Chi_Minh";
 
@@ -17,7 +18,7 @@ export class AiService {
     private readonly tools: ToolsService,
     private readonly rag: RagService,
     private readonly llm: LlmGateway,
-  ) { }
+  ) {}
 
   // =============================
   // Detect chat mode bằng prefix
@@ -58,12 +59,10 @@ export class AiService {
 
   // =============================
   // Nhận diện câu hỏi DỮ LIỆU (SQL)
-  // → để KHÔNG cho LLM đẩy sang CHAT
   // =============================
   private looksLikeDataQuestion(raw: string): boolean {
     const q = raw.toLowerCase().normalize("NFC");
 
-    // Từ khóa rất “DB”: doanh thu, hóa đơn, đơn hàng, doanh số...
     const patterns = [
       /doanh\s*thu/,
       /doanh\s*số/,
@@ -73,9 +72,9 @@ export class AiService {
       /invoice/,
       /revenue/,
       /sales/,
-      /tháng\s*\d{1,2}\s*20\d{2}/, // tháng 9 2025, tháng 12 2024...
+      /tháng\s*\d{1,2}\s*20\d{2}/,
       /tháng\s*\d{1,2}/,
-      /\b20\d{2}\b/,               // có năm
+      /\b20\d{2}\b/,
       /(bao nhiêu|mấy|tổng|đếm)\s+(hóa\s*đơn|hoá\s*đơn|đơn\s*hàng)/,
     ];
 
@@ -92,14 +91,12 @@ Nhiệm vụ: CHỈ trả về đúng MỘT từ trong các nhãn sau (viết ho
 
 - "DATA": khi người dùng hỏi về số liệu, thống kê, đếm, doanh thu, số hóa đơn, 
   danh sách dữ liệu trong database (kể cả tháng/năm trong TƯƠNG LAI so với bạn).
-  KHÔNG được suy đoán "tháng đó đã tới hay chưa", chỉ cần biết đó là truy vấn dữ liệu.
 
 - "SQL": khi người dùng muốn xem hoặc viết câu lệnh SQL, debug SQL, hoặc yêu cầu "viết câu SELECT..."...
 
 - "RAG": khi người dùng hỏi về quy trình, nội quy, chính sách, hướng dẫn, SOP, tài liệu txt/md.
 
-- "TIME": khi người dùng hỏi về thời gian/ngày giờ hiện tại
-  (ví dụ: "bây giờ mấy giờ", "thời gian hiện tại ở HCM", "hôm nay ngày mấy").
+- "TIME": khi người dùng hỏi về thời gian/ngày giờ hiện tại.
 
 - "CHAT": các câu hỏi trò chuyện thông thường, giải thích chung, tư vấn,
   không cần truy vấn DB và không nằm trong tài liệu nội bộ.
@@ -118,7 +115,8 @@ CHỈ trả về một trong năm chuỗi: DATA, SQL, RAG, TIME, CHAT.
       if (out.includes("CHAT")) return "CHAT";
     } catch (e) {
       this.logger.warn(
-        `[AiService] classifyQuestion error: ${e instanceof Error ? e.message : e
+        `[AiService] classifyQuestion error: ${
+          e instanceof Error ? e.message : e
         }`,
       );
     }
@@ -153,8 +151,8 @@ CHỈ trả về một trong năm chuỗi: DATA, SQL, RAG, TIME, CHAT.
   // =============================
   // AUTO MODE
   // =============================
-  private async autoRoute(question: string) {
-    // 0) TIME bằng regex → trả lời ngay, không hỏi LLM
+  private async autoRoute(question: string, ragRole: RagRole = "ALL") {
+    // 0) TIME bằng regex → trả lời ngay
     if (this.isTimeQuestion(question)) {
       this.logger.log(
         `[AiService] AUTO detect TIME by regex question="${question}"`,
@@ -162,7 +160,7 @@ CHỈ trả về một trong năm chuỗi: DATA, SQL, RAG, TIME, CHAT.
       return { role: "assistant", content: this.buildNowAnswer() };
     }
 
-    // 1) DATA bằng regex → ép DATA luôn, không cho LLM nhầm sang CHAT
+    // 1) DATA bằng regex → ép DATA luôn
     let kind: QuestionKind;
     if (this.looksLikeDataQuestion(question)) {
       kind = "DATA";
@@ -176,7 +174,7 @@ CHỈ trả về một trong năm chuỗi: DATA, SQL, RAG, TIME, CHAT.
       );
     }
 
-    // 2) TIME do LLM detect (phòng trường hợp câu phức tạp)
+    // 2) TIME do LLM detect
     if (kind === "TIME") {
       return { role: "assistant", content: this.buildNowAnswer() };
     }
@@ -200,10 +198,12 @@ CHỈ trả về một trong năm chuỗi: DATA, SQL, RAG, TIME, CHAT.
       }
     }
 
-    // 4) RAG → đọc tài liệu
+    // 4) RAG → đọc tài liệu (dùng LangChain + role)
     if (kind === "RAG") {
       try {
-        const rag = await this.rag.ask(question);
+        const rag = await this.rag.askWithLangChain(question, {
+          role: ragRole,
+        });
         return {
           role: "assistant",
           content: rag.answer,
@@ -241,7 +241,7 @@ Bạn là trợ lý AI thân thiện cho quản lý nhà hàng.
   // =============================
   // MAIN ROUTE
   // =============================
-  async route(messages: UiMsg[]) {
+  async route(messages: UiMsg[], ctx: { role: RagRole }) {
     const questionRaw =
       messages.filter((m) => m.role === "user").pop()?.content || "";
     if (!questionRaw) return { role: "assistant", content: "Xin chào 👋" };
@@ -251,7 +251,9 @@ Bạn là trợ lý AI thân thiện cho quản lý nhà hàng.
       .replace(/^\/(gemini|rag|sql)\s+/i, "")
       .trim();
 
-    this.logger.log(`[AiService] mode=${mode}, question="${question}"`);
+    this.logger.log(
+      `[AiService] mode=${mode}, role=${ctx.role}, question="${question}"`,
+    );
 
     // ép /sql → SmartSQL
     if (mode === "sql") {
@@ -271,9 +273,11 @@ Bạn là trợ lý AI thân thiện cho quản lý nhà hàng.
       }
     }
 
-    // ép /rag → RAG
+    // ép /rag → RAG (LangChain + role)
     if (mode === "rag") {
-      const rag = await this.rag.ask(question);
+      const rag = await this.rag.askWithLangChain(question, {
+        role: ctx.role ?? "ALL",
+      });
       return {
         role: "assistant",
         content: rag.answer,
@@ -297,10 +301,10 @@ Bạn là trợ lý AI thân thiện cho quản lý nhà hàng.
     }
 
     // AUTO
-    return this.autoRoute(question);
+    return this.autoRoute(question, ctx.role ?? "ALL");
   }
 
-  async chat(uiMessages: UiMsg[], _ctx: { role: "MANAGER" }) {
-    return this.route(uiMessages || []);
+  async chat(uiMessages: UiMsg[], ctx: { role: RagRole }) {
+    return this.route(uiMessages || [], ctx);
   }
 }
