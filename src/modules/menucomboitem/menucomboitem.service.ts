@@ -2,10 +2,14 @@ import { MenuItem } from '@modules/menuitems/entities/menuitem.entity';
 import { Injectable } from '@nestjs/common';
 import { ResponseCommon, ResponseException } from 'src/common/common_dto/respone.dto';
 import { MenuComboItem } from './entities/menucomboitem.entity';
+import { OrderItem } from '@modules/orderitems/entities/orderitem.entity';
+import { OrderStatus, InvoiceStatus } from 'src/common/enums';
 import { Category } from '@modules/category/entities/category.entity';
+import { Invoice } from '@modules/invoice/entities/invoice.entity';
+import { Payment } from '@modules/payments/entities/payment.entity';
 import { UpdateComboDto } from './dto/update-combo.dto';
 import { CreateComboDto } from './dto/create-combo.dto';
-import { DataSource, In, Repository } from 'typeorm';
+import { DataSource, In, Repository, Brackets } from 'typeorm';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ConfigS3Service } from 'src/common/AWS/config-s3/config-s3.service';
 import { ListCombosDto } from './dto/ListCombosDto.dto';
@@ -139,6 +143,38 @@ export class MenucomboitemService {
     const combo = await this.menuRepo.findOne({ where: { id, isCombo: true } });
     if (!combo) return new ResponseCommon(404, false, 'COMBO_NOT_FOUND');
 
+    // Kiểm tra nếu có order "mở" đang dùng combo này thì không cho phép sửa
+    const openStatuses = [
+      OrderStatus.PENDING,
+      OrderStatus.CONFIRMED,
+      OrderStatus.PREPARING,
+      OrderStatus.READY,
+      OrderStatus.SERVED,
+    ];
+    // Chỉ tính các order còn "mở" VÀ chưa có invoice được thanh toán.
+    // Một số luồng thanh toán có thể đã mark invoice = PAID nhưng chưa cập nhật order.status,
+    // nên ta loại trừ các order có invoice.status = PAID để tránh block vô lý.
+    // chỉ tính các order mở được tạo trong cùng ngày (ngày hiện tại của server)
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const tomorrowStart = new Date(todayStart);
+    tomorrowStart.setDate(todayStart.getDate() + 1);
+
+    const inUseCount = await this.ds.getRepository(OrderItem)
+      .createQueryBuilder('oi')
+      .innerJoin('oi.order', 'o')
+      .leftJoin('o.invoice', 'inv')
+      .where('oi.menuItemId = :mid', { mid: id })
+      .andWhere('o.status IN (:...sts)', { sts: openStatuses })
+      .andWhere('o.createdAt >= :from AND o.createdAt < :to', { from: todayStart, to: tomorrowStart })
+      .andWhere(new Brackets(qb => {
+        qb.where('inv.id IS NULL').orWhere('inv.status <> :paid', { paid: InvoiceStatus.PAID });
+      }))
+      .getCount();
+    if (inUseCount > 0) {
+      return new ResponseCommon(400, false, 'COMBO_IN_USE_BY_OPEN_ORDERS');
+    }
+
     return this.ds.transaction(async em => {
       // 1) Xử lý cập nhật thông tin cơ bản
       if (dto.name !== undefined) combo.name = dto.name;
@@ -189,8 +225,28 @@ export class MenucomboitemService {
   async remove(id: string) {
     const combo = await this.menuRepo.findOne({ where: { id, isCombo: true } });
     if (!combo) return new ResponseCommon(404, false, 'COMBO_NOT_FOUND');
+    // Kiểm tra đã có giao dịch/hóa đơn liên quan tới combo này chưa
+    // Nếu đã có hóa đơn hoặc thanh toán -> chỉ ẩn (isAvailable = false)
+    // Nếu chưa có hóa đơn nào -> cho phép xóa hoàn toàn
+
+    // 1) Count invoices that are connected to orders containing this combo
+    const invCount = await this.ds.getRepository(Invoice)
+      .createQueryBuilder('inv')
+      .innerJoin('inv.order', 'o')
+      .innerJoin('o.items', 'oi')
+      .where('oi."menuItemId" = :mid', { mid: id })
+      .getCount();
+
+    if (invCount > 0) {
+      // Có hoá đơn liên quan -> ẩn combo
+      combo.isAvailable = false;
+      await this.menuRepo.save(combo);
+      return new ResponseCommon(200, true, 'COMBO_HIDDEN', { id: combo.id, isAvailable: combo.isAvailable });
+    }
+
+    // 2) No invoices — safe to delete. (payments normally linked to invoices)
     await this.menuRepo.delete(combo.id);
-    return { success: true };
+    return new ResponseCommon(200, true, 'COMBO_DELETED', { id: combo.id });
   }
 
 }
