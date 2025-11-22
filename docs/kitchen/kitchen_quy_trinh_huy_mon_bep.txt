@@ -1,0 +1,15 @@
+# SOP BẾP – XỬ LÝ YÊU CẦU HUỶ MÓN
+
+## 1. Khi có yêu cầu huỷ từ phục vụ
+- Kiểm tra trạng thái món:
+  - CHƯA LÀM → huỷ ngay.
+  - ĐANG LÀM → hỏi bếp trưởng.
+  - ĐÃ XONG → không huỷ, báo phục vụ.
+
+## 2. Ghi chú lý do
+- Khách đổi ý
+- Order nhầm
+- Món trùng
+
+## 3. Lưu ý
+- Không tự ý làm tiếp món đã có yêu cầu huỷ.

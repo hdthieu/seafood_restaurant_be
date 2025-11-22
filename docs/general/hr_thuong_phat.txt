@@ -1,0 +1,13 @@
+===== FILE: docs/general/hr_thuong_phat.txt =====
+# QUY ĐỊNH THƯỞNG – PHẠT
+
+## 1. Thưởng
+- Thưởng doanh thu.
+- Thưởng theo KPI.
+- Thưởng nhân viên xuất sắc.
+
+## 2. Phạt
+- Đi trễ.
+- Thiếu đồng phục.
+- Thái độ không tốt với khách.
+===== END FILE =====

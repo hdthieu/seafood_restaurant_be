@@ -1,0 +1,11 @@
+===== FILE: docs/general/hr_cham_cong_cham_gio.txt =====
+# QUY ĐỊNH CHẤM CÔNG
+
+## 1. Nguyên tắc
+- Xuất hiện đúng vị trí chấm công.
+- 100% phải chấm công vào & ra.
+
+## 2. Lỗi chấm công
+- Quên chấm công: báo ngay trong ngày.
+- Chấm công sai: nộp form điều chỉnh.
+===== END FILE =====

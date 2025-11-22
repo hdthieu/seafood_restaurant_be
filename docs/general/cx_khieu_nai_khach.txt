@@ -1,0 +1,19 @@
+===== FILE: docs/general/cx_khieu_nai_khach.txt =====
+# QUY TRÌNH XỬ LÝ KHIẾU NẠI KHÁCH
+
+## 1. 4 bước chuẩn
+1) Lắng nghe  
+2) Xin lỗi  
+3) Giải thích  
+4) Đưa giải pháp
+
+## 2. Các trường hợp phổ biến
+- Món chậm.
+- Món sai.
+- Món không ngon.
+- Phục vụ không tốt.
+
+## 3. Theo thẩm quyền
+- Nhân viên: xin lỗi + báo quản lý.
+- Quản lý: giảm giá / đổi món / tặng món.
+===== END FILE =====

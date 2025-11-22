@@ -25,7 +25,7 @@ export class QueryCategoryDto {
     @TransformType(() => Number) @IsInt() @Min(1) @Max(100) @IsOptional()
     limit?: number = 10;
 
-    @ApiPropertyOptional({ example: 'createdAt:DESC', description: 'field:ASC|DESC' })
+    @ApiPropertyOptional({ example: 'createdAt:DESC', description: 'field:ASC|DESC (ví dụ createdAt:DESC)' })
     @IsString() @IsOptional()
-    sort?: string; // vd: "sortOrder:ASC" hoặc "createdAt:DESC"
+    sort?: string; // ví dụ: "createdAt:DESC"
 }

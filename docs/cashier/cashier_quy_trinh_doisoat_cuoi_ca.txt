@@ -1,0 +1,43 @@
+# SOP THU NGÂN – ĐỐI SOÁT CUỐI CA
+
+## 1. Mục tiêu
+- Đảm bảo số tiền thực tế trong két khớp với số liệu trên hệ thống.
+- Ghi nhận kịp thời chênh lệch, tránh thất thoát.
+
+## 2. Chuẩn bị
+- Kiểm tra không còn hoá đơn đang mở nếu ca đã kết thúc.
+- In báo cáo doanh thu ca từ POS, gồm:
+  - Tổng doanh thu.
+  - Tiền mặt.
+  - Thẻ.
+  - QR/ ví điện tử.
+  - Giảm giá/khuyến mãi.
+  - Hoàn tiền (refund).
+
+## 3. Kiểm đếm tiền mặt
+- Lấy toàn bộ tiền mặt trong két ca đó.
+- Tách mệnh giá:
+  - 500k, 200k, 100k, 50k, 20k, 10k, 5k, 2k, 1k…
+- Ghi nhận tổng cộng vào phiếu kiểm kê.
+
+## 4. Đối chiếu số liệu
+- So sánh:
+  - Tiền mặt thực tế vs tiền mặt trên báo cáo.
+- Nếu có chênh lệch:
+  - Kiểm tra lại:
+    - Hoá đơn huỷ.
+    - Hoàn tiền.
+    - Phiếu chi trong ca.
+  - Ghi chú lý do (nếu xác định được).
+
+## 5. Bàn giao ca
+- Đối với mô hình giao ca:
+  - Bàn giao két cho ca sau.
+  - Cả hai cùng ký xác nhận số tiền.
+- Đối với mô hình nộp tiền cuối ngày:
+  - Nộp tiền cho quản lý/kế toán.
+  - Ký xác nhận đã bàn giao đủ tiền.
+
+## 6. Lưu ý
+- Hạn chế tối đa việc “bù tiền túi” cho chênh lệch mà không rõ nguyên nhân.
+- Bất kỳ chênh lệch lớn phải báo ngay cho quản lý để xử lý.

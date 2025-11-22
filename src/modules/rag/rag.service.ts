@@ -136,74 +136,80 @@ private normalizeVector(v: any): number[] {
   throw new Error("Embedding vector is invalid");
 }
 
-  async searchDocs(
+ // 🟢 KHÔNG động vào phần trên…
+
+// 🟢 KHÔNG động vào phần trên…
+
+async searchDocs(
   question: string,
-  topK = 4,
-  scoreThreshold = 0.18,
-  sourceFilter?: string,        // 👈 thêm
+  topK = Number(process.env.RAG_TOPK || 16),
+  scoreThreshold = Number(process.env.RAG_SCORE_THRESHOLD || 0.05),
+  filter?: any,
 ) {
   await this.ensureCollection(this.docCollection);
-    await this.ensureDocPayloadIndexes();
+  await this.ensureDocPayloadIndexes();
+
   const v = await this.embed(question);
   const vector = this.normalizeVector(v);
-
-  const filter = sourceFilter
-    ? {
-        must: [
-          {
-            key: "metadata.source", 
-            match: { value: sourceFilter },
-          },
-        ],
-      }
-    : undefined;
 
   const r = await this.qdrant.search(this.docCollection as any, {
     vector,
     limit: topK,
     with_payload: true,
-    score_threshold: scoreThreshold,
-    filter,                     // 👈 truyền filter vào
+    // ❌ không dùng score_threshold ở Qdrant để khỏi bị loại sớm
+    // score_threshold: scoreThreshold,
+    filter,
   });
 
-  return (r || []).sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+  const hits = (r || []) as Array<{
+    score?: number;
+    payload?: any;
+  }>;
+
+  // 🧹 Tự lọc theo scoreThreshold & sort giảm dần
+  return hits
+    .filter((h) => (h.score ?? 0) >= scoreThreshold)
+    .sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
 }
+
+
+/** PUBLIC: cho AiService / script debug – trả danh sách hit gọn */
+async query(
+  question: string,
+  topK = Number(process.env.RAG_TOPK || 16),
+  scoreThreshold?: number,           // 🔧 cho phép override
+): Promise<RagHit[]> {
+  const threshold =
+    typeof scoreThreshold === "number"
+      ? scoreThreshold
+      : Number(process.env.RAG_SCORE_THRESHOLD || 0.18);
+
+  // ❌ BỎ hết filter theo tên file kiểu sop_quan_ly.txt
+  // vì giờ metadata.source là manager_quy_tac_chung.txt, waiter_..., v.v.
+  const hits = await this.searchDocs(question, topK, threshold);
+
+  return (hits || []).map((h: any) => {
+    const meta = (h.payload?.metadata || {}) as any;
+
+    return {
+      // 🔧 đọc đúng chỗ
+      text:
+        (h.payload?.page_content as string) ||
+        (meta.text as string) ||
+        "",
+      score: h.score,
+      source: meta.source,
+      absPath: meta.absPath,
+      index: meta.index,
+    };
+  });
+}
+
 
 
 
   /** PUBLIC: cho AiService – trả danh sách hit gọn */
- async query(
-  question: string,
-  topK = Number(process.env.RAG_TOPK || 4),
-): Promise<RagHit[]> {
-  const q = question.toLowerCase();
 
-  let sourceFilter: string | undefined;
-  if (q.includes("bếp")) {
-    sourceFilter = "sop_bep.txt";
-  } else if (q.includes("phục vụ")) {
-    sourceFilter = "sop_phuc_vu.txt";
-  } else if (q.includes("thu ngân") || q.includes("thu ngân")) {
-    sourceFilter = "sop_thu_ngan.txt";
-  } else if (q.includes("quản lý")) {
-    sourceFilter = "sop_quan_ly.txt";
-  }
-
-  const hits = await this.searchDocs(
-    question,
-    topK,
-    Number(process.env.RAG_SCORE_THRESHOLD || 0.18),
-    sourceFilter,
-  );
-
-  return (hits || []).map((h: any) => ({
-    text: h.payload?.text || "",
-    score: h.score,
-    source: h.payload?.source,
-    absPath: h.payload?.absPath,
-    index: h.payload?.index,
-  }));
-}
 
 
   /** Nếu muốn RAG tự tổng hợp trả lời (không bắt buộc) */
@@ -372,84 +378,82 @@ async askWithLangChain(
   opts?: {
     topK?: number;
     role?: "KITCHEN" | "WAITER" | "CASHIER" | "MANAGER" | "ALL";
-    scoreThreshold?: number;
+    scoreThreshold?: number; // hiện chưa dùng ở đây, có thể dùng nếu muốn
   },
 ) {
   await this.ensureCollection(this.docCollection);
   await this.ensureDocPayloadIndexes();
 
   const topK = opts?.topK ?? Number(process.env.RAG_TOPK || 8);
-  const scoreThreshold =
-    opts?.scoreThreshold ?? Number(process.env.RAG_SCORE_THRESHOLD || 0.05);
   const role = opts?.role;
 
   const store = await this.getVectorStore();
 
   const must: any[] = [];
-  const q = question.toLowerCase();
 
-  // 1) Lọc theo role (trừ MANAGER, MANAGER đọc được hết)
-  if (role && role !== "ALL" && role !== "MANAGER") {
+  // 🔍 Ưu tiên đoán bộ phận từ nội dung câu hỏi
+  const q = question.toLowerCase();
+  let deptRole: "KITCHEN" | "WAITER" | "CASHIER" | "MANAGER" | null = null;
+
+  if (q.includes("bếp") || q.includes("bep") || q.includes("kitchen")) {
+    deptRole = "KITCHEN";
+  } else if (q.includes("phục vụ") || q.includes("phuc vu") || q.includes("waiter")) {
+    deptRole = "WAITER";
+  } else if (q.includes("thu ngân") || q.includes("thu ngan") || q.includes("cashier")) {
+    deptRole = "CASHIER";
+  } else if (q.includes("quản lý") || q.includes("quan ly") || q.includes("manager")) {
+    deptRole = "MANAGER";
+  }
+
+  // 🔧 Chọn role để lọc:
+  // - Nếu câu hỏi nói rõ bộ phận → dùng deptRole
+  // - Nếu không, mà ctx.role là KITCHEN/WAITER/CASHIER → dùng ctx.role
+  let roleFilter: "KITCHEN" | "WAITER" | "CASHIER" | "MANAGER" | null = null;
+
+  if (deptRole) {
+    roleFilter = deptRole;
+  } else if (role && role !== "ALL" && role !== "MANAGER") {
+    roleFilter = role;
+  }
+
+  // Nếu có roleFilter → lọc theo [roleFilter, "ALL"]
+  if (roleFilter) {
     must.push({
       key: "metadata.role",
-      match: { any: [role, "ALL"] },
-    });
-  }
-
-  // 2) Lọc thêm theo nguồn SOP theo từ khoá trong câu hỏi
-  const sources: string[] = [];
-
-  if (q.includes("thu ngân") || q.includes("thu ngan") || q.includes("cashier")) {
-    sources.push("sop_thu_ngan.txt");
-  }
-  if (q.includes("phục vụ") || q.includes("phuc vu") || q.includes("phục vụ")) {
-    sources.push("sop_phuc_vu.txt");
-  }
-  if (q.includes("bếp") || q.includes("kitchen")) {
-    sources.push("sop_bep.txt");
-  }
-  if (q.includes("quản lý") || q.includes("quan ly") || q.includes("manager")) {
-    sources.push("sop_quan_ly.txt");
-  }
-
-  // luôn cho phép SOP tổng quát nếu đã match bộ phận nào đó
-  if (sources.length > 0) {
-    sources.push("sop_tong_quat.txt");
-    must.push({
-      key: "metadata.source",
-      match: { any: sources },
+      match: { any: [roleFilter, "ALL"] },
     });
   }
 
   const filter = must.length ? { must } : undefined;
 
+  // 🧠 Lấy docs từ Qdrant qua LangChain
   const docs = (await store.similaritySearch(
     question,
     topK,
     filter,
   )) as Document[];
 
-  const filtered = docs.filter((d: any) => {
-    const s =
-      typeof d.metadata?.score === "number"
-        ? d.metadata.score
-        : typeof d.score === "number"
-        ? d.score
-        : undefined;
-    if (typeof s !== "number") return true;
-    return s >= scoreThreshold;
-  });
-
   this.log.log(
-    `[RAG] [LangChain] query="${question}" docs=${docs.length}, filtered=${filtered.length}`,
+    `[RAG] [LangChain] query="${question}" docs=${docs.length}`,
   );
-  filtered.forEach((d, i) => {
+  docs.forEach((d: any, i) => {
     this.log.log(
       `[RAG] [${i}] src=${d.metadata?.source} idx=${d.metadata?.index} role=${d.metadata?.role}`,
     );
   });
 
-  const context = filtered
+  // ❌ Không có doc nào luôn → chịu, báo thẳng
+  if (!docs.length) {
+    return {
+      answer: "Không tìm thấy trong tài liệu.",
+      sources: [],
+    };
+  }
+
+  // 🔥 Chỉ dùng 1–3 chunk đầu để tránh nhiễu (ưu tiên chunk tốt nhất)
+  const primary = docs.slice(0, 3);
+
+  const context = primary
     .map(
       (d) =>
         `=== ${d.metadata?.source ?? ""} (idx=${d.metadata?.index}) ===\n${d.pageContent}`,
@@ -465,30 +469,30 @@ TÀI LIỆU:
 ${context || "(trống)"}
   `.trim();
 
- const rawAnswer = await this.llm.chat(sysPrompt, question, 30_000);
-let answer = (rawAnswer || "").trim();
+  const NO_DATA = "Không tìm thấy trong tài liệu.";
 
-if (!answer || !answer.trim()) {
-  if (filtered.length === 0) {
-    answer = "Không tìm thấy trong tài liệu.";
-  } else {
-    // không xả context nữa, nói nhẹ nhàng thôi
+  const rawAnswer = await this.llm.chat(sysPrompt, question, 30_000);
+  let answer = (rawAnswer || "").trim();
+
+  // ⚠️ Nếu LLM im lặng *hoặc* trả NO_DATA trong khi rõ ràng có docs
+  if (!answer || answer.includes(NO_DATA)) {
     answer =
-      "Mình đã tìm được một số đoạn trong SOP liên quan, nhưng chưa tóm tắt được rõ ràng. Bạn có thể mở trực tiếp tài liệu hoặc hỏi cụ thể hơn nhé.";
+      "Dưới đây là nội dung tài liệu liên quan mà hệ thống tìm được:\n\n" +
+      context;
   }
-}
-
-
 
   return {
-    answer: (answer || "Không tìm thấy trong tài liệu.").trim(),
-    sources: filtered.map((d: any) => ({
+    answer,
+    // Trả đủ list nguồn để FE show "Nguồn tham chiếu"
+    sources: docs.map((d: any) => ({
       source: d.metadata?.source,
       index: d.metadata?.index,
-      score: d.metadata?.score,
+      score: d.metadata?.score, // nếu sau này muốn ghi thêm
     })),
   };
 }
+
+
 
 
 

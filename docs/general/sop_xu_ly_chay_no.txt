@@ -1,0 +1,17 @@
+===== FILE: docs/general/sop_xu_ly_chay_no.txt =====
+# SOP XỬ LÝ CHÁY NỔ
+
+## 1. Khi phát hiện mùi gas
+- Mở cửa thông gió.
+- Không bật/tắt công tắc điện.
+- Khoá van gas ngay lập tức.
+
+## 2. Khi cháy nhỏ
+- Dùng bình chữa cháy.
+- Không dùng nước với cháy dầu/mỡ.
+
+## 3. Khi cháy lớn
+- Sơ tán toàn bộ khách.
+- Gọi 114.
+- Khoá điện tổng nếu có thể.
+===== END FILE =====

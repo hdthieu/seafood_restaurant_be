@@ -1,0 +1,35 @@
+# SOP THU NGÂN – HOÀN TIỀN / REFUND
+
+## 1. Trường hợp hoàn tiền
+- Tính nhầm, thu dư so với hoá đơn đúng.
+- Món lỗi nghiêm trọng và quản lý quyết định hoàn tiền.
+- Huỷ dịch vụ/tiệc theo quyết định quản lý.
+
+## 2. Nguyên tắc
+- Chỉ hoàn tiền khi có:
+  - Xác nhận của quản lý.
+  - Ghi nhận rõ ràng trên sổ/ hệ thống.
+- Số tiền hoàn phải khớp với hoá đơn hoặc biên bản thoả thuận với khách.
+
+## 3. Hoàn tiền bằng tiền mặt
+1) Kiểm tra lại hoá đơn gốc.
+2) Ghi nhận lý do hoàn tiền trên hệ thống hoặc sổ tay.
+3) Lấy tiền từ két theo số tiền cần hoàn.
+4) Đếm trước mặt khách, giao tiền:
+   - “Em hoàn lại cho anh/chị … đồng ạ.”
+5) Nếu quy định:
+   - Cho khách ký xác nhận đã nhận tiền.
+   - Thu ngân/ quản lý ký xác nhận chi.
+
+## 4. Hoàn tiền qua thẻ/QR
+- Thực hiện theo hướng dẫn của ngân hàng/đơn vị thanh toán:
+  - Hoàn lại trên máy POS thẻ.
+  - Hoặc tạo giao dịch chuyển khoản/hoàn tiền trên cổng thanh toán.
+- Ghi lại:
+  - Mã giao dịch hoàn tiền.
+  - Thời gian.
+- Thông báo cho khách thời gian dự kiến tiền về tài khoản.
+
+## 5. Lưu ý
+- Không hoàn tiền mặt cho giao dịch thẻ nếu quy định không cho phép.
+- Mọi hoàn tiền đều phải có chứng từ, không “trả bằng tay” không ghi nhận.

@@ -1,0 +1,15 @@
+===== FILE: docs/general/hr_gio_giac_lam_viec.txt =====
+# QUY ĐỊNH GIỜ GIẤC
+
+## 1. Đi làm đúng giờ
+- Đi trễ > 5 phút = tính đi trễ.
+- Báo trước với quản lý khi có vấn đề.
+
+## 2. Về sớm
+- Phải có lý do chính đáng.
+- Phải được quản lý duyệt.
+
+## 3. Chấm công
+- Sử dụng app chấm công / khuôn mặt.
+- Không chấm công hộ.
+===== END FILE =====
