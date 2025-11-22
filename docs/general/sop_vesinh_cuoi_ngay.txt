@@ -1,0 +1,22 @@
+===== FILE: docs/general/sop_vesinh_cuoi_ngay.txt =====
+# SOP VỆ SINH CUỐI NGÀY
+
+## 1. Khu phục vụ
+- Lau bàn ghế, menu, tường.
+- Sắp xếp bàn ghế đúng layout.
+- Hút bụi và lau sàn kỹ.
+
+## 2. Nhà vệ sinh
+- Lau toàn bộ bồn cầu, lavabo.
+- Thay giấy + kiểm tra thiết bị.
+- Khử mùi và khoá lại đúng quy định.
+
+## 3. Khu bếp
+- Lau bếp, lò, máy hút mùi.
+- Chà sàn và khu sơ chế.
+- Gom rác và mang ra đúng nơi quy định.
+
+## 4. Quầy thu ngân
+- Tắt thiết bị (POS, máy in).
+- Khoá két tiền (nếu có).
+===== END FILE =====

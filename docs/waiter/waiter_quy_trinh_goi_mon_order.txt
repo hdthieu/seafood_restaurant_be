@@ -1,0 +1,25 @@
+# SOP PHỤC VỤ – GHI ORDER (NHẬN MÓN)
+
+## 1. Mục tiêu
+- Ghi order chính xác, rõ ràng.
+- Tránh sai sót món/hương vị.
+
+## 2. Chuẩn bị
+- Điện thoại / thiết bị order đã đăng nhập.
+- Nắm rõ menu và món bán chạy.
+
+## 3. Quy trình ghi order
+1) Đứng bên phải khách khi ghi món (nếu có thể).
+2) Gợi ý các món signature.
+3) Lặp lại order để xác nhận:
+   - “Em xin nhắc lại món của mình: … đúng không ạ?”
+4) Gửi order lên hệ thống:
+   - Xác nhận trạng thái món “PREPARING”.
+5) Hướng dẫn thời gian món ra:
+   - Món nhanh: 5–7 phút.
+   - Món nướng/chiên: 10–15 phút.
+   - Combo/tiệc: 15–20 phút.
+
+## 4. Lưu ý
+- Không ghi order bằng trí nhớ.
+- Không tạo hai order cho cùng bàn (tránh trùng).

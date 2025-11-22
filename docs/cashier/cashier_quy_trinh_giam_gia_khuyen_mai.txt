@@ -1,0 +1,35 @@
+# SOP THU NGÂN – ÁP DỤNG KHUYẾN MÃI, GIẢM GIÁ, VOUCHER
+
+## 1. Nguyên tắc chung
+- Chỉ áp dụng chương trình còn hiệu lực, đúng quy định.
+- Tất cả giảm giá phải thực hiện trên hệ thống, không “bớt ngoài”.
+- Nội dung giảm giá phải thể hiện rõ ràng trên hoá đơn.
+
+## 2. Các loại khuyến mãi thường gặp
+- Giảm % trên tổng hoá đơn (vd: -10%).
+- Giảm giá theo món (vd: món A giảm 20k).
+- Combo set menu giá ưu đãi.
+- Voucher / mã giảm giá (code).
+- Tặng món miễn phí (free item).
+
+## 3. Quy trình áp dụng
+1) Hỏi khách:
+   - “Anh/chị có dùng voucher hay đang tham gia chương trình khuyến mãi nào không ạ?”
+2) Kiểm tra điều kiện:
+   - Thời gian chương trình.
+   - Giá trị hoá đơn tối thiểu.
+   - Món áp dụng.
+3) Thao tác trên POS:
+   - Chọn đúng loại khuyến mãi.
+   - Chọn đúng món hoặc toàn hoá đơn.
+   - Nhập mã voucher nếu có.
+4) Kiểm tra lại:
+   - Tổng trước giảm.
+   - Số tiền/ phần trăm giảm.
+   - Tổng sau giảm.
+
+## 4. Lưu ý
+- Không cộng dồn khuyến mãi nếu chương trình quy định “không áp dụng chung”.
+- Nếu nhập sai khuyến mãi:
+  - Huỷ/điều chỉnh hoá đơn theo SOP huỷ/sửa.
+- Mọi trường hợp “linh động cho khách” ngoài chính sách phải được quản lý duyệt.

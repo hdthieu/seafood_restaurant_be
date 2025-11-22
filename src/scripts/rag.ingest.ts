@@ -1,3 +1,4 @@
+// src/scripts/rag.ingest.ts
 import "dotenv/config";
 import { NestFactory } from "@nestjs/core";
 import { AppModule } from "../app.module";
@@ -27,13 +28,11 @@ function splitText(text: string, max = 1600): string[] {
   return out;
 }
 
-// Chia docs .txt/.md theo heading "##" cho dễ truy vấn RAG
+// Chia docs .txt/.md theo heading "##"
 function splitDocBySection(text: string, max = 1200): string[] {
-  // Tách theo heading level 2
   const parts = text.split(/^##\s+/m);
   const out: string[] = [];
 
-  // Phần trước heading đầu tiên (nếu có)
   if (parts[0]?.trim()) {
     out.push(...splitText(parts[0].trim(), max));
   }
@@ -51,13 +50,13 @@ function splitDocBySection(text: string, max = 1200): string[] {
     if (sectionText.length <= max) {
       out.push(sectionText);
     } else {
-      // nếu section quá dài thì lại chia nhỏ bằng splitText
       out.push(...splitText(sectionText, max));
     }
   }
 
   return out;
 }
+
 const fileExists = (p: string) => {
   try {
     return fss.statSync(p).isFile();
@@ -66,25 +65,44 @@ const fileExists = (p: string) => {
   }
 };
 
+const DOC_ROOT = path.join(process.cwd(), "docs");
+
+// map theo THƯ MỤC
+function detectRoleByPath(filePath: string):
+  | "KITCHEN"
+  | "WAITER"
+  | "CASHIER"
+  | "MANAGER"
+  | "ALL" {
+  const s = filePath.toLowerCase().replace(/\\/g, "/");
+  if (s.includes("/kitchen/")) return "KITCHEN";
+  if (s.includes("/waiter/")) return "WAITER";
+  if (s.includes("/cashier/")) return "CASHIER";
+  if (s.includes("/manager/")) return "MANAGER";
+  return "ALL"; // general, hr, ...
+}
+
 function buildPatterns(cliArgs: string[]): string[] {
   if (cliArgs?.length) {
     return cliArgs.map((a) => path.resolve(process.cwd(), a));
   }
-
-  const root = process.cwd();
-
+  const root = DOC_ROOT;
   return [
-    path.join(root, "docs/**/*.sql").replace(/\\/g, "/"),
-    path.join(root, "docs/**/*.txt").replace(/\\/g, "/"),
-    path.join(root, "docs/**/*.md").replace(/\\/g, "/"),
+    path.join(root, "**/*.txt").replace(/\\/g, "/"),
+    path.join(root, "**/*.md").replace(/\\/g, "/"),
   ];
 }
-
 
 async function readTargets(cliArgs: string[]) {
   const patterns = buildPatterns(cliArgs);
   console.log("[RAG-Ingest] Patterns:", patterns);
-  const files = await fg(patterns, { absolute: true, onlyFiles: true, unique: true, suppressErrors: true });
+  const files = await fg(patterns, {
+    absolute: true,
+    onlyFiles: true,
+    unique: true,
+    suppressErrors: true,
+  });
+
   for (const arg of cliArgs || []) {
     const abs = path.resolve(process.cwd(), arg);
     if (fileExists(abs) && !files.includes(abs)) files.push(abs);
@@ -101,64 +119,53 @@ async function run() {
   const args = process.argv.slice(2);
   const files = await readTargets(args);
   console.log("[RAG-Ingest] Found", files.length, "files");
+
   if (!files.length) {
     console.log(
-      " Ví dụ: node dist/scripts/rag.ingest.js ./docs/schema.sql ./docs/*.md",
+      "⚠️ Không tìm thấy file docs.\n" +
+        "Ví dụ: npx ts-node -r tsconfig-paths/register -r dotenv/config src/scripts/rag.ingest.ts ./docs/**/*.txt",
     );
   }
 
-  // 🔥 BƯỚC 1: XÓA HẾT collection rồi tạo lại (chỉ cần khi bạn muốn reset)
-  // Bật bằng env để tránh lỡ tay xóa nhầm
   if (String(process.env.RAG_RESET || "0") === "1") {
-    console.log("🔥 RAG_RESET=1 → reset schema & docs collections...");
-    await rag.resetSchemaCollection();
+    console.log("🔥 RAG_RESET=1 → reset docs collection...");
     await rag.resetDocCollection();
   } else {
-    console.log(
-      "ℹ️ RAG_RESET!=1 → giữ nguyên dữ liệu cũ, chỉ upsert thêm/ghi đè.",
-    );
-  }
- 
-  // 🔁 BƯỚC 2: Ingest lại toàn bộ file
-for (const f of files) {
-  const ext = path.extname(f).toLowerCase();
-  const raw = await fs.readFile(f, "utf8");
-
-  const isDoc = ext === ".txt" || ext === ".md";
-  if (!isDoc) {
-    console.log("⏭ skip (not doc):", f);
-    continue;
+    console.log("ℹ️ RAG_RESET!=1 → giữ nguyên dữ liệu cũ, chỉ upsert thêm/ghi đè.");
   }
 
-  const chunks = splitDocBySection(raw, 1200);
+  for (const f of files) {
+    const ext = path.extname(f).toLowerCase();
+    if (ext !== ".txt" && ext !== ".md") {
+      console.log("⏭ skip (not txt/md):", f);
+      continue;
+    }
 
-  // 👉 map file → role (như bạn đã làm)
-  let role: string | undefined;
-  const base = path.basename(f).toLowerCase();
-  if (base.includes("sop_bep")) role = "KITCHEN";
-  else if (base.includes("sop_phuc_vu")) role = "WAITER";
-  else if (base.includes("sop_thu_ngan")) role = "CASHIER";
-  else if (base.includes("sop_quan_ly")) role = "MANAGER";
-  else if (base.includes("sop_tong_quat")) role = "ALL";
+    const raw = await fs.readFile(f, "utf8");
+    const chunks = splitDocBySection(raw, 1200);
 
-  for (let i = 0; i < chunks.length; i++) {
-    const meta: any = {
-      source: path.basename(f),
-      absPath: f,
-      index: i,
-    };
-    if (role) meta.role = role;
+    const role = detectRoleByPath(f);
+    const baseName = path.basename(f);
 
-    console.log(`📄 docs → ${f} chunk ${i}`);
-    await rag.upsertDocChunk({ id: randomUUID(), text: chunks[i], meta });
+    for (let i = 0; i < chunks.length; i++) {
+      const meta: any = {
+        source: baseName,
+        absPath: f,
+        index: i,
+        role, // 👈 quan trọng: KITCHEN/WAITER/CASHIER/MANAGER/ALL
+      };
+
+      console.log(`📄 docs → ${baseName} [${role}] chunk ${i}`);
+      await rag.upsertDocChunk({
+        id: randomUUID(),
+        text: chunks[i],
+        meta,
+      });
+    }
   }
-}
-
-
 
   await app.close();
 }
-
 
 run().catch((e) => {
   console.error(e);

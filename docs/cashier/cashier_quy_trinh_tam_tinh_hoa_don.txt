@@ -1,0 +1,25 @@
+# SOP THU NGÂN – IN HOÁ ĐƠN TẠM TÍNH
+
+## 1. Khi nào dùng hoá đơn tạm tính
+- Khách yêu cầu xem tạm số tiền trước khi thanh toán.
+- Nhân viên phục vụ muốn kiểm tra lại với khách:
+  - Số lượng món.
+  - Giá và khuyến mãi.
+- Các trường hợp cần chốt tạm trong tiệc, thanh toán theo đợt.
+
+## 2. Các bước in tạm tính
+1) Chọn đúng bàn / mã order trên POS.
+2) Kiểm tra:
+   - Danh sách món.
+   - Số lượng.
+   - Các món huỷ đã trừ khỏi hoá đơn.
+   - Khuyến mãi/voucher đã thêm đúng chưa.
+3) Nhấn chức năng “In hoá đơn tạm tính”.
+4) Giao hoá đơn tạm tính cho khách hoặc cho nhân viên phục vụ.
+
+## 3. Lưu ý
+- Hoá đơn tạm tính **không phải** hoá đơn thanh toán cuối cùng.
+- Không dùng hoá đơn tạm tính để đối soát tiền mặt cuối ca.
+- Nếu khách yêu cầu điều chỉnh (thêm/bớt món):
+  - Cập nhật lại order trên hệ thống.
+  - In lại hoá đơn tạm tính mới nếu cần.

@@ -1,0 +1,34 @@
+# SOP THU NGÂN – XUẤT HOÁ ĐƠN VAT
+
+## 1. Khi nào cần xuất hoá đơn VAT
+- Khách là công ty, yêu cầu xuất hoá đơn đỏ.
+- Tiệc đặt trước có thoả thuận xuất hoá đơn trong hợp đồng.
+
+## 2. Thông tin bắt buộc
+- Tên công ty.
+- Mã số thuế.
+- Địa chỉ xuất hoá đơn.
+- Email/Số điện thoại nhận hoá đơn (đối với hoá đơn điện tử).
+
+## 3. Quy trình xuất hoá đơn
+1) Hoàn tất hoá đơn thanh toán trên POS.
+2) Mở chức năng “Xuất hoá đơn VAT”:
+   - Chọn hoá đơn vừa thanh toán.
+   - Nhập đầy đủ thông tin doanh nghiệp.
+3) Kiểm tra cẩn thận:
+   - Tên, MST, địa chỉ KHÔNG sai chính tả.
+4) Xác nhận xuất hoá đơn:
+   - In giấy hoặc gửi file điện tử tuỳ quy trình.
+5) Báo cho khách:
+   - Thời gian nhận hoá đơn (ngay lập tức hoặc trong ngày).
+
+## 4. Huỷ / điều chỉnh hoá đơn VAT
+- Tuân thủ quy định kế toán và pháp luật.
+- Thu ngân không tự ý huỷ / điều chỉnh hoá đơn VAT đã phát hành.
+- Nếu có sai sót:
+  - Thu thập thông tin.
+  - Báo ngay cho quản lý / kế toán để xử lý.
+
+## 5. Lưu ý
+- Lưu trữ thông tin xuất hoá đơn để tiện tra soát.
+- Không cho mượn thông tin hoá đơn của đơn hàng này xuất cho đơn hàng khác.

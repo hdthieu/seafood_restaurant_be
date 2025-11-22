@@ -1,0 +1,21 @@
+===== FILE: docs/general/onboarding_nhanvien_moi.txt =====
+# TÀI LIỆU ONBOARDING NHÂN VIÊN MỚI
+
+## 1. Giới thiệu
+- Lịch sử nhà hàng.
+- Mục tiêu – tầm nhìn.
+
+## 2. Nội quy cơ bản
+- Giờ giấc.
+- Đồng phục.
+- Tác phong.
+
+## 3. Quy trình đào tạo
+- Phục vụ / Bếp / Thu ngân / Quản lý.
+- Hướng dẫn 1 kèm 1.
+
+## 4. Đánh giá sau thử việc
+- Kỹ năng.
+- Thái độ.
+- Phù hợp văn hoá.
+===== END FILE =====

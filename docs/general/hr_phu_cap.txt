@@ -1,0 +1,13 @@
+===== FILE: docs/general/hr_phu_cap.txt =====
+# QUY ĐỊNH PHỤ CẤP
+
+## 1. Các loại phụ cấp
+- Phụ cấp ăn ca.
+- Phụ cấp gửi xe.
+- Phụ cấp trách nhiệm.
+- Phụ cấp ca gãy.
+
+## 2. Quy định
+- Chỉ tính khi làm đủ ca.
+- Không áp dụng khi nghỉ không phép.
+===== END FILE =====

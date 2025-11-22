@@ -1,0 +1,37 @@
+# SOP THU NGÂN – THANH TOÁN THẺ & QR
+
+## 1. Mục tiêu
+- Đảm bảo giao dịch không tiền mặt chính xác, an toàn.
+- Giảm rủi ro nhầm lẫn, trùng giao dịch.
+
+## 2. Thanh toán bằng thẻ (POS card)
+1) Xác nhận số tiền trên hoá đơn.
+2) Nhập số tiền vào máy POS thẻ.
+3) Đưa máy cho khách:
+   - Chạm thẻ / quẹt thẻ / cắm thẻ.
+   - Khách nhập PIN (nếu cần).
+4) Chờ máy xử lý:
+   - Nếu “Approved/Thành công” → in hoá đơn thẻ.
+   - Nếu “Declined/Từ chối” → thông báo lịch sự cho khách.
+5) Nếu thành công:
+   - Ghim hoá đơn thẻ kèm hoá đơn bán hàng.
+   - Xác nhận giao dịch trên POS bán hàng.
+
+## 3. Thanh toán bằng QR / ví điện tử
+1) Hiển thị mã QR đúng kênh thanh toán (ngân hàng/ ví).
+2) Đọc số tiền để khách kiểm tra trước khi quét.
+3) Hướng dẫn khách:
+   - Mở app → quét QR → xác nhận thanh toán.
+4) Kiểm tra:
+   - Thông báo giao dịch thành công trên màn hình đối soát.
+   - Hạn chế chỉ nhìn “ảnh chụp màn hình”.
+5) Xác nhận trên POS:
+   - Chọn phương thức “QR/ Ví điện tử”.
+   - Ghi chú mã giao dịch (nếu cần).
+
+## 4. Lưu ý chung
+- Không tự ý nhập lại giao dịch nếu chưa chắc giao dịch trước thất bại.
+- Nếu nghi ngờ bị trùng:
+  - Kiểm tra lịch sử giao dịch.
+  - Tra soát với đơn vị thanh toán.
+- Tuyệt đối không ghi hoặc chụp lại thông tin nhạy cảm của thẻ.

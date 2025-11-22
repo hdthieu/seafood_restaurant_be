@@ -1,0 +1,18 @@
+# SOP QUẢN LÝ – BÁO CÁO DOANH THU NGÀY
+
+## 1. Báo cáo gồm
+- Doanh thu gộp
+- Giảm giá
+- Doanh thu thuần
+- Số hóa đơn
+- TOP món bán chạy
+
+## 2. Thời điểm báo cáo
+- Mỗi ngày trước 23:00.
+
+## 3. Nguồn dữ liệu
+- Lấy từ POS.
+- Đối chiếu với tiền mặt thực tế.
+
+## 4. Lưu ý
+- Chênh lệch tiền mặt > 50,000 phải giải trình.

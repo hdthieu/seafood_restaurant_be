@@ -1,0 +1,13 @@
+# SOP BẾP – BÁO HẾT MÓN
+
+## 1. Khi phát hiện nguyên liệu thiếu
+- Báo ngay cho bếp trưởng.
+- Kiểm tra toàn bộ kho trước khi xác nhận.
+
+## 2. Quy trình báo hết món
+- Bếp trưởng xác nhận → báo quản lý.
+- Quản lý cập nhật hết món trên POS.
+- Không hứa với khách khi món không chắc làm được.
+
+## 3. Lưu ý
+- Nếu nguyên liệu sẽ có lại → ghi chú thời gian dự kiến.

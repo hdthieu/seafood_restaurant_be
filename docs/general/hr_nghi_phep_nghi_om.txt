@@ -1,0 +1,12 @@
+===== FILE: docs/general/hr_nghi_phep_nghi_om.txt =====
+# QUY ĐỊNH NGHỈ PHÉP
+
+## 1. Loại nghỉ
+- Nghỉ phép năm.
+- Nghỉ bệnh.
+- Nghỉ không lương.
+
+## 2. Quy định
+- Phải báo trước tối thiểu 1 ngày.
+- Nghỉ bệnh phải có xác nhận.
+===== END FILE =====

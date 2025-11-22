@@ -1,0 +1,19 @@
+===== FILE: docs/general/hr_noi_quy_lao_dong.txt =====
+# NỘI QUY LAO ĐỘNG
+
+## 1. Thời gian làm việc
+- Tôn trọng giờ giấc.
+- Đi trễ 3 lần = 1 lỗi.
+
+## 2. Trang phục
+- Mặc đúng đồng phục.
+- Không mang dép lê.
+
+## 3. Giao tiếp
+- Không quát tháo.
+- Không nói xấu khách.
+
+## 4. Kỷ luật
+- Vi phạm nhẹ: nhắc nhở.
+- Vi phạm lặp lại: lập biên bản.
+===== END FILE =====
