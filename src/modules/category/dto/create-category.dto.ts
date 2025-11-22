@@ -16,7 +16,4 @@ export class CreateCategoryDto {
     @IsEnum(CategoryType)
     type: CategoryType;
 
-    @ApiPropertyOptional({ example: 0 })
-    @IsOptional()
-    sortOrder?: number;
 }

@@ -49,11 +49,14 @@ export class CategoryService {
     const skip = (page - 1) * limit;
 
     // sort: "field:ASC|DESC"
-    let order: Record<string, 'ASC' | 'DESC'> = { sortOrder: 'ASC', createdAt: 'DESC' };
+    // Không sử dụng sortOrder nữa. Mặc định sắp theo createdAt DESC
+    let order: Record<string, 'ASC' | 'DESC'> = { createdAt: 'DESC' };
     if (q.sort) {
       const [field, dirRaw] = q.sort.split(':');
       const dir = (dirRaw ?? 'ASC').toUpperCase() as 'ASC' | 'DESC';
-      if (['ASC', 'DESC'].includes(dir) && field) {
+      // chỉ cho phép sort theo những trường thực sự tồn tại trên entity để tránh lỗi DB
+      const allowedFields = ['createdAt', 'updatedAt', 'name', 'isActive', 'id'];
+      if (['ASC', 'DESC'].includes(dir) && field && allowedFields.includes(field)) {
         order = { [field]: dir };
       }
     }
