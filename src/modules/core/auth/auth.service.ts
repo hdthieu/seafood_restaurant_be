@@ -53,23 +53,34 @@ export class AuthService {
     }
 
     // ===== Core logic =====
+    // 1. Sửa hàm validateUser: Trả về cùng 1 thông báo lỗi
     async validateUser(email: string, password: string): Promise<User> {
         const user = await this.userService.findByEmail(email);
 
+        // Tạo biến thông báo chung
+        const loginErrorMsg = 'Tài khoản hoặc mật khẩu không chính xác';
+
+        // Nếu không tìm thấy user -> Báo lỗi chung
         if (!user) {
-            throw new ResponseException('Thông tin đăng nhập không hợp lệ', 401);
+            throw new ResponseException(loginErrorMsg, 401);
         }
+
+        // Nếu user bị khóa -> Báo lỗi riêng (cái này giữ lại là đúng)
         if (user.status !== 'ACTIVE') {
             throw new ResponseException('Tài khoản đã bị khóa', 403);
         }
 
         const ok = await bcrypt.compare(password, user.password);
+
+        // Nếu sai mật khẩu -> Báo lỗi chung
         if (!ok) {
-            throw new ResponseException('Thông tin đăng nhập không hợp lệ', 401);
+            throw new ResponseException(loginErrorMsg, 401);
         }
+
         return user;
     }
 
+    // 2. Sửa hàm login: Để bắt đúng mã lỗi từ validateUser ném ra
     async login(dto: LoginUserDto): Promise<ResponseCommon<TokenResponseDto>> {
         try {
             const user = await this.validateUser(dto.email, dto.password);
@@ -82,6 +93,9 @@ export class AuthService {
 
             return new ResponseCommon<TokenResponseDto>(200, true, 'Đăng nhập thành công', tokens);
         } catch (error) {
+            if (error instanceof ResponseException) {
+                throw error;
+            }
             throw new ResponseException(error, 500);
         }
     }

@@ -71,17 +71,21 @@ export class CreateCashbookEntryDto {
 
 
     // thêm
-@ApiPropertyOptional({ format: 'uuid' })
-@ValidateIf(o => o.counterpartyGroup === CounterpartyGroup.STAFF)
-@IsUUID()
-@IsOptional()
-staffId?: string;
+    @ApiPropertyOptional({ format: 'uuid' })
+    @ValidateIf(o => o.counterpartyGroup === CounterpartyGroup.STAFF)
+    @IsUUID()
+    @IsOptional()
+    staffId?: string;
 
-@ApiPropertyOptional({ format: 'uuid' })
-@ValidateIf(o => o.counterpartyGroup === CounterpartyGroup.DELIVERY_PARTNER)
-@IsUUID()
-@IsOptional()
-deliveryPartnerId?: string;
+    @ApiPropertyOptional({ format: 'uuid' })
+    @ValidateIf(o => o.counterpartyGroup === CounterpartyGroup.DELIVERY_PARTNER)
+    @IsUUID()
+    @IsOptional()
+    deliveryPartnerId?: string;
 
+    @ApiPropertyOptional({ format: 'uuid' })
+    @IsOptional()
+    @IsUUID()
+    purchaseReturnId?: string;
 
 }

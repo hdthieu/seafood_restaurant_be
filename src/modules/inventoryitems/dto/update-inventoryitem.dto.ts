@@ -22,10 +22,4 @@ export class UpdateInventoryitemDto {
     @IsOptional()
     @IsUUID()
     categoryId?: string | null;
-
-    @ApiPropertyOptional({ type: [String] })
-    @IsOptional()
-    @IsArray()
-    @IsUUID('all', { each: true })
-    supplierIds?: string[];
 }

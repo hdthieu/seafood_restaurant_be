@@ -32,4 +32,12 @@ export class ListIngredientsDto {
   @IsOptional() @IsUUID()
   supplierId?: string;
 
+  @ApiPropertyOptional({ description: 'Lọc theo trạng thái hoạt động', example: true })
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (value === 'true') return true;
+    if (value === 'false') return false;
+    return undefined;
+  })
+  isActive?: boolean;
 }

@@ -15,6 +15,7 @@ import { CashbookService } from '@modules/cashbook/cashbook.service';
 
 import { Invoice } from '@modules/invoice/entities/invoice.entity';
 import { PurchaseReceipt } from '@modules/purchasereceipt/entities/purchasereceipt.entity';
+import { PurchaseReturn } from '@modules/purchasereturn/entities/purchasereturn.entity';
 import { User } from '@modules/user/entities/user.entity';
 import { Customer } from '@modules/customers/entities/customers.entity';
 import { Supplier } from '@modules/supplier/entities/supplier.entity';
@@ -31,6 +32,7 @@ import { Supplier } from '@modules/supplier/entities/supplier.entity';
       CashType,
       Invoice,
       PurchaseReceipt,
+      PurchaseReturn,
       Customer,
       Supplier,
       CashOtherParty,
@@ -41,4 +43,4 @@ import { Supplier } from '@modules/supplier/entities/supplier.entity';
   providers: [PayrollService, CashbookService],
   exports: [PayrollService],
 })
-export class PayrollModule {}
+export class PayrollModule { }

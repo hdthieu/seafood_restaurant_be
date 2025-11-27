@@ -65,6 +65,10 @@ export class PurchaseReturn {
     @Column('numeric', { precision: 14, scale: 2, default: 0 })
     paidAmount: number;
 
+    /** Số tiền nợ (refundAmount - paidAmount) */
+    @Column('numeric', { precision: 14, scale: 2, default: 0 })
+    debt: number;
+
     /** Người tạo phiếu */
     @ManyToOne(() => User, { nullable: false, onDelete: 'RESTRICT' })
     @JoinColumn({ name: 'created_by_id' })

@@ -176,6 +176,7 @@ export class PurchasereturnService {
       savedHeader.totalAfterDiscount = totalAfterDiscount;
       savedHeader.refundAmount = totalAfterDiscount;
       savedHeader.paidAmount = paidInput;
+      savedHeader.debt = this.roundMoney(totalAfterDiscount - paidInput);
       (savedHeader as any).postedAt = new Date();
       await em.getRepository(PurchaseReturn).save(savedHeader);
 
@@ -193,6 +194,7 @@ export class PurchasereturnService {
         totalAfterDiscount,
         refundAmount: savedHeader.refundAmount,
         paidAmount: savedHeader.paidAmount,
+        debt: savedHeader.debt,
       };
     });
   }
@@ -327,16 +329,6 @@ export class PurchasereturnService {
     });
   }
 
-
-  async markRefunded(id: string) {
-    const pr = await this.prRepo.findOne({ where: { id } });
-    if (!pr) throw new ResponseException(null, 404, 'PURCHASE_RETURN_NOT_FOUND');
-    if (pr.status === PurchaseReturnStatus.CANCELLED) throw new ResponseException(null, 400, 'ALREADY_CANCELLED');
-    pr.status = PurchaseReturnStatus.REFUNDED;
-    (pr as any).refundedAt = new Date();
-    return this.prRepo.save(pr);
-  }
-
   async changeStatus(id: string, status: PurchaseReturnStatus) {
     const pr = await this.prRepo.findOne({ where: { id } });
     if (!pr) throw new ResponseException(null, 404, 'PURCHASE_RETURN_NOT_FOUND');
@@ -346,7 +338,10 @@ export class PurchasereturnService {
     if (status === PurchaseReturnStatus.POSTED) {
       if (pr.status !== PurchaseReturnStatus.DRAFT) throw new ResponseException(null, 400, 'ONLY_DRAFT_CAN_BE_POSTED');
       return this.ds.transaction(async (em) => {
-        const prTx = await em.getRepository(PurchaseReturn).findOne({ where: { id }, relations: ['logs', 'logs.item', 'createdBy'] });
+        const prTx = await em.getRepository(PurchaseReturn).findOne({
+          where: { id },
+          relations: ['supplier', 'logs', 'logs.item', 'createdBy']
+        });
         if (!prTx) throw new ResponseException(null, 404, 'PURCHASE_RETURN_NOT_FOUND_IN_TX');
 
         const logs = prTx.logs ?? [];
@@ -417,7 +412,7 @@ export class PurchasereturnService {
   async getOne(id: string) {
     const pr = await this.prRepo.findOne({
       where: { id },
-      relations: ['supplier', 'logs', 'logs.item'],
+      relations: ['supplier', 'logs', 'logs.item', 'logs.uom'],
     });
     if (!pr) throw new ResponseException(null, 404, 'PURCHASE_RETURN_NOT_FOUND');
     return {
@@ -432,6 +427,7 @@ export class PurchasereturnService {
       status: pr.status,
       note: pr.note,
       paidAmount: Number(pr.paidAmount ?? 0),
+      debt: Number(pr.debt ?? 0),
       createdAt: pr.createdAt,
       updatedAt: pr.updatedAt,
       logs: (pr.logs ?? []).map(l => ({
@@ -444,6 +440,8 @@ export class PurchasereturnService {
         refundPrice: Number(l.lineTotalAfterDiscount ?? l.refundAmount ?? 0),
         discount: Number(l.globalDiscountAllocated ?? 0),
         total: Number(l.lineTotalAfterDiscount ?? l.refundAmount ?? 0),
+        uomCode: (l.uom as any)?.code ?? null,
+        uomName: (l.uom as any)?.name ?? null,
       })),
     };
   }
@@ -508,9 +506,8 @@ export class PurchasereturnService {
 
     if (pr.status === PurchaseReturnStatus.DRAFT) {
       return this.ds.transaction(async (em) => {
-        // ✅ reload pr bằng em (trong transaction)
         const prTx = await em.getRepository(PurchaseReturn).findOne({
-          where: { id: pr.id },
+          where: { id: pr.id }, relations: ['supplier'],
         });
         if (!prTx) throw new ResponseException(null, 404, 'PURCHASE_RETURN_NOT_FOUND_IN_TX');
 
@@ -635,10 +632,12 @@ export class PurchasereturnService {
           if (paidInput < 0) throw new ResponseException(null, 400, 'INVALID_PAID_AMOUNT');
           if (paidInput > totalAfterDiscount) throw new ResponseException(null, 400, 'PAID_AMOUNT_EXCEEDS_REFUND');
           prTx.paidAmount = paidInput;
+          prTx.debt = this.roundMoney(totalAfterDiscount - paidInput);
         } else {
           // ensure existing paid amount does not exceed new refund
           const existingPaid = this.roundMoney(Number(prTx.paidAmount ?? 0));
           if (existingPaid > totalAfterDiscount) throw new ResponseException(null, 400, 'PAID_AMOUNT_EXCEEDS_REFUND');
+          prTx.debt = this.roundMoney(totalAfterDiscount - existingPaid);
         }
 
         return em.getRepository(PurchaseReturn).save(prTx);

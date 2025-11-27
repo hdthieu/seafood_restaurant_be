@@ -11,6 +11,7 @@ import { PurchaseReceipt } from '@modules/purchasereceipt/entities/purchaserecei
 import { CashbookType, CounterpartyGroup } from 'src/common/enums';
 import { CashOtherParty } from './cash_other_party';
 import { User } from '@modules/user/entities/user.entity';
+import { PurchaseReturn } from '@modules/purchasereturn/entities/purchasereturn.entity';
 @Entity('cashbook_entries')
 @Unique(['code'])
 @Index(['date'])
@@ -59,6 +60,10 @@ export class CashbookEntry {
   @ManyToOne(() => PurchaseReceipt, { nullable: true })
   @JoinColumn({ name: 'purchase_receipt_id' })
   purchaseReceipt?: PurchaseReceipt | null;
+
+  @ManyToOne(() => PurchaseReturn, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'purchase_return_id' })
+  purchaseReturn?: PurchaseReturn | null;
 
   @Column({ name: 'source_code', nullable: true })
   sourceCode?: string;

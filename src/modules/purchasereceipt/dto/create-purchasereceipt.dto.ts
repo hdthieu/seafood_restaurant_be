@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { ArrayMinSize, IsArray, IsDateString, IsEnum, IsNumber, IsOptional, IsPositive, IsString, IsUUID, Max, MaxLength, Min, ValidateNested } from 'class-validator';
+import { ArrayMinSize, IsArray, IsDateString, IsEnum, IsNumber, IsOptional, IsPositive, IsString, IsUUID, Max, MaxLength, Min, ValidateIf, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { DiscountType } from 'src/common/enums';
 import { CreatePurchaseReceiptItemDto } from '@modules/purchasereceiptitem/dto/create-purchasereceiptitem.dto';
@@ -19,6 +19,8 @@ export class CreatePurchaseReceiptDto {
 
     @ApiPropertyOptional({ example: 0 })
     @Type(() => Number) @IsNumber() @Min(0) @IsOptional()
+    @ValidateIf(o => o.globalDiscountType === DiscountType.PERCENT)
+    @Max(100, { message: 'Chiết khấu phần trăm không được quá 100%' })
     globalDiscountValue?: number = 0;
 
     @ApiPropertyOptional({ example: 0 })
