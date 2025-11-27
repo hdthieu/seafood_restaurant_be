@@ -41,14 +41,6 @@ export class PurchasereturnController {
     return await this.purchasereturnService.createDraft(userId, dto);
   }
 
-  // hàm này 
-  @Post(':id/mark-refunded')
-  @Roles(UserRole.MANAGER)
-  @ApiOperation({ summary: 'Mark a purchase return as refunded' })
-  async markRefunded(@Param('id', new ParseUUIDPipe({ version: '4' })) id: string) {
-    return await this.purchasereturnService.markRefunded(id);
-  }
-
   @Patch(':id/status')
   @Roles(UserRole.MANAGER)
   @ApiOperation({ summary: 'Change status of a purchase return' })
@@ -68,8 +60,8 @@ export class PurchasereturnController {
 
   @Get('/get-all-purchasereturns')
   @Roles(UserRole.MANAGER)
-  findAll(@Query() q: QueryPurchaseReturnDto) {
-    return this.purchasereturnService.findAll(q);
+  async findAll(@Query() q: QueryPurchaseReturnDto) {
+    return await this.purchasereturnService.findAll(q);
   }
 
   @Patch(':id')

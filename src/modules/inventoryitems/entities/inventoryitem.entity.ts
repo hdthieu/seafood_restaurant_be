@@ -53,4 +53,8 @@ export class InventoryItem {
 
     @Column({ type: 'boolean', default: false })
     isDeleted: boolean;
+
+    @Column({ type: 'boolean', default: true })
+    isActive: boolean;
+
 }

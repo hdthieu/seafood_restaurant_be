@@ -56,7 +56,15 @@ export class CashbookController {
     return this.cashbookService.findOneCashbook(id);
   }
 
-
+  @Patch(':id')
+  @Roles(UserRole.MANAGER)
+  @ApiOperation({ summary: 'Update a cashbook entry (amount, date, note)' })
+  async update(
+    @Param('id') id: string, 
+    @Body() dto: { amount?: number; date?: Date; note?: string }
+  ) {
+    return await this.cashbookService.update(id, dto);
+  }
 
   // controller dùng cho cash other party
   // ------------------ CASH OTHER PARTY ------------------
@@ -121,4 +129,6 @@ export class CashbookController {
   async removeCashType(@Param('id') id: string) {
     return await this.cashbookService.removeCashType(id);
   }
+
+  
 }
