@@ -42,4 +42,7 @@ cancelledBy?: string | null;
 cancelled: boolean;
 @DeleteDateColumn({ name: 'deleted_at', nullable: true })
 deletedAt?: Date | null;
+
+ @Column({ type: 'text', nullable: true })
+  note?: string | null;
 }

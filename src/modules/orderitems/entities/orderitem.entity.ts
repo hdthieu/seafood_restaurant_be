@@ -43,6 +43,7 @@ export class OrderItem {
 
   // @Column({ type: 'timestamptz', nullable: true })
   // cancelledAt?: Date | null;
+   @Column({ type: 'text', nullable: true,name:'note' })
   note: string | null;
 @Column({ name: 'cancelled_at', type: 'timestamptz', nullable: true })
 cancelledAt?: Date | null;
@@ -56,4 +57,7 @@ cancelledBy?: string | null;
 
 @DeleteDateColumn({ name: 'deleted_at', nullable: true })
   deletedAt?: Date | null;
+
+
+  
 }

@@ -6,10 +6,12 @@ import { CancelItemsDto, CancelPartialDto } from './dto/cancel-items.dto';
 import { UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
 import { CurrentUser } from 'src/common/decorators/user.decorator';
+import { Param } from '@nestjs/common';
+import { UpdateItemNoteDto } from './dto/update-item-note.dto';
+
+
+
 @Controller('orderitems')
-
-
-
 export class OrderItemsController {
   constructor(private readonly svc: OrderItemsService) {}
 
@@ -46,6 +48,16 @@ export class OrderItemsController {
   @Patch('move-one')
 async moveOne(@Body() dto: { itemId: string; to: ItemStatus }) {
   return this.svc.moveOne(dto.itemId, dto.to);
+}
+ @UseGuards(JwtAuthGuard)
+@Patch(':id/note')
+async updateNote(
+  @Param('id') id: string,
+  @Body() dto: UpdateItemNoteDto,
+  @CurrentUser() user: any,
+) {
+  console.log('updateNote dto =', dto); // xem có note hay không
+  return this.svc.updateNote(id, dto.note ?? null, user.id);
 }
 
 }

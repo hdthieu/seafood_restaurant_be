@@ -13,7 +13,7 @@ export class KitchenController {
   @Post('/orders/:orderId/notify-items')
   async notifyItems(
     @Param('orderId') orderId: string,
-    @Body() body: { items: { menuItemId: string; delta: number }[]; priority?: boolean; note?: string, tableName: string },
+    @Body() body: { items: { menuItemId: string; delta: number }[]; priority?: boolean; note?: string, tableName: string, source?: "cashier" | "waiter" | "other" },
     @Req() req: any,
   ) {
     const staff = req.user?.name ?? 'Thu ngân';
@@ -25,6 +25,7 @@ export class KitchenController {
       itemsDelta: body.items,
       priority: body.priority,
       note: body.note,
+       source: body.source ?? "cashier",
     });
   }
 

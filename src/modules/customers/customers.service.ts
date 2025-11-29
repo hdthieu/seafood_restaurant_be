@@ -15,7 +15,9 @@ import { CustomerInvoiceRow } from './dtos/query-customer-history.dto';
 import { PageMeta } from 'src/common/common_dto/paginated';
 import { DataSource } from 'typeorm';
 import { UpdateCustomerDto } from './dtos/update-customer.dto';
-
+import  type {CreateCustomerInput } from '../../shared/schemas/customer';
+import { DeepPartial } from 'typeorm/common/DeepPartial';
+import { Not } from 'typeorm';
 
 @Injectable()
 export class CustomersService {
@@ -59,64 +61,72 @@ async getDetail(id: string): Promise<Customer> {
     return c;
   }
 
-  async update(id: string, dto: UpdateCustomerDto): Promise<Customer> {
-    const c = await this.cusRepo.findOne({ where: { id } });
-    if (!c) throw new NotFoundException('CUSTOMER_NOT_FOUND');
+ async update(id: string, dto: UpdateCustomerDto): Promise<Customer> {
+  const c = await this.cusRepo.findOne({ where: { id } });
+  if (!c) throw new NotFoundException("CUSTOMER_NOT_FOUND");
 
-    Object.assign(c, {
-      name: dto.name ?? c.name,
-      phone: dto.phone ?? c.phone,
-      email: dto.email ?? c.email,
-      type: dto.type ?? c.type,
-      gender: dto.gender ?? c.gender,
-      birthday: dto.birthday ? new Date(dto.birthday) : c.birthday,
-      address: dto.address ?? c.address,
-      province: dto.province ?? c.province,
-      district: dto.district ?? c.district,
-      ward: dto.ward ?? c.ward,
-    });
+  // check duplicate (ignore current id)
+  await this.ensurePhoneNotDuplicate(dto.phone, id);
 
-    try {
-      return await this.cusRepo.save(c);
-    } catch (e: any) {
-      if (e?.code === '23505') throw new BadRequestException('DUPLICATE_FIELD');
-      throw e;
-    }
+  Object.assign(c, {
+    name: dto.name ?? c.name,
+    phone: dto.phone ?? c.phone,
+    email: dto.email ?? c.email,
+    type: dto.type ?? c.type,
+    gender: dto.gender ?? c.gender,
+    birthday: dto.birthday ? new Date(dto.birthday) : c.birthday,
+    address: dto.address ?? c.address,
+    province: dto.province ?? c.province,
+    district: dto.district ?? c.district,
+    ward: dto.ward ?? c.ward,
+  });
+
+  return await this.cusRepo.save(c);
+}
+
+
+
+  async create(dto: CreateCustomerInput): Promise<Customer> {
+  await this.ensurePhoneNotDuplicate(dto.phone);
+
+  const partial: DeepPartial<Customer> = {
+    type: dto.type,
+    code: dto.code ?? this.genCode(),
+    name: dto.name.trim(),
+    companyName: dto.companyName ?? null,
+    phone: dto.phone ?? null,
+    email: dto.email ?? null,
+    gender: dto.gender ?? null,
+    birthday: dto.birthday ? new Date(dto.birthday) : null,
+    address: dto.address ?? null,
+    province: dto.province ?? null,
+    district: dto.district ?? null,
+    ward: dto.ward ?? null,
+    taxNo: dto.taxNo ?? null,
+    identityNo: dto.identityNo ?? null,
+    isWalkin: false,
+  };
+
+  const entity = this.cusRepo.create(partial);
+  return await this.cusRepo.save(entity);
+}
+
+
+
+ private async ensurePhoneNotDuplicate(phone?: string, ignoreId?: string) {
+  if (!phone?.trim()) return; // không nhập sdt thì bỏ qua
+
+  const exists = await this.cusRepo.findOne({
+    where: ignoreId
+      ? { phone, id: Not(ignoreId) }       // update
+      : { phone },                         // create
+  });
+
+  if (exists) {
+    throw new BadRequestException("Số điện thoại đã được sử dụng");
   }
+}
 
-
-  async create(dto: CreateCustomerDto): Promise<Customer> {
-    if (!dto.name?.trim()) throw new BadRequestException('NAME_REQUIRED');
-
-    const entity = this.cusRepo.create({
-      type: dto.type,                                   // PERSONAL | COMPANY
-      code: dto.code ?? this.genCode(),
-      name: dto.name.trim(),
-      companyName: dto.companyName ?? null,
-      phone: dto.phone ?? null,
-      email: dto.email ?? null,
-      gender: dto.gender ?? null,
-      birthday: dto.birthday ? new Date(dto.birthday) : null,
-      address: dto.address ?? null,
-      province: dto.province ?? null,
-      district: dto.district ?? null,
-      ward: dto.ward ?? null,
-      taxNo: dto.taxNo ?? null,
-      identityNo: dto.identityNo ?? null,
-      isWalkin: false,
-    });
-
-    try {
-      return await this.cusRepo.save(entity);
-    } catch (e: any) {
-      if (e?.code === '23505') {
-        throw new BadRequestException('Số điện thoại hoặc mã đã tồn tại');
-      }
-      throw e;
-    }
-  }
-
- 
 
 
 

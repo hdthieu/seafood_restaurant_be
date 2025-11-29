@@ -26,6 +26,7 @@ import { KitchenService } from 'src/modules/kitchen/kitchen.service';
 import { KitchenGateway } from 'src/modules/socket/kitchen.gateway';
 import { Inject, forwardRef } from '@nestjs/common';
 import {KitchenTicket} from '../kitchen/entities/kitchen-ticket.entity';
+import { RestaurantTable } from 'src/modules/restauranttable/entities/restauranttable.entity';
 // OrderItemsService
 const ALLOWED_ITEM_TRANSITIONS: Record<ItemStatus, ItemStatus[]> = {
   [ItemStatus.PENDING]:   [ItemStatus.CONFIRMED, ItemStatus.PREPARING, ItemStatus.CANCELLED], // <-- thêm PREPARING
@@ -144,26 +145,43 @@ async updateStatusBulk(dto: UpdateItemsStatusDto) {
   }
 
   public async recomputeOrderStatus(em: EntityManager, orderId: string) {
-    const oRepo = em.getRepository(Order);
-    const hRepo = em.getRepository(OrderStatusHistory);
-    const iRepo = em.getRepository(OrderItem);
+  const oRepo = em.getRepository(Order);
+  const hRepo = em.getRepository(OrderStatusHistory);
+  const iRepo = em.getRepository(OrderItem);
 
-    const order = await oRepo.findOne({ where: { id: orderId } });
-    if (!order) return;
+  const order = await oRepo.findOne({
+    where: { id: orderId },
+    relations: ['table'],
+  });
+  if (!order) return;
 
-    // terminal -> bỏ qua
-    if ([OrderStatus.PAID, OrderStatus.CANCELLED].includes(order.status)) return;
+  if ([OrderStatus.PAID, OrderStatus.CANCELLED].includes(order.status)) return;
 
-    const items = await iRepo.find({ where: { order: { id: orderId } } });
-    const itemStatuses = items.map((it) => it.status);
+  const items = await iRepo.find({ where: { order: { id: orderId } } });
+  const itemStatuses = items.map((it) => it.status);
 
-    const next = this.deriveOrderStatusFromItems(itemStatuses, order.status);
-    if (next !== order.status) {
-      order.status = next;
-      await oRepo.save(order);
-      await hRepo.save(hRepo.create({ order, status: next }));
-    }
-  }
+
+  // 🔻 Nếu tất cả item CANCELLED → tự huỷ order + giải phóng bàn + bắn socket
+ const next = this.deriveOrderStatusFromItems(itemStatuses, order.status);
+if (next === order.status) return;
+
+order.status = next;
+await oRepo.save(order);
+await hRepo.save(hRepo.create({ order, status: next }));
+
+// 🔹 Nếu tất cả item CANCELLED → tự bắn socket “order bị huỷ”
+// (KHÔNG đụng tới table.status)
+if (next === OrderStatus.CANCELLED) {
+  this.gw.emitOrderChanged({
+    orderId: order.id,
+    tableId: order.table?.id ?? '',
+    reason: 'ORDER_CANCELLED',
+  });
+}
+
+}
+
+
 
 
   // ĐANG SỬ DỤNG 
@@ -428,5 +446,32 @@ async moveOne(itemId: string, to: ItemStatus) {
   });
 }
 
+
+  async updateNote(itemId: string, note: string | null, userId: string) {
+  console.log("[updateNote] called", { itemId, note, userId });
+
+  const it = await this.itemRepo.findOne({
+    where: { id: itemId },
+    relations: ['order', 'menuItem'],
+  });
+  if (!it) {
+    console.log("[updateNote] ITEM_NOT_FOUND", itemId);
+    throw new NotFoundException('ITEM_NOT_FOUND');
+  }
+
+  it.note = note;
+  const saved = await this.itemRepo.save(it);
+  console.log("[updateNote] saved", { id: saved.id, note: saved.note });
+
+  this.gw.emitItemNoteUpdated?.({
+    orderId: it.order.id,
+    orderItemId: it.id,
+    menuItemId: it.menuItem.id,
+    note,
+    by: userId,
+  });
+
+  return { ok: true, id: it.id, note };
+}
 
 }
