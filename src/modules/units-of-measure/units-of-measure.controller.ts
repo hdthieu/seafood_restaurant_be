@@ -44,6 +44,13 @@ export class UnitsOfMeasureController {
     return this.unitsOfMeasureService.update(code, dto);
   }
 
+  @Get(':code/usage')
+  @Roles(UserRole.MANAGER)
+  @ApiOperation({ summary: 'Kiểm tra nơi sử dụng của UOM (đếm số record ở các bảng liên quan)' })
+  checkUsage(@Param('code') code: string) {
+    return this.unitsOfMeasureService.checkUsage(code);
+  }
+
   @Delete(':code')
   @Roles(UserRole.MANAGER)
   @ApiOperation({ summary: 'Xóa UOM (chỉ khi chưa được sử dụng ở đâu)' })

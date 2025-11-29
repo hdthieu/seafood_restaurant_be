@@ -163,7 +163,10 @@ export class CashbookService {
 
   // dùng cho cash book entry
   async getCashBookEntry(id: string) {
-    const row = await this.repo.findOne({ where: { id }, relations: ['cashType', 'invoice', 'purchaseReceipt'] as any });
+    const row = await this.repo.findOne({
+      where: { id },
+      relations: ['cashType', 'invoice', 'purchaseReceipt', 'purchaseReturn', 'customer', 'supplier', 'cashOtherParty', 'staff'] as any,
+    });
     if (!row) throw new ResponseException('CASHBOOK_NOT_FOUND', 404, 'CASHBOOK_NOT_FOUND');
     return row;
   }
@@ -361,6 +364,7 @@ export class CashbookService {
       .leftJoinAndSelect('e.cashType', 'cashType')
       .leftJoinAndSelect('e.invoice', 'invoice')
       .leftJoinAndSelect('e.purchaseReceipt', 'purchaseReceipt')
+      .leftJoinAndSelect('e.purchaseReturn', 'purchaseReturn')
       .leftJoinAndSelect('e.customer', 'customer')
       .leftJoinAndSelect('e.supplier', 'supplier')
       .leftJoinAndSelect('e.staff', 'staff')
@@ -404,10 +408,7 @@ export class CashbookService {
 
   async findOneCashbook(id: string): Promise<ResponseCommon<CashbookEntry>> {
     try {
-      const cashbook = await this.repo.findOne({ where: { id } });
-      if (!cashbook) {
-        throw new ResponseException('NOT_FOUND', 404, 'Cashbook không tồn tại');
-      }
+      const cashbook = await this.getCashBookEntry(id);
       return new ResponseCommon(200, true, 'GET_CASHBOOK_SUCCESS', cashbook);
     } catch (error) {
       throw new ResponseException(error, 500, 'GET_CASHBOOK_FAILED');

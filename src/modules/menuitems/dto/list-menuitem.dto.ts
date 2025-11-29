@@ -43,4 +43,8 @@ export class GetMenuItemsDto {
   @ApiPropertyOptional({ description: 'Có kèm khuyến mãi hay không', default: false })
   @IsOptional() @IsBooleanString()
   withPromotions?: boolean;
+
+  @ApiPropertyOptional({ description: 'Lọc món Combo (true) hoặc món thường (false)' })
+  @IsOptional() @IsBooleanString()
+  isCombo?: string;
 }

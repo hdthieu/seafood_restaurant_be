@@ -15,6 +15,7 @@ import { PayReceiptDto } from './dto/pay-receipt.dto';
 import { InventoryTransaction } from '@modules/inventorytransaction/entities/inventorytransaction.entity';
 import { UpdatePurchaseReceiptDto } from './dto/update-purchasereceipt.dto';
 import { CashbookService } from '@modules/cashbook/cashbook.service';
+import { getConversionFactorRecursive } from 'src/common/utils/uom.util';
 @Injectable()
 export class PurchasereceiptService {
   constructor(
@@ -55,18 +56,18 @@ export class PurchasereceiptService {
       }
     });
 
-    // 3) Chặn trùng lô (cùng SP + ĐVT + lô)
+    // 3) Chặn trùng lô
     const norm = (s?: string) => (s ?? '').trim().toUpperCase();
     const dupKey = new Set<string>();
     dto.items.forEach((it, idx) => {
       const lot = norm(it.lotNumber);
-      if (!lot) return; // không nhập lô thì cho phép (tuỳ nghiệp vụ)
+      if (!lot) return;
       const key = [it.itemId, norm(it.receivedUomCode), lot].join('|');
       if (dupKey.has(key)) throw new ResponseException(null, 400, `DUPLICATE_LOT_AT_${idx + 1}`);
       dupKey.add(key);
     });
 
-    // 4) Tải InventoryItem theo danh sách ID duy nhất
+    // 4) Tải InventoryItem
     const ids = dto.items.map(i => i.itemId);
     const uniqIds = Array.from(new Set(ids));
     const invItems = await this.invRepo.find({
@@ -105,34 +106,35 @@ export class PurchasereceiptService {
       const saved: PurchaseReceiptItem[] = [];
 
       for (const it of dto.items) {
-        const item = itemMap.get(it.itemId)!; // đã validate ở trên
+        const itemMaster = itemMap.get(it.itemId)!;
 
-        // === Tra UOM & conversion bằng helper (đồng nhất với các hàm khác) ===
-        let receivedUomCode = it.receivedUomCode ?? null;
+        // --- [BẮT ĐẦU SỬA: SỬ DỤNG GET_CONVERSION_FACTOR_RECURSIVE] ---
+        // 1. Chuẩn hóa mã đơn vị nhận. Nếu user không gửi -> dùng base
+        const receivedUomCode = it.receivedUomCode
+          ? it.receivedUomCode.trim().toUpperCase()
+          : itemMaster.baseUom.code;
+
+        const baseCode = itemMaster.baseUom.code;
         let factor = 1;
-        let receivedName = '';
-        try {
-          const res = await resolveUomAndFactor(
-            em,
-            item.baseUom.code,        // base của item
-            receivedUomCode,          // UOM FE chọn (có thể null -> dùng base)
-            it.conversionToBase ?? null,
-          );
-          receivedUomCode = res.received.code;
-          receivedName = res.received.name;
-          factor = res.factor;
-        } catch (err: any) {
-          const msg = String(err?.message || err);
-          if (msg === 'BASE_UOM_NOT_FOUND') throw new ResponseException(null, 400, `BASE_UOM_NOT_FOUND_AT_${lineNo}`);
-          if (msg === 'RECEIVED_UOM_NOT_FOUND') throw new ResponseException(null, 400, `RECEIVED_UOM_NOT_FOUND_AT_${lineNo}`);
-          if (msg === 'UOM_DIMENSION_MISMATCH') throw new ResponseException(null, 400, `UOM_DIMENSION_MISMATCH_AT_${lineNo}`);
-          if (msg === 'NO_CONVERSION_DEFINED') throw new ResponseException(null, 400, `NO_CONVERSION_DEFINED_AT_${lineNo}`);
-          throw new ResponseException(null, 400, `UOM_ERROR_AT_${lineNo}`);
+
+        // 2. Tính toán hệ số
+        // Ưu tiên: Nếu có nhập tay conversionToBase > 0 thì dùng luôn
+        if (it.conversionToBase && Number(it.conversionToBase) > 0) {
+          factor = Number(it.conversionToBase);
+        } else {
+          // Nếu không nhập tay -> Dò tìm đệ quy
+          factor = await getConversionFactorRecursive(em, receivedUomCode, baseCode);
+
+          // Nếu trả về 0 nghĩa là không tìm thấy đường dẫn quy đổi
+          if (factor === 0) {
+            throw new ResponseException(null, 400, `NO_CONVERSION_PATH_AT_LINE_${lineNo}: ${receivedUomCode} -> ${baseCode}`);
+          }
         }
+        // --- [KẾT THÚC SỬA] ---
 
         const line = lineRepo.create({
           receipt: { id: receipt.id } as any,
-          item: { id: item.id } as any,
+          item: { id: itemMaster.id } as any,
           lineNo: lineNo++,
           quantity: Number(it.quantity),
           receivedUom: { code: receivedUomCode } as any,
@@ -145,9 +147,6 @@ export class PurchasereceiptService {
           note: it.note ?? undefined,
         });
         await lineRepo.save(line);
-
-        // nhét name để trả response đẹp
-        (line as any).__receivedUomName = receivedName;
         saved.push(line);
       }
 
@@ -186,13 +185,11 @@ export class PurchasereceiptService {
           id: i.id,
           lineNo: i.lineNo!,
           itemId: (i.item as any)?.id ?? i.item,
-          itemName: undefined, // nếu cần, join thêm
           quantity: Number(i.quantity),
           unitPrice: Number(i.unitPrice),
           discountType: i.discountType,
           discountValue: Number(i.discountValue),
           receivedUomCode: (i.receivedUom as any)?.code ?? i.receivedUom,
-          receivedUomName: (i as any).__receivedUomName ?? null,
           conversionToBase: Number(i.conversionToBase),
           lotNumber: i.lotNumber ?? null,
           expiryDate: i.expiryDate ?? null,
@@ -345,45 +342,57 @@ export class PurchasereceiptService {
       const txRepo = em.getRepository(InventoryTransaction);
 
       // 2) Tạo receipt
-      // Mặc định là nợ hết, sau đó nếu có trả tiền thì update lại
       const receipt = receiptRepo.create({
         code,
         supplier,
         receiptDate: dto.receiptDate,
-        status: ReceiptStatus.OWING, // Mặc định là nợ
+        status: ReceiptStatus.OWING,
         globalDiscountType: dto.globalDiscountType ?? DiscountType.AMOUNT,
         globalDiscountValue: dto.globalDiscountValue ?? 0,
         shippingFee: dto.shippingFee ?? 0,
-        amountPaid: 0, // [SỬA] Khởi tạo bằng 0
+        amountPaid: 0,
         note: dto.note ?? null,
         createdBy: { id: userId } as any,
-        debt: 0, // Sẽ tính sau
+        debt: 0,
       });
       const savedReceipt = await receiptRepo.save(receipt);
 
       // 3) Lưu items + kho
       const savedLines: PurchaseReceiptItem[] = [];
+      let lineNo = 1;
 
       for (const it of dto.items) {
         const itemMaster = itemMap.get(it.itemId)!;
-        let receivedUomCode = it.receivedUomCode ?? null;
+
+        // --- [SỬA ĐỔI LOGIC QUY ĐỔI ĐỆ QUY] ---
+        // Chuẩn hóa mã đơn vị nhận: nếu user không gửi -> lấy đơn vị gốc
+        const receivedUomCode = it.receivedUomCode
+          ? it.receivedUomCode.trim().toUpperCase()
+          : itemMaster.baseUom.code;
+
+        const baseCode = itemMaster.baseUom.code;
         let factor = 1;
-        try {
-          const res = await resolveUomAndFactor(
-            em, itemMaster.baseUom.code, receivedUomCode, it.conversionToBase ?? null,
-          );
-          receivedUomCode = res.received.code;
-          factor = res.factor;
-        } catch (err: any) {
-          // ... error handling
-          throw new ResponseException(null, 400, `UOM_ERROR: ${err.message}`);
+
+        // Nếu người dùng nhập tay hệ số (cho hàng mới chưa có quy định) -> dùng luôn
+        if (it.conversionToBase && Number(it.conversionToBase) > 0) {
+          factor = Number(it.conversionToBase);
+        } else {
+          // Nếu không nhập tay -> Tự động dò tìm đệ quy (Lốc -> Chai -> Can)
+          factor = await getConversionFactorRecursive(em, receivedUomCode, baseCode);
+
+          // Nếu factor trả về 0 nghĩa là không tìm thấy đường dẫn quy đổi
+          if (factor === 0) {
+            throw new ResponseException(null, 400, `NO_CONVERSION_PATH: ${receivedUomCode} -> ${baseCode}`);
+          }
         }
+        // --- [KẾT THÚC SỬA ĐỔI] ---
 
         const line = lineRepo.create({
           receipt: { id: savedReceipt.id } as any,
           item: { id: itemMaster.id } as any,
+          lineNo: lineNo++,
           quantity: it.quantity,
-          receivedUom: { code: receivedUomCode } as any,
+          receivedUom: { code: receivedUomCode } as any, // Lưu code đã chuẩn hóa
           conversionToBase: factor,
           unitPrice: it.unitPrice,
           discountType: it.discountType ?? DiscountType.AMOUNT,
@@ -437,7 +446,7 @@ export class PurchasereceiptService {
       if (paidNow < 0) throw new ResponseException(null, 400, 'INVALID_PAYMENT_AMOUNT');
       if (paidNow > grandTotal) throw new ResponseException(null, 400, 'OVERPAY_NOT_ALLOWED');
 
-      // [SỬA] Tạo phiếu chi nếu có trả tiền
+      // Tạo phiếu chi nếu có trả tiền
       if (paidNow > 0) {
         await this.cashbookService.createPaymentVoucherWithTransaction(
           em,
@@ -602,7 +611,6 @@ export class PurchasereceiptService {
     const norm = (s?: string) => (s ?? '').trim().toUpperCase();
     const dup = new Set<string>();
     itemsDto.forEach((it, idx) => {
-      // ... Validate chi tiết item giữ nguyên ...
       const lot = norm(it.lotNumber);
       if (!lot) return;
       const key = [it.itemId, norm(it.receivedUomCode), lot].join('|');
@@ -633,7 +641,6 @@ export class PurchasereceiptService {
       existed.globalDiscountType = dto.globalDiscountType ?? existed.globalDiscountType ?? DiscountType.AMOUNT;
       existed.globalDiscountValue = dto.globalDiscountValue ?? existed.globalDiscountValue ?? 0;
       existed.shippingFee = dto.shippingFee ?? existed.shippingFee ?? 0;
-      // existed.amountPaid: Khoan update vội, update sau khi tạo phiếu chi
       existed.note = dto.note ?? existed.note ?? null;
       await receiptRepo.save(existed);
 
@@ -645,17 +652,24 @@ export class PurchasereceiptService {
         let lineNo = 1;
         for (const it of itemsDto) {
           const itemMaster = itemMap.get(it.itemId)!;
-          let receivedUomCode = it.receivedUomCode ?? null;
+
+          // --- [BẮT ĐẦU SỬA: SỬ DỤNG GET_CONVERSION_FACTOR_RECURSIVE] ---
+          const receivedUomCode = it.receivedUomCode
+            ? it.receivedUomCode.trim().toUpperCase()
+            : itemMaster.baseUom.code;
+
+          const baseCode = itemMaster.baseUom.code;
           let factor = 1;
-          try {
-            const res = await resolveUomAndFactor(
-              em, itemMaster.baseUom.code, receivedUomCode, it.conversionToBase ?? null,
-            );
-            receivedUomCode = res.received.code;
-            factor = res.factor;
-          } catch (err: any) {
-            throw new ResponseException(null, 400, `UOM_ERROR_AT_${lineNo}`);
+
+          if (it.conversionToBase && Number(it.conversionToBase) > 0) {
+            factor = Number(it.conversionToBase);
+          } else {
+            factor = await getConversionFactorRecursive(em, receivedUomCode, baseCode);
+            if (factor === 0) {
+              throw new ResponseException(null, 400, `NO_CONVERSION_PATH_AT_LINE_${lineNo}: ${receivedUomCode} -> ${baseCode}`);
+            }
           }
+          // --- [KẾT THÚC SỬA] ---
 
           const line = lineRepo.create({
             receipt: { id: existed.id } as any,
@@ -672,7 +686,7 @@ export class PurchasereceiptService {
             note: it.note ?? undefined,
           });
           await lineRepo.save(line);
-          // Ghi nhận quan hệ item - supplier
+
           await em.query(
             `INSERT INTO "inventory_item_suppliers"("inventoryItemsId","suppliersId")
              SELECT $1, $2 WHERE NOT EXISTS (
@@ -683,6 +697,7 @@ export class PurchasereceiptService {
           savedLines.push(line);
         }
       } else {
+        // Nếu không gửi items mới thì lấy items cũ để tính toán
         savedLines = await lineRepo.find({
           where: { receipt: { id: existed.id } as any },
           relations: ['item', 'receivedUom'],
@@ -694,7 +709,6 @@ export class PurchasereceiptService {
       if (!postNow) {
         const totals = calcReceiptTotals(savedLines as any, existed);
         existed.status = ReceiptStatus.DRAFT;
-        // Draft thì cứ lưu tạm amountPaid người dùng nhập, chưa tạo phiếu chi
         existed.amountPaid = Number(dto.amountPaid ?? existed.amountPaid);
         await receiptRepo.save(existed);
 
@@ -710,7 +724,6 @@ export class PurchasereceiptService {
           amountPaid: Number(existed.amountPaid),
           remaining: null,
           items: savedLines.map(i => ({
-            // ... map items ...
             id: i.id,
             itemId: (i.item as any)?.id ?? i.item,
             quantity: Number(i.quantity),
@@ -726,14 +739,7 @@ export class PurchasereceiptService {
         const inv = await invRepo.findOne({ where: { id: itemId } });
         if (!inv) throw new ResponseException(null, 404, 'ITEM_NOT_FOUND');
 
-        // Insert supplier relation check (just in case)
-        await em.query(
-          `INSERT INTO "inventory_item_suppliers"("inventoryItemsId","suppliersId")
-            SELECT $1, $2 WHERE NOT EXISTS (
-              SELECT 1 FROM "inventory_item_suppliers" WHERE "inventoryItemsId" = $1 AND "suppliersId" = $2
-            )`,
-          [inv.id, existed.supplier.id],
-        );
+        // Note: Relation supplier-item đã insert ở trên rồi
 
         const baseQty = Number(line.quantity) * Number(line.conversionToBase);
         const unitCostBase = Number(line.unitPrice) / Number(line.conversionToBase);
@@ -770,8 +776,7 @@ export class PurchasereceiptService {
       if (paidNow < 0) throw new ResponseException(null, 400, 'INVALID_PAYMENT_AMOUNT');
       if (paidNow > grandTotal) throw new ResponseException(null, 400, 'OVERPAY_NOT_ALLOWED');
 
-      // [QUAN TRỌNG] Tạo phiếu chi nếu có trả tiền
-      // Giả định: Chuyển từ Draft -> Post coi như lần thanh toán đầu tiên.
+      // Tạo phiếu chi nếu có trả tiền
       if (paidNow > 0) {
         await this.cashbookService.createPaymentVoucherWithTransaction(
           em,
@@ -792,12 +797,6 @@ export class PurchasereceiptService {
       else existed.status = ReceiptStatus.OWING;
 
       await receiptRepo.save(existed);
-
-      if (paidNow > 0) {
-        // (Dư thừa? Đã gọi createPaymentVoucherWithTransaction ở trên rồi)
-        // Nếu bạn vẫn muốn giữ hàm postPaymentFromPurchase cũ thì xóa đoạn này đi
-        // await this.cashbookService.postPaymentFromPurchase(em, existed, paidNow); 
-      }
 
       return {
         id: existed.id,
