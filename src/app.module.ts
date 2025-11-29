@@ -39,6 +39,7 @@ import { AiModule } from "@modules/ai/ai.module";
 import { RagModule } from "@modules/rag/rag.module";
 import { LlmGateway } from "@modules/ai/llm.gateway";
 import { PayrollModule } from "@modules/payroll/payroll.module";
+import { MailModule } from './modules/mail/mail.module';
 @Module({
   imports: [ConfigModule.forRoot({
     isGlobal: true,
@@ -83,6 +84,11 @@ import { PayrollModule } from "@modules/payroll/payroll.module";
 
       FRONTEND_URL: Joi.string().uri().optional(),
       TZ: Joi.string().optional(),
+
+      // Mailer
+      MAIL_SERVICE: Joi.string().optional().default('gmail'),
+      MAIL_USER: Joi.string().required(),
+      MAIL_PASS: Joi.string().required(),
     }),
   }),
 
@@ -95,11 +101,11 @@ import { PayrollModule } from "@modules/payroll/payroll.module";
     database: process.env.DB_DATABASE as string,
     // entities: [__dirname + '/**/*.entity{.ts,.js}'],
     synchronize: true,
-     ssl: { rejectUnauthorized: false }, 
+    ssl: { rejectUnauthorized: false },
     autoLoadEntities: true,
     // logging: ['error', 'warn', 'query'],
   }),
-    UserModule, ProfileModule, MenuitemsModule, OrdersModule, OrderitemsModule, InventoryitemsModule, InventorytransactionModule, InvoiceModule, OrderstatushistoryModule, RestauranttableModule, AuthModule, AreaModule, ConfigS3Module, IngredientModule, CategoryModule, PaymentModule, CustomersModule, SupplierModule, PurchasereceiptModule, PurchasereceiptitemModule, SuppliergroupModule, ReportModule, UnitsOfMeasureModule, UomconversionModule, MenucomboitemModule, PromotionsModule, FaceModule, CashbookModule, SocketModule, KitchenModule, PurchasereturnModule, AiModule, RagModule, PayrollModule],
+    UserModule, ProfileModule, MenuitemsModule, OrdersModule, OrderitemsModule, InventoryitemsModule, InventorytransactionModule, InvoiceModule, OrderstatushistoryModule, RestauranttableModule, AuthModule, AreaModule, ConfigS3Module, IngredientModule, CategoryModule, PaymentModule, CustomersModule, SupplierModule, PurchasereceiptModule, PurchasereceiptitemModule, SuppliergroupModule, ReportModule, UnitsOfMeasureModule, UomconversionModule, MenucomboitemModule, PromotionsModule, FaceModule, CashbookModule, SocketModule, KitchenModule, PurchasereturnModule, AiModule, RagModule, PayrollModule, MailModule],
   controllers: [AppController],
   providers: [AppService, LlmGateway],
 })
