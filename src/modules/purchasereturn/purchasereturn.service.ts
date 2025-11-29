@@ -4,18 +4,16 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { PurchaseReturn } from './entities/purchasereturn.entity';
 import { DataSource, In, Repository } from 'typeorm';
 import { PurchaseReturnLog } from './entities/purchasereturnlog.entity';
-import { resolveUomAndFactor } from '@modules/helper/purchasereceipthelper.service';
-import { PurchaseReceipt } from '@modules/purchasereceipt/entities/purchasereceipt.entity';
 import { InventoryItem } from '@modules/inventoryitems/entities/inventoryitem.entity';
 import { InventoryTransaction } from '@modules/inventorytransaction/entities/inventorytransaction.entity';
 import { CashbookService } from '@modules/cashbook/cashbook.service';
 import { Supplier } from '@modules/supplier/entities/supplier.entity';
 import { User } from '@modules/user/entities/user.entity';
-import { PurchaseReceiptItem } from '@modules/purchasereceiptitem/entities/purchasereceiptitem.entity';
 import { ResponseException, ResponseCommon } from 'src/common/common_dto/respone.dto';
 import { PageMeta } from 'src/common/common_dto/paginated';
 import { StandaloneReturnDto } from './dto/standalone-return.dto';
 import { UpdateStandaloneReturnDto } from './dto/update-standalone-return.dto';
+import { getConversionFactorRecursive } from 'src/common/utils/uom.util';
 
 @Injectable()
 export class PurchasereturnService {
@@ -50,6 +48,11 @@ export class PurchasereturnService {
   async createStandalone(userId: string, dto: StandaloneReturnDto) {
     if (!dto.items?.length) throw new ResponseException(null, 400, 'RETURN_ITEM_LIST_EMPTY');
 
+    // Require paidAmount field to be provided (supplier may prepay some amount).
+    if ((dto as any).paidAmount === undefined || (dto as any).paidAmount === null) {
+      throw new ResponseException(null, 400, 'PAID_AMOUNT_REQUIRED');
+    }
+
     return this.ds.transaction(async (em) => {
       const user = userId ? await em.getRepository(User).findOne({ where: { id: userId } }) : null;
       const supplier = await em.getRepository(Supplier).findOne({ where: { id: dto.supplierId } });
@@ -79,27 +82,20 @@ export class PurchasereturnService {
       for (const line of dto.items) {
         const inv = invMap.get(line.itemId)!;
 
-        // resolve received UOM and conversion factor (allow returns in non-base units)
-        let receivedUomCode = (line as any).receivedUomCode ?? null;
+        // --- [SỬA ĐỔI LOGIC: QUY ĐỔI ĐỆ QUY] ---
+        const baseCode = (inv as any).baseUom?.code;
+        const receivedUomCode = (line as any).receivedUomCode
+          ? (line as any).receivedUomCode.trim().toUpperCase()
+          : baseCode;
+
         let factor = 1;
-        try {
-          // conversionToBase removed from DTO: always resolve factor from DB/uom conversions
-          const res = await resolveUomAndFactor(
-            em,
-            (inv as any).baseUom?.code,
-            receivedUomCode,
-            null,
-          );
-          receivedUomCode = res.received.code;
-          factor = res.factor;
-        } catch (err: any) {
-          const msg = String(err?.message || err);
-          if (msg === 'BASE_UOM_NOT_FOUND') throw new ResponseException(null, 400, `BASE_UOM_NOT_FOUND_FOR_ITEM:${inv.id}`);
-          if (msg === 'RECEIVED_UOM_NOT_FOUND') throw new ResponseException(null, 400, `RECEIVED_UOM_NOT_FOUND_FOR_ITEM:${inv.id}`);
-          if (msg === 'UOM_DIMENSION_MISMATCH') throw new ResponseException(null, 400, `UOM_DIMENSION_MISMATCH_FOR_ITEM:${inv.id}`);
-          if (msg === 'NO_CONVERSION_DEFINED') throw new ResponseException(null, 400, `NO_CONVERSION_DEFINED_FOR_ITEM:${inv.id}`);
-          throw new ResponseException(null, 400, `UOM_ERROR_FOR_ITEM:${inv.id}`);
+        // Tự động tìm đường dẫn quy đổi (vd: Lốc -> Chai -> Can)
+        factor = await getConversionFactorRecursive(em, receivedUomCode, baseCode);
+
+        if (factor === 0) {
+          throw new ResponseException(null, 400, `NO_CONVERSION_PATH: ${receivedUomCode} -> ${baseCode}`);
         }
+        // --- [KẾT THÚC SỬA ĐỔI] ---
 
         const qty = Number(line.quantity ?? 0);
         if (!(qty > 0)) throw new ResponseException(null, 400, 'INVALID_RETURN_QTY');
@@ -127,7 +123,6 @@ export class PurchasereturnService {
         const savedTx = await em.getRepository(InventoryTransaction).save(tx as any);
 
         const unitPrice = this.roundMoney(Number(line.unitPrice ?? 0));
-        // unitPrice is per received unit; line total before discount uses received-qty
         const lineTotalBeforeDiscount = this.roundMoney(unitPrice * qty);
         totalGoods = this.roundMoney(totalGoods + lineTotalBeforeDiscount);
 
@@ -136,7 +131,7 @@ export class PurchasereturnService {
           receipt: null,
           receiptItem: null,
           item: inv,
-          quantity: qty,               // đơn vị user chọn
+          quantity: qty,
           conversionToBase: factor,
           baseQty,
           reason: dto.reason ?? undefined,
@@ -147,15 +142,12 @@ export class PurchasereturnService {
           refundAmount: 0,
           inventoryTx: savedTx,
           performedBy: user ?? undefined,
-
-          // ⭐ NEW: lưu đơn vị user chọn
-          uom: { code: receivedUomCode } as any,
+          uom: { code: receivedUomCode } as any, // Lưu code đã chuẩn hóa
         } as any) as unknown as PurchaseReturnLog;
 
         createdLogs.push(log);
       }
 
-      // header discount is applied on total goods (no per-line discounts)
       const discountAmount = this.computeDiscountFromType(totalGoods, (dto as any).discountType, (dto as any).discountValue);
       const allocs = this.allocateDiscount(createdLogs.map(l => this.roundMoney(l.lineTotalBeforeDiscount)), discountAmount);
       createdLogs.forEach((l, i) => {
@@ -176,10 +168,10 @@ export class PurchasereturnService {
       savedHeader.totalAfterDiscount = totalAfterDiscount;
       savedHeader.refundAmount = totalAfterDiscount;
       savedHeader.paidAmount = paidInput;
+      savedHeader.debt = this.roundMoney(totalAfterDiscount - paidInput);
       (savedHeader as any).postedAt = new Date();
       await em.getRepository(PurchaseReturn).save(savedHeader);
 
-      // record cashbook receipt if supplier refunded money to us at posting
       if (paidInput && paidInput > 0) {
         await this.cashbookService.postReceiptFromPurchaseReturn(em, savedHeader, paidInput);
       }
@@ -193,13 +185,20 @@ export class PurchasereturnService {
         totalAfterDiscount,
         refundAmount: savedHeader.refundAmount,
         paidAmount: savedHeader.paidAmount,
+        debt: savedHeader.debt,
       };
     });
   }
 
-
+  // 3. Hàm Create Draft (Tạo nháp)
   async createDraft(userId: string, dto: StandaloneReturnDto) {
     if (!dto.items?.length) throw new ResponseException(null, 400, 'RETURN_ITEM_LIST_EMPTY');
+
+    // Require paidAmount field to be provided even for draft so FE must input a value
+    // (can be 0 if nothing paid). This prevents empty/undefined values.
+    if ((dto as any).paidAmount === undefined || (dto as any).paidAmount === null) {
+      throw new ResponseException(null, 400, 'PAID_AMOUNT_REQUIRED');
+    }
 
     return this.ds.transaction(async (em) => {
       const user = userId ? await em.getRepository(User).findOne({ where: { id: userId } }) : null;
@@ -230,26 +229,19 @@ export class PurchasereturnService {
       for (const line of dto.items) {
         const inv = invMap.get(line.itemId as string)!;
 
-        let receivedUomCode = (line as any).receivedUomCode ?? null;
+        // --- [SỬA ĐỔI LOGIC: QUY ĐỔI ĐỆ QUY] ---
+        const baseCode = (inv as any).baseUom?.code;
+        const receivedUomCode = (line as any).receivedUomCode
+          ? (line as any).receivedUomCode.trim().toUpperCase()
+          : baseCode;
+
         let factor = 1;
-        try {
-          // conversionToBase removed from DTO
-          const res = await resolveUomAndFactor(
-            em,
-            (inv as any).baseUom?.code,
-            receivedUomCode,
-            null,
-          );
-          receivedUomCode = res.received.code;
-          factor = res.factor;
-        } catch (err: any) {
-          const msg = String(err?.message || err);
-          if (msg === 'BASE_UOM_NOT_FOUND') throw new ResponseException(null, 400, `BASE_UOM_NOT_FOUND_FOR_ITEM:${inv.id}`);
-          if (msg === 'RECEIVED_UOM_NOT_FOUND') throw new ResponseException(null, 400, `RECEIVED_UOM_NOT_FOUND_FOR_ITEM:${inv.id}`);
-          if (msg === 'UOM_DIMENSION_MISMATCH') throw new ResponseException(null, 400, `UOM_DIMENSION_MISMATCH_FOR_ITEM:${inv.id}`);
-          if (msg === 'NO_CONVERSION_DEFINED') throw new ResponseException(null, 400, `NO_CONVERSION_DEFINED_FOR_ITEM:${inv.id}`);
-          throw new ResponseException(null, 400, `UOM_ERROR_FOR_ITEM:${inv.id}`);
+        factor = await getConversionFactorRecursive(em, receivedUomCode, baseCode);
+
+        if (factor === 0) {
+          throw new ResponseException(null, 400, `NO_CONVERSION_PATH: ${receivedUomCode} -> ${baseCode}`);
         }
+        // --- [KẾT THÚC SỬA ĐỔI] ---
 
         const qty = Number(line.quantity ?? 0);
         if (!(qty > 0)) throw new ResponseException(null, 400, 'INVALID_RETURN_QTY');
@@ -276,9 +268,7 @@ export class PurchasereturnService {
           refundAmount: 0,
           inventoryTx: null,
           performedBy: user ?? undefined,
-
-          // ⭐ NEW: lưu đơn vị user chọn
-          uom: { code: receivedUomCode } as any,
+          uom: { code: receivedUomCode } as any, // Lưu code đã chuẩn hóa
         } as any) as unknown as PurchaseReturnLog;
 
         createdLogs.push(log);
@@ -327,16 +317,6 @@ export class PurchasereturnService {
     });
   }
 
-
-  async markRefunded(id: string) {
-    const pr = await this.prRepo.findOne({ where: { id } });
-    if (!pr) throw new ResponseException(null, 404, 'PURCHASE_RETURN_NOT_FOUND');
-    if (pr.status === PurchaseReturnStatus.CANCELLED) throw new ResponseException(null, 400, 'ALREADY_CANCELLED');
-    pr.status = PurchaseReturnStatus.REFUNDED;
-    (pr as any).refundedAt = new Date();
-    return this.prRepo.save(pr);
-  }
-
   async changeStatus(id: string, status: PurchaseReturnStatus) {
     const pr = await this.prRepo.findOne({ where: { id } });
     if (!pr) throw new ResponseException(null, 404, 'PURCHASE_RETURN_NOT_FOUND');
@@ -346,7 +326,10 @@ export class PurchasereturnService {
     if (status === PurchaseReturnStatus.POSTED) {
       if (pr.status !== PurchaseReturnStatus.DRAFT) throw new ResponseException(null, 400, 'ONLY_DRAFT_CAN_BE_POSTED');
       return this.ds.transaction(async (em) => {
-        const prTx = await em.getRepository(PurchaseReturn).findOne({ where: { id }, relations: ['logs', 'logs.item', 'createdBy'] });
+        const prTx = await em.getRepository(PurchaseReturn).findOne({
+          where: { id },
+          relations: ['supplier', 'logs', 'logs.item', 'createdBy']
+        });
         if (!prTx) throw new ResponseException(null, 404, 'PURCHASE_RETURN_NOT_FOUND_IN_TX');
 
         const logs = prTx.logs ?? [];
@@ -417,7 +400,7 @@ export class PurchasereturnService {
   async getOne(id: string) {
     const pr = await this.prRepo.findOne({
       where: { id },
-      relations: ['supplier', 'logs', 'logs.item'],
+      relations: ['supplier', 'logs', 'logs.item', 'logs.uom'],
     });
     if (!pr) throw new ResponseException(null, 404, 'PURCHASE_RETURN_NOT_FOUND');
     return {
@@ -432,6 +415,7 @@ export class PurchasereturnService {
       status: pr.status,
       note: pr.note,
       paidAmount: Number(pr.paidAmount ?? 0),
+      debt: Number(pr.debt ?? 0),
       createdAt: pr.createdAt,
       updatedAt: pr.updatedAt,
       logs: (pr.logs ?? []).map(l => ({
@@ -444,6 +428,8 @@ export class PurchasereturnService {
         refundPrice: Number(l.lineTotalAfterDiscount ?? l.refundAmount ?? 0),
         discount: Number(l.globalDiscountAllocated ?? 0),
         total: Number(l.lineTotalAfterDiscount ?? l.refundAmount ?? 0),
+        uomCode: (l.uom as any)?.code ?? null,
+        uomName: (l.uom as any)?.name ?? null,
       })),
     };
   }
@@ -506,11 +492,11 @@ export class PurchasereturnService {
     const pr = await this.prRepo.findOne({ where: { id }, relations: ['supplier', 'logs', 'logs.item'] });
     if (!pr) throw new ResponseException(null, 404, 'PURCHASE_RETURN_NOT_FOUND');
 
+    // === TRƯỜNG HỢP DRAFT ===
     if (pr.status === PurchaseReturnStatus.DRAFT) {
       return this.ds.transaction(async (em) => {
-        // ✅ reload pr bằng em (trong transaction)
         const prTx = await em.getRepository(PurchaseReturn).findOne({
-          where: { id: pr.id },
+          where: { id: pr.id }, relations: ['supplier'],
         });
         if (!prTx) throw new ResponseException(null, 404, 'PURCHASE_RETURN_NOT_FOUND_IN_TX');
 
@@ -540,35 +526,31 @@ export class PurchasereturnService {
           if (invs.length !== invIds.length) throw new ResponseException(null, 404, 'ONE_OR_MORE_ITEMS_NOT_FOUND');
           const invMap = new Map(invs.map(x => [x.id, x]));
 
-          // xóa logs cũ (nếu có)
+          // xóa logs cũ
           const oldLogs = await em.getRepository(PurchaseReturnLog).find({ where: { purchaseReturn: { id: prTx.id } } });
           if (oldLogs.length) {
-            await em.getRepository(PurchaseReturnLog).remove(oldLogs); // dùng remove để chạy hook/cascade chuẩn
+            await em.getRepository(PurchaseReturnLog).remove(oldLogs);
           }
 
           for (const line of dto.items) {
             const inv = invMap.get(line.itemId as string)!;
 
-            let receivedUomCode = (line as any).receivedUomCode ?? null;
+            // --- [SỬA ĐỔI LOGIC: QUY ĐỔI ĐỆ QUY] ---
+            const baseCode = (inv as any).baseUom?.code;
+            // Nếu user không gửi đơn vị -> lấy đơn vị gốc
+            const receivedUomCode = (line as any).receivedUomCode
+              ? (line as any).receivedUomCode.trim().toUpperCase()
+              : baseCode;
+
             let factor = 1;
-            try {
-              // conversionToBase removed from DTO
-              const res = await resolveUomAndFactor(
-                em,
-                (inv as any).baseUom?.code,
-                receivedUomCode,
-                null,
-              );
-              receivedUomCode = res.received.code;
-              factor = res.factor;
-            } catch (err: any) {
-              const msg = String(err?.message || err);
-              if (msg === 'BASE_UOM_NOT_FOUND') throw new ResponseException(null, 400, `BASE_UOM_NOT_FOUND_FOR_ITEM:${inv.id}`);
-              if (msg === 'RECEIVED_UOM_NOT_FOUND') throw new ResponseException(null, 400, `RECEIVED_UOM_NOT_FOUND_FOR_ITEM:${inv.id}`);
-              if (msg === 'UOM_DIMENSION_MISMATCH') throw new ResponseException(null, 400, `UOM_DIMENSION_MISMATCH_FOR_ITEM:${inv.id}`);
-              if (msg === 'NO_CONVERSION_DEFINED') throw new ResponseException(null, 400, `NO_CONVERSION_DEFINED_FOR_ITEM:${inv.id}`);
-              throw new ResponseException(null, 400, `UOM_ERROR_FOR_ITEM:${inv.id}`);
+
+            // Tìm hệ số quy đổi đệ quy
+            factor = await getConversionFactorRecursive(em, receivedUomCode, baseCode);
+
+            if (factor === 0) {
+              throw new ResponseException(null, 400, `NO_CONVERSION_PATH: ${receivedUomCode} -> ${baseCode}`);
             }
+            // --- [KẾT THÚC SỬA ĐỔI] ---
 
             const qty = Number(line.quantity ?? 0);
             if (!(qty > 0)) throw new ResponseException(null, 400, 'INVALID_RETURN_QTY');
@@ -577,6 +559,7 @@ export class PurchasereturnService {
             const unitPrice = this.roundMoney(Number(line.unitPrice ?? 0));
             const lineTotalBeforeDiscount = this.roundMoney(unitPrice * qty);
             totalGoods = this.roundMoney(totalGoods + lineTotalBeforeDiscount);
+
             const log = em.getRepository(PurchaseReturnLog).create({
               purchaseReturn: prTx,
               receipt: null,
@@ -593,11 +576,13 @@ export class PurchasereturnService {
               refundAmount: 0,
               inventoryTx: null,
               performedBy: user ?? undefined,
-              uom: { code: receivedUomCode } as any,
+              uom: { code: receivedUomCode } as any, // Lưu code đã chuẩn hóa
             } as any) as unknown as PurchaseReturnLog;
 
             createdLogs.push(log);
           }
+
+          // Tính toán Discount
           const discountForAlloc = (dto as any).discountType !== undefined || (dto as any).discountValue !== undefined
             ? this.computeDiscountFromType(totalGoods, (dto as any).discountType, (dto as any).discountValue)
             : this.roundMoney(prTx.discount ?? 0);
@@ -635,15 +620,18 @@ export class PurchasereturnService {
           if (paidInput < 0) throw new ResponseException(null, 400, 'INVALID_PAID_AMOUNT');
           if (paidInput > totalAfterDiscount) throw new ResponseException(null, 400, 'PAID_AMOUNT_EXCEEDS_REFUND');
           prTx.paidAmount = paidInput;
+          prTx.debt = this.roundMoney(totalAfterDiscount - paidInput);
         } else {
-          // ensure existing paid amount does not exceed new refund
           const existingPaid = this.roundMoney(Number(prTx.paidAmount ?? 0));
           if (existingPaid > totalAfterDiscount) throw new ResponseException(null, 400, 'PAID_AMOUNT_EXCEEDS_REFUND');
+          prTx.debt = this.roundMoney(totalAfterDiscount - existingPaid);
         }
 
         return em.getRepository(PurchaseReturn).save(prTx);
       });
     }
+
+    // === TRƯỜNG HỢP POSTED (Giữ nguyên logic cũ, chỉ cho sửa tiền trả) ===
     if (pr.status === PurchaseReturnStatus.POSTED) {
       const forbidden = ['items', 'supplierId', 'reason', 'discount'];
       for (const k of forbidden) {
@@ -652,12 +640,10 @@ export class PurchasereturnService {
         }
       }
 
-      // allow updating refundAmount and/or paidAmount on posted records
       if ((dto as any).refundAmount == null && (dto as any).paidAmount == null) {
         throw new ResponseException(null, 400, 'MUST_PROVIDE_REFUND_OR_PAID_AMOUNT');
       }
 
-      // Perform update inside a transaction so we can also create cashbook entries atomically
       return this.ds.transaction(async (em) => {
         const prTx = await em.getRepository(PurchaseReturn).findOne({ where: { id: pr.id } });
         if (!prTx) throw new ResponseException(null, 404, 'PURCHASE_RETURN_NOT_FOUND_IN_TX');
@@ -675,10 +661,8 @@ export class PurchasereturnService {
         prTx.refundAmount = ra;
         prTx.paidAmount = paNew;
 
-        // save header
         await em.getRepository(PurchaseReturn).save(prTx);
 
-        // if paidAmount increased, record receipt from supplier inside same transaction
         if (delta > 0) {
           await this.cashbookService.postReceiptFromPurchaseReturn(em, prTx, delta);
         }

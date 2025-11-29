@@ -18,4 +18,12 @@ export class ListUomConversionQueryDto {
     @Min(1)
     @Transform(({ value }) => value === undefined || value === '' ? 50 : Number(value))
     limit?: number = 50;
+
+    @ApiProperty({ required: false, example: 'ML' })
+    @IsOptional()
+    fromCode?: string;
+
+    @ApiProperty({ required: false, example: 'L' })
+    @IsOptional()
+    toCode?: string;
 }

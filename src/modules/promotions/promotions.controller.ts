@@ -25,9 +25,9 @@ export class PromotionsController {
 
   @Get('list-all')
   @ApiOperation({ summary: 'Get all promotions with filters & pagination' })
+  @Roles(UserRole.MANAGER, UserRole.CASHIER, UserRole.WAITER, UserRole.KITCHEN)
   async findAll(@Query() query: ListPromotionsDto) {
     // debug tạm
-    console.log('query raw:', query, typeof query.isActive, query.isActive);
     return this.service.findAllPromotions(query);
   }
 

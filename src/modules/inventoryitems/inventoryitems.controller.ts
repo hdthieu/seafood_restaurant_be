@@ -65,16 +65,24 @@ export class InventoryitemsController {
   // ?hard=true => attempt hard delete (only allowed when safety checks pass)
   // ?force=true => force zero stock then deactivate (audit WASTE tx)
   // @Delete(':id')
-  // @Roles(UserRole.MANAGER)
-  // @ApiOperation({ summary: 'Delete an inventory item. Use ?force=true to zero stock then deactivate; use ?hard=true to permanently delete if allowed.' })
-  // async remove(
-  //   @Param('id') id: string,
-  //   @Query('hard') hard?: string,
-  //   @Query('force') force?: string,
-  // ) {
-  //   if (hard === 'true' || hard === '1') return this.inventoryitemsService.hardDelete(id);
-  //   const f = force === 'true' || force === '1';
-  //   return this.inventoryitemsService.remove(id, f);
-  // }
+  @Delete(':id')
+  @Roles(UserRole.MANAGER)
+  @ApiOperation({ summary: 'Delete an inventory item. Use ?force=true to zero stock then deactivate; use ?hard=true to permanently delete if allowed.' })
+  async remove(
+    @Param('id') id: string,
+    @Query('hard') hard?: string,
+    @Query('force') force?: string,
+  ) {
+    if (hard === 'true' || hard === '1') return this.inventoryitemsService.hardDelete(id);
+    const f = force === 'true' || force === '1';
+    return this.inventoryitemsService.remove(id, f);
+  }
+
+  @Patch(':id/restore')
+  @Roles(UserRole.MANAGER)
+  @ApiOperation({ summary: 'Khôi phục vật tư đã ngưng sử dụng' })
+  async restore(@Param('id') id: string) {
+    return this.inventoryitemsService.restore(id);
+  }
 
 }

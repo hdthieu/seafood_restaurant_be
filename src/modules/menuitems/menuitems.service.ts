@@ -84,7 +84,7 @@ export class MenuitemsService {
 
     const fullItem = await this.menuItemRepo.findOne({
       where: { id: savedItem.id },
-      relations: ['ingredients', 'ingredients.inventoryItem', 'category'],
+      relations: ['ingredients', 'ingredients.inventoryItem', 'ingredients.selectedUom', 'category'],
     });
     if (!fullItem) throw new ResponseException('MENU_ITEM_NOT_FOUND_AFTER_CREATION');
     return fullItem;
@@ -100,10 +100,11 @@ export class MenuitemsService {
   }> {
     const {
       page = 1,
-      limit = 20,
+      limit = 10,
       search,
       categoryId,
       isAvailable,
+      isCombo, // <--- Destructure thêm biến này
       minPrice,
       maxPrice,
       sortBy = 'name',
@@ -120,9 +121,18 @@ export class MenuitemsService {
       qb.andWhere('(mi.name ILIKE :kw OR mi.description ILIKE :kw)', { kw: `%${search.trim()}%` });
     }
     if (categoryId) qb.andWhere('category.id = :categoryId', { categoryId });
+
     if (typeof isAvailable !== 'undefined') {
       qb.andWhere('mi.isAvailable = :isAvailable', { isAvailable: isAvailable === 'true' });
     }
+
+    // --- THÊM LOGIC LỌC COMBO TẠI ĐÂY ---
+    if (typeof isCombo !== 'undefined') {
+      // isCombo gửi lên là string "true"/"false", cần so sánh để ra boolean
+      qb.andWhere('mi.isCombo = :isCombo', { isCombo: isCombo === 'true' });
+    }
+    // ------------------------------------
+
     if (typeof minPrice === 'number') qb.andWhere('mi.price >= :minPrice', { minPrice });
     if (typeof maxPrice === 'number') qb.andWhere('mi.price <= :maxPrice', { maxPrice });
 
@@ -210,23 +220,73 @@ export class MenuitemsService {
           [existed.id],
         );
 
-        // 3.2 Chuẩn hoá về base UOM và DEDUPE theo inventoryItemId (cộng dồn baseQty, giữ note đầu tiên)
-        const byInv = new Map<string, { baseQty: number; note?: string }>();
+        // 3.2 Chuẩn hoá về base UOM và DEDUPE theo inventoryItemId
+        // - cộng dồn baseQty
+        // - nếu tất cả dòng gộp có cùng selectedUom thì lưu selectedUom và cộng selectedQty (theo selected unit)
+        // - nếu có nhiều selectedUom khác nhau, để selectedUom/selectedQty = null (tránh nhầm lẫn)  
+        const byInv = new Map<string, { baseQty: number; note?: string; selectedUom?: string | null; selectedQty?: number | null }>();
         for (const i of dto.ingredients) {
           if (!i?.inventoryItemId) continue;
           const norm = await this.toBaseQty(i.inventoryItemId, Number(i.quantity) || 0, (i as any).uomCode);
           const cur = byInv.get(i.inventoryItemId);
-          byInv.set(i.inventoryItemId, {
-            baseQty: (cur?.baseQty ?? 0) + norm.baseQty,
-            note: cur?.note ?? i.note,
-          });
+          if (cur) {
+            // merge
+            const prevUom = cur.selectedUom ?? null;
+            const newUom = norm.selectedUomCode ?? null;
+            let mergedSelectedUom: string | null;
+            let mergedSelectedQty: number | null;
+            if (prevUom == null || newUom == null) {
+              // if any side is null, result is null (ambiguous)
+              mergedSelectedUom = null;
+              mergedSelectedQty = null;
+            } else if (prevUom !== newUom) {
+              // different selected UOMs -> try to convert newUom qty into prevUom and keep prevUom
+              // we can compute prev factor from stored baseQty and selectedQty if available
+              const prevSelectedQty = cur.selectedQty ?? null;
+              if (prevSelectedQty && prevSelectedQty > 0) {
+                const prevFactor = (cur.baseQty ?? 0) / Number(prevSelectedQty);
+                if (prevFactor > 0) {
+                  // convert norm.baseQty into prevUom units
+                  const convertedQty = (norm.baseQty) / prevFactor;
+                  mergedSelectedUom = prevUom;
+                  mergedSelectedQty = (cur.selectedQty ?? 0) + convertedQty;
+                } else {
+                  mergedSelectedUom = null;
+                  mergedSelectedQty = null;
+                }
+              } else {
+                // cannot determine conversion -> ambiguous
+                mergedSelectedUom = null;
+                mergedSelectedQty = null;
+              }
+            } else {
+              // same selected UOM -> sum selectedQty
+              mergedSelectedUom = prevUom;
+              mergedSelectedQty = (cur.selectedQty ?? 0) + (norm.selectedQty ?? 0);
+            }
+
+            byInv.set(i.inventoryItemId, {
+              baseQty: (cur.baseQty ?? 0) + norm.baseQty,
+              note: cur.note ?? i.note,
+              selectedUom: mergedSelectedUom,
+              selectedQty: mergedSelectedQty,
+            });
+          } else {
+            byInv.set(i.inventoryItemId, {
+              baseQty: norm.baseQty,
+              note: i.note,
+              selectedUom: norm.selectedUomCode ?? null,
+              selectedQty: norm.selectedQty ?? null,
+            });
+          }
         }
+
         const values = Array.from(byInv.entries()).map(([inventoryItemId, v]) => ({
           menuItem: { id: existed.id } as any,
           inventoryItem: { id: inventoryItemId } as any,
           quantity: v.baseQty,
-          selectedUom: null as any, // khi gộp nhiều dòng với đơn vị khác nhau, không lưu đơn vị người dùng để tránh sai lệch
-          selectedQty: null as any,
+          selectedUom: v.selectedUom ? ({ code: v.selectedUom } as any) : null,
+          selectedQty: v.selectedQty ?? null,
           note: v.note,
         }));
 
@@ -248,6 +308,7 @@ export class MenuitemsService {
           'category',
           'ingredients',
           'ingredients.inventoryItem',
+          'ingredients.selectedUom',
           'components',
           'components.item',
         ],

@@ -1,7 +1,7 @@
 // inventoryitems.service.ts
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { InventoryItem } from './entities/inventoryitem.entity';
 import { InventoryTransaction } from '@modules/inventorytransaction/entities/inventorytransaction.entity';
 import { PurchaseReceiptItem } from '@modules/purchasereceiptitem/entities/purchasereceiptitem.entity';
@@ -70,38 +70,31 @@ export class InventoryitemsService {
       if (!name) throw new ResponseException('NAME_REQUIRED', 400);
       if (!uomCode) throw new ResponseException('UOM_REQUIRED', 400);
 
-      // Đơn vị người dùng chọn khi khai báo vật tư (KG, GOI500G, CASE24,...)
       const inputUom = await this.uomRepo.findOne({ where: { code: uomCode } });
       if (!inputUom) throw new ResponseException('UOM_NOT_FOUND', 400);
 
       const alertThresholdRaw = Number(dto.alertThreshold ?? 0);
       if (alertThresholdRaw < 0) throw new ResponseException('ALERT_THRESHOLD_INVALID', 400);
 
-      // === Lấy baseCode từ chính UOM
       const baseCode = (inputUom.baseCode || inputUom.code).toUpperCase();
       const baseUom = await this.uomRepo.findOne({ where: { code: baseCode } });
       if (!baseUom) throw new ResponseException(`BASE_UOM_NOT_FOUND_${baseCode}`, 400);
 
-      // Ngưỡng cảnh báo user nhập theo đơn vị họ chọn (KG, GOI500G,...)
-      // => convert sang base (G) để lưu
       const alertThreshold = await this.convertQty(inputUom.code, baseUom.code, alertThresholdRaw);
 
-      const quantity = 0;
-
-      // Generate code như bạn đang làm
+      // Generate code
       const now = new Date();
       const pad = (n: number, l = 2) => n.toString().padStart(l, '0');
-      const code = `ING-${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(
-        now.getHours(),
-      )}${pad(now.getMinutes())}${pad(now.getSeconds())}-${Math.floor(Math.random() * 900 + 100)}`;
+      const code = `ING-${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
 
       const item = this.inventoryRepo.create({
         name,
         code,
         baseUom,
-        quantity,
+        quantity: 0,
         alertThreshold,
         description: dto.description?.trim() || null,
+        isDeleted: false, // Mặc định active
       });
 
       if (dto.categoryId) {
@@ -116,12 +109,11 @@ export class InventoryitemsService {
         id: saved.id,
         code: saved.code,
         name: saved.name,
-        baseUom: { code: baseUom.code, name: baseUom.name, dimension: baseUom.dimension },
+        baseUom: { code: baseUom.code, name: baseUom.name },
         quantity: Number(saved.quantity),
         alertThreshold: Number(saved.alertThreshold),
-        avgCost: Number(saved.avgCost ?? 0),
-        description: saved.description,
-        category: saved.category ? { id: saved.category.id, name: (saved as any).category?.name } : null,
+        isActive: true, // [MỚI] Trả về isActive
+        category: saved.category ? { id: saved.category.id, name: saved.category.name } : null,
         createdAt: saved.createdAt,
       });
     } catch (error) {
@@ -140,27 +132,27 @@ export class InventoryitemsService {
         .leftJoinAndSelect('i.baseUom', 'u')
         .leftJoinAndSelect('i.category', 'c')
         .leftJoinAndSelect('i.suppliers', 's')
-        .where('i.isDeleted = :isDeleted', { isDeleted: false })
         .orderBy('i.createdAt', 'DESC')
         .skip(skip)
-        .take(limit)
-        .distinct(true);
+        .take(limit);
 
-      qb.select(['i', 'u', 'c', 's.id', 's.name']).distinct(true);
+      if (dto.isActive !== undefined) {
+        qb.andWhere('i.isDeleted = :isDeleted', { isDeleted: !dto.isActive });
+      }
 
-      // --- Search theo tên + đơn vị
+      // --- Search ---
       const q = dto.q?.trim();
       if (q) {
         const kw = `%${q.toLowerCase()}%`;
         qb.andWhere('(LOWER(i.name) LIKE :kw OR LOWER(u.name) LIKE :kw OR LOWER(u.code) LIKE :kw)', { kw });
       }
 
-      // --- Lọc theo đơn vị
+      // --- Filter Base UOM ---
       if (dto.baseUomCode?.trim()) {
         qb.andWhere('u.code = :uom', { uom: dto.baseUomCode.trim().toUpperCase() });
       }
 
-      // --- Lọc theo tồn kho
+      // --- Filter Stock ---
       switch (dto.stock) {
         case 'BELOW': qb.andWhere('i.quantity < i.alertThreshold'); break;
         case 'OVER': qb.andWhere('i.quantity > i.alertThreshold'); break;
@@ -168,21 +160,12 @@ export class InventoryitemsService {
         case 'OUT_OF_STOCK': qb.andWhere('i.quantity = 0'); break;
       }
 
-      // --- Lọc theo nhà cung cấp
+      // --- Filter Supplier ---
       if (dto.supplierId) {
         qb.andWhere('s.id = :sid', { sid: dto.supplierId });
       }
 
-      // Đếm tổng (vì DISTINCT)
-      const countQb = qb.clone()
-        .select('COUNT(DISTINCT i.id)', 'cnt')
-        .limit(undefined)
-        .offset(undefined)
-        .orderBy(undefined as any);
-      const [{ cnt }] = await countQb.getRawMany();
-      const total = Number(cnt ?? 0);
-
-      const rows = await qb.getMany();
+      const [rows, total] = await qb.getManyAndCount();
 
       const items = rows.map(r => ({
         id: r.id,
@@ -191,19 +174,20 @@ export class InventoryitemsService {
         baseUom: {
           code: r.baseUom.code,
           name: r.baseUom.name,
-          dimension: r.baseUom.dimension,
         },
         quantity: Number(r.quantity),
         avgCost: Number(r.avgCost),
         alertThreshold: Number(r.alertThreshold),
         category: r.category ? { id: r.category.id, name: r.category.name } : null,
         suppliers: (r.suppliers ?? []).map(s => ({ id: s.id, name: s.name })),
+        isActive: !r.isDeleted, // [MỚI] Map isActive từ isDeleted
+        isDeleted: r.isDeleted,  // Trả về cả isDeleted cho rõ ràng
         createdAt: r.createdAt,
         updatedAt: r.updatedAt,
         description: r.description,
       }));
 
-      return new ResponseCommon<typeof items, PageMeta>(
+      return new ResponseCommon(
         200,
         true,
         'Lấy danh sách vật tư thành công',
@@ -215,9 +199,6 @@ export class InventoryitemsService {
     }
   }
 
-
-
-  /** (tuỳ chọn) lấy chi tiết 1 item */
   async findOne(id: string) {
     const r = await this.inventoryRepo.findOne({
       where: { id },
@@ -260,81 +241,116 @@ export class InventoryitemsService {
   async getUomsForItem(itemId: string): Promise<Array<{
     code: string; name: string; conversionToBase: number; isBase: boolean; label: string;
   }>> {
+    // 1. Lấy thông tin Item và Base Unit
     const item = await this.inventoryRepo.findOne({
       where: { id: itemId },
       relations: ['baseUom'],
     });
     if (!item) throw new NotFoundException('ITEM_NOT_FOUND');
 
-    const base = item.baseUom; // ví dụ: CAN
+    const base = item.baseUom;
+    const baseCode = base.code;
 
-    // lấy các conversion có đích là base: 1 from = factor * base
-    const conversions = await this.convRepo.find({
-      where: { to: { code: base.code } },
-      relations: ['from', 'to'],
-      order: { factor: 'ASC' },
+    // 2. Chuẩn bị Map để lưu trữ kết quả và hệ số tích lũy
+    // Key: Unit Code, Value: Factor to Base
+    const validUnitsMap = new Map<string, number>();
+    validUnitsMap.set(baseCode, 1); // Base luôn có hệ số 1
+
+    // Danh sách các code cần đi tìm "cha" ở vòng lặp hiện tại
+    let currentLevelCodes = [baseCode];
+
+    // 3. Vòng lặp tìm kiếm mở rộng (BFS)
+    while (currentLevelCodes.length > 0) {
+      // Tìm tất cả các quy đổi trỏ VỀ danh sách hiện tại (tìm ngược dòng)
+      const conversions = await this.convRepo.find({
+        where: { to: { code: In(currentLevelCodes) } },
+        relations: ['from', 'to'],
+      });
+
+      const nextLevelCodes: string[] = [];
+
+      for (const conv of conversions) {
+        const childCode = conv.from.code;   // Đơn vị lớn hơn (vd: Lốc)
+        const parentCode = conv.to.code;    // Đơn vị nhỏ hơn (vd: Chai)
+
+        // Nếu đơn vị này chưa từng được duyệt qua
+        if (!validUnitsMap.has(childCode)) {
+          // Kiểm tra Dimension phải khớp (Chặn trường hợp kg đổi sang lít nếu logic ko cho phép)
+          // Tuy nhiên, nếu đã tạo được conversion trong DB thì thường là dimension đã khớp rồi.
+          // Nếu bạn muốn chặt chẽ thì thêm check: conv.from.dimension === base.dimension
+
+          // TÍNH TOÁN HỆ SỐ:
+          // Hệ số của con = Hệ số conversion * Hệ số tích lũy của cha
+          // Vd: Lốc->Chai (6), Chai->Can (1) => Lốc->Can = 6 * 1 = 6
+          const parentFactor = validUnitsMap.get(parentCode) || 1;
+          const totalFactor = Number(conv.factor) * parentFactor;
+
+          validUnitsMap.set(childCode, totalFactor);
+          nextLevelCodes.push(childCode);
+        }
+      }
+
+      // Gán danh sách mới để lặp tiếp
+      currentLevelCodes = nextLevelCodes;
+    }
+
+    // 4. Lấy thông tin chi tiết (Tên, Dimension...) của tất cả các Unit tìm được
+    const allFoundCodes = Array.from(validUnitsMap.keys());
+    const uomDetails = await this.uomRepo.find({
+      where: { code: In(allFoundCodes) }
     });
 
-    const baseOption = {
-      code: base.code,
-      name: base.name,
-      conversionToBase: 1,
-      isBase: true,
-      label: `${base.code} (base)`,
-    };
+    // 5. Map kết quả trả về
+    const result = uomDetails
+      .filter(u => u.dimension === base.dimension) // Chặn lần cuối cho chắc chắn cùng dimension
+      .map(u => {
+        const factor = validUnitsMap.get(u.code) || 0;
+        const isBase = u.code === baseCode;
 
-    const others = conversions
-      .filter(c => c.from.code !== base.code)
-      .filter(c => c.from.dimension === base.dimension) // chặn ml/l/kg...
-      .map(c => ({
-        code: c.from.code,
-        name: c.from.name,
-        conversionToBase: Number(c.factor),
-        isBase: false,
-        label: `${c.from.code} (x${Number(c.factor)} ${base.code})`,
-      }))
-      .sort((a, b) => a.conversionToBase - b.conversionToBase);
+        return {
+          code: u.code,
+          name: u.name,
+          conversionToBase: factor,
+          isBase: isBase,
+          // Label hiển thị đẹp: CAN (Base) hoặc LỐC (x6 CAN)
+          label: isBase
+            ? `${u.name} (Chuẩn)`
+            : `${u.name} (x${factor} ${base.name})`
+        };
+      })
+      .sort((a, b) => a.conversionToBase - b.conversionToBase); // Sắp xếp từ nhỏ đến lớn
 
-    return [baseOption, ...others];
+    return result;
   }
 
 
   async update(id: string, dto: UpdateInventoryitemDto): Promise<ResponseCommon<any>> {
+    // Chỉ update được item chưa bị xóa vĩnh viễn (isDeleted=true vẫn update được để sửa thông tin nếu muốn, tùy nghiệp vụ)
+    // Ở đây ta cho phép update cả item đã ngưng sử dụng
     const item = await this.inventoryRepo.findOne({
-      // Chỉ cho phép cập nhật item còn đang hoạt động (chưa bị soft delete)
-      where: { id, isDeleted: false },
+      where: { id },
       relations: ['baseUom', 'category', 'suppliers'],
     });
-    if (!item) {
-      throw new ResponseException('ITEM_NOT_FOUND', 404);
-    }
+    if (!item) throw new ResponseException('ITEM_NOT_FOUND', 404);
 
-    // Không cho đổi code & baseUom qua API này
-    // (nếu FE cố gửi thì bỏ qua hoặc báo lỗi)
-    // Ví dụ: nếu dto có field code / unit thì chặn:
-    // if ((dto as any).code || (dto as any).unit) throw new ResponseException('CANNOT_CHANGE_CODE_OR_BASEUOM', 400);
+    if ((dto as any).code || (dto as any).unit) throw new ResponseException('CANNOT_CHANGE_CODE_OR_BASEUOM', 400);
 
-    // name
     if (dto.name !== undefined) {
       const name = dto.name.trim();
       if (!name) throw new ResponseException('NAME_REQUIRED', 400);
       item.name = name;
     }
 
-    // alertThreshold (ở đây hiểu là đã theo baseUom)
     if (dto.alertThreshold !== undefined) {
       const v = Number(dto.alertThreshold);
       if (v < 0) throw new ResponseException('ALERT_THRESHOLD_INVALID', 400);
       item.alertThreshold = v;
     }
 
-    // description
     if (dto.description !== undefined) {
       item.description = dto.description?.trim() || null;
     }
 
-    // category
-    // category: allow clearing (null) or assigning existing category by id
     if ((dto as any).categoryId !== undefined) {
       if ((dto as any).categoryId === null) {
         item.category = null as any;
@@ -349,94 +365,112 @@ export class InventoryitemsService {
 
     return new ResponseCommon(200, true, 'Cập nhật vật tư thành công', {
       id: saved.id,
-      code: saved.code,
       name: saved.name,
-      baseUom: {
-        code: saved.baseUom.code,
-        name: saved.baseUom.name,
-        dimension: saved.baseUom.dimension,
-      },
       quantity: Number(saved.quantity),
-      avgCost: Number(saved.avgCost),
-      alertThreshold: Number(saved.alertThreshold),
-      description: saved.description,
-      category: saved.category ? { id: saved.category.id, name: saved.category.name } : null,
-      suppliers: (saved.suppliers ?? []).map(s => ({ id: s.id, name: s.name })),
-      // isActive = !isDeleted để FE dễ dùng
-      isActive: !saved.isDeleted,
-      updatedAt: saved.updatedAt,
+      isActive: !saved.isDeleted, // [MỚI]
+      // ... các trường khác
     });
   }
 
-  // async remove(id: string, force = false): Promise<ResponseCommon<any>> {
-  //   const item = await this.inventoryRepo.findOne({ where: { id } });
-  //   if (!item) {
-  //     throw new ResponseException('ITEM_NOT_FOUND', 404);
-  //   }
-  //   const qty = Number(item.quantity ?? 0);
+  // =================================================================================
+  // 4. REMOVE (SOFT DELETE - NGƯNG SỬ DỤNG)
+  // =================================================================================
+  async remove(id: string, force = false): Promise<ResponseCommon<any>> {
+    const item = await this.inventoryRepo.findOne({ where: { id } });
+    if (!item) throw new ResponseException('ITEM_NOT_FOUND', 404);
 
-  //   // Nếu caller muốn force zero stock thì tạo giao dịch WASTE
-  //   if (qty > 0 && force) {
-  //     const unitCost = Number(item.avgCost ?? 0);
-  //     const lineCost = Number((unitCost * qty).toFixed(2));
+    if (item.isDeleted) {
+      throw new ResponseException('ITEM_ALREADY_DELETED', 400);
+    }
 
-  //     await this.invTxRepo.save(this.invTxRepo.create({
-  //       item: { id: item.id } as any,
-  //       quantity: qty,
-  //       action: InventoryAction.WASTE,
-  //       unitCost: unitCost,
-  //       lineCost,
-  //       beforeQty: qty,
-  //       afterQty: 0,
-  //       refType: 'ITEM_DEACTIVATE',
-  //       refId: item.id as any,
-  //       note: 'Force deactivate: zeroed stock',
-  //     } as any));
+    const qty = Number(item.quantity ?? 0);
 
-  //     item.quantity = 0;
-  //     item.avgCost = 0;
-  //   }
+    // 1. Check tham chiếu (Logic cũ của bạn - tốt)
+    const txCount = await this.invTxRepo.count({ where: { item: { id } as any } });
+    const prCount = await this.prItemRepo.count({ where: { item: { id } as any } });
+    const ingCount = await this.ingredientRepo.count({ where: { inventoryItem: { id } as any } });
+    const hadHistory = txCount > 0 || prCount > 0 || ingCount > 0;
 
-  //   // Soft delete regardless of qty (we keep history)
-  //   item.isDeleted = true;
-  //   const saved = await this.inventoryRepo.save(item);
-  //   return new ResponseCommon(200, true, 'Ngưng sử dụng vật tư thành công', {
-  //     id: saved.id,
-  //     hadStock: qty > 0,
-  //     remainingQty: Number(saved.quantity),
-  //   });
-  // }
+    // 2. Xử lý tồn kho nếu force = true
+    if (qty > 0 && force) {
+      const unitCost = Number(item.avgCost ?? 0);
+      const lineCost = Number((unitCost * qty).toFixed(2));
 
-  // /** Permanently remove an item only if safety checks pass
-  //  *  Criteria to allow hard delete:
-  //  *   - quantity === 0
-  //  *   - no inventory_transactions referencing this item
-  //  *   - no purchase_receipt_items and no menu ingredients referencing this item
-  //  *  Returns detailed reason if not allowed.
-  //  */
-  // async hardDelete(id: string): Promise<ResponseCommon<null>> {
-  //   const item = await this.inventoryRepo.findOne({ where: { id } });
-  //   if (!item) throw new ResponseException('ITEM_NOT_FOUND', 404);
+      await this.invTxRepo.save(this.invTxRepo.create({
+        item: { id: item.id } as any,
+        quantity: qty,
+        action: InventoryAction.WASTE, // Xuất hủy
+        unitCost: unitCost,
+        lineCost,
+        beforeQty: qty,
+        afterQty: 0,
+        refType: 'ITEM_DEACTIVATE',
+        refId: item.id as any,
+        note: 'Hệ thống: Ngưng sử dụng và hủy tồn kho',
+      } as any));
 
-  //   const qty = Number(item.quantity ?? 0);
+      item.quantity = 0 as any;
+      item.avgCost = 0 as any;
+    }
 
-  //   const txCount = await this.invTxRepo.count({ where: { item: { id } as any } });
-  //   const prCount = await this.prItemRepo.count({ where: { item: { id } as any } });
-  //   const ingCount = await this.ingredientRepo.count({ where: { inventoryItem: { id } as any } });
+    // 3. Đánh dấu đã xóa (isActive = false)
+    item.isDeleted = true;
+    const saved = await this.inventoryRepo.save(item);
 
-  //   const reasons: string[] = [];
-  //   if (qty !== 0) reasons.push('NON_ZERO_QUANTITY');
-  //   if (txCount > 0) reasons.push('HAS_INVENTORY_TRANSACTIONS');
-  //   if (prCount > 0) reasons.push('HAS_PURCHASE_RECEIPT_ITEMS');
-  //   if (ingCount > 0) reasons.push('USED_IN_MENU_INGREDIENTS');
+    return new ResponseCommon(200, true, 'Ngưng sử dụng vật tư thành công', {
+      id: saved.id,
+      isActive: false, // [MỚI]
+      hadStock: qty > 0,
+      remainingQty: Number(saved.quantity),
+    });
+  }
 
-  //   if (reasons.length > 0) {
-  //     throw new ResponseException({ allowed: false, reasons }, 400, 'CANNOT_HARD_DELETE_ITEM');
-  //   }
+  // =================================================================================
+  // 5. RESTORE (KHÔI PHỤC HOẠT ĐỘNG) - [MỚI]
+  // =================================================================================
+  async restore(id: string): Promise<ResponseCommon<any>> {
+    const item = await this.inventoryRepo.findOne({ where: { id } });
+    if (!item) throw new ResponseException('ITEM_NOT_FOUND', 404);
 
-  //   // safe to hard delete
-  //   await this.inventoryRepo.remove(item);
-  //   return new ResponseCommon(200, true, 'ITEM_DELETED_PERMANENTLY', null);
-  // }
+    if (!item.isDeleted) {
+      throw new ResponseException('ITEM_IS_ALREADY_ACTIVE', 400);
+    }
+
+    // Đánh dấu hoạt động trở lại
+    item.isDeleted = false;
+    const saved = await this.inventoryRepo.save(item);
+
+    return new ResponseCommon(200, true, 'Khôi phục vật tư thành công', {
+      id: saved.id,
+      name: saved.name,
+      isActive: true, // [MỚI]
+    });
+  }
+
+  // =================================================================================
+  // 6. HARD DELETE (XÓA VĨNH VIỄN)
+  // =================================================================================
+  async hardDelete(id: string): Promise<ResponseCommon<null>> {
+    const item = await this.inventoryRepo.findOne({ where: { id } });
+    if (!item) throw new ResponseException('ITEM_NOT_FOUND', 404);
+
+    const qty = Number(item.quantity ?? 0);
+    const txCount = await this.invTxRepo.count({ where: { item: { id } as any } });
+    const prCount = await this.prItemRepo.count({ where: { item: { id } as any } });
+    const ingCount = await this.ingredientRepo.count({ where: { inventoryItem: { id } as any } });
+
+    const reasons: string[] = [];
+    if (qty !== 0) reasons.push('NON_ZERO_QUANTITY');
+    if (txCount > 0) reasons.push('HAS_INVENTORY_TRANSACTIONS');
+    if (prCount > 0) reasons.push('HAS_PURCHASE_RECEIPT_ITEMS');
+    if (ingCount > 0) reasons.push('USED_IN_MENU_INGREDIENTS');
+
+    if (reasons.length > 0) {
+      throw new ResponseException({ allowed: false, reasons }, 400, 'CANNOT_HARD_DELETE_ITEM');
+    }
+
+    await this.inventoryRepo.remove(item);
+    return new ResponseCommon(200, true, 'Xóa vĩnh viễn vật tư thành công', null);
+  }
 
 }

@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, UseGuards, Query, Patch, Delete } from '@nestjs/common';
+import { Controller, Get, Post, Body, UseGuards, Query, Patch, Delete, Put } from '@nestjs/common';
 import { CreateUomconversionDto } from './dto/create-uomconversion.dto';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '@modules/core/auth/guards/jwt-auth.guard';
@@ -30,7 +30,7 @@ export class UomconversionController {
         return this.svc.list(q);
     }
 
-    @Patch()
+    @Put()
     @Roles(UserRole.MANAGER)
     @ApiOperation({ summary: 'Cập nhật hệ số quy đổi UOM' })
     update(@Body() dto: UpdateUomconversionDto) {

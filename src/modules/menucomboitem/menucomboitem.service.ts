@@ -71,7 +71,7 @@ export class MenucomboitemService {
 
       return em.getRepository(MenuItem).findOne({
         where: { id: combo.id },
-        relations: { components: { item: true }, category: true },
+        relations: { components: { item: { ingredients: { selectedUom: true, inventoryItem: true } } }, category: true },
       });
     });
   }
@@ -132,7 +132,7 @@ export class MenucomboitemService {
   async findOne(id: string) {
     const combo = await this.menuRepo.findOne({
       where: { id, isCombo: true },
-      relations: { components: { item: true }, category: true },
+      relations: { components: { item: { ingredients: { selectedUom: true, inventoryItem: true } } }, category: true },
     });
     if (!combo) return new ResponseCommon(404, false, 'COMBO_NOT_FOUND');
     return combo;
@@ -216,7 +216,7 @@ export class MenucomboitemService {
       // 5) Trả về combo đã cập nhật
       return em.getRepository(MenuItem).findOne({
         where: { id: combo.id },
-        relations: { components: { item: true }, category: true },
+        relations: { components: { item: { ingredients: { selectedUom: true, inventoryItem: true } } }, category: true },
       });
     });
   }
