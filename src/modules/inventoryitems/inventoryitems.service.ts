@@ -1,7 +1,7 @@
 // inventoryitems.service.ts
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { InventoryItem } from './entities/inventoryitem.entity';
 import { InventoryTransaction } from '@modules/inventorytransaction/entities/inventorytransaction.entity';
 import { PurchaseReceiptItem } from '@modules/purchasereceiptitem/entities/purchasereceiptitem.entity';
@@ -241,42 +241,86 @@ export class InventoryitemsService {
   async getUomsForItem(itemId: string): Promise<Array<{
     code: string; name: string; conversionToBase: number; isBase: boolean; label: string;
   }>> {
+    // 1. Lấy thông tin Item và Base Unit
     const item = await this.inventoryRepo.findOne({
       where: { id: itemId },
       relations: ['baseUom'],
     });
     if (!item) throw new NotFoundException('ITEM_NOT_FOUND');
 
-    const base = item.baseUom; // ví dụ: CAN
+    const base = item.baseUom;
+    const baseCode = base.code;
 
-    // lấy các conversion có đích là base: 1 from = factor * base
-    const conversions = await this.convRepo.find({
-      where: { to: { code: base.code } },
-      relations: ['from', 'to'],
-      order: { factor: 'ASC' },
+    // 2. Chuẩn bị Map để lưu trữ kết quả và hệ số tích lũy
+    // Key: Unit Code, Value: Factor to Base
+    const validUnitsMap = new Map<string, number>();
+    validUnitsMap.set(baseCode, 1); // Base luôn có hệ số 1
+
+    // Danh sách các code cần đi tìm "cha" ở vòng lặp hiện tại
+    let currentLevelCodes = [baseCode];
+
+    // 3. Vòng lặp tìm kiếm mở rộng (BFS)
+    while (currentLevelCodes.length > 0) {
+      // Tìm tất cả các quy đổi trỏ VỀ danh sách hiện tại (tìm ngược dòng)
+      const conversions = await this.convRepo.find({
+        where: { to: { code: In(currentLevelCodes) } },
+        relations: ['from', 'to'],
+      });
+
+      const nextLevelCodes: string[] = [];
+
+      for (const conv of conversions) {
+        const childCode = conv.from.code;   // Đơn vị lớn hơn (vd: Lốc)
+        const parentCode = conv.to.code;    // Đơn vị nhỏ hơn (vd: Chai)
+
+        // Nếu đơn vị này chưa từng được duyệt qua
+        if (!validUnitsMap.has(childCode)) {
+          // Kiểm tra Dimension phải khớp (Chặn trường hợp kg đổi sang lít nếu logic ko cho phép)
+          // Tuy nhiên, nếu đã tạo được conversion trong DB thì thường là dimension đã khớp rồi.
+          // Nếu bạn muốn chặt chẽ thì thêm check: conv.from.dimension === base.dimension
+
+          // TÍNH TOÁN HỆ SỐ:
+          // Hệ số của con = Hệ số conversion * Hệ số tích lũy của cha
+          // Vd: Lốc->Chai (6), Chai->Can (1) => Lốc->Can = 6 * 1 = 6
+          const parentFactor = validUnitsMap.get(parentCode) || 1;
+          const totalFactor = Number(conv.factor) * parentFactor;
+
+          validUnitsMap.set(childCode, totalFactor);
+          nextLevelCodes.push(childCode);
+        }
+      }
+
+      // Gán danh sách mới để lặp tiếp
+      currentLevelCodes = nextLevelCodes;
+    }
+
+    // 4. Lấy thông tin chi tiết (Tên, Dimension...) của tất cả các Unit tìm được
+    const allFoundCodes = Array.from(validUnitsMap.keys());
+    const uomDetails = await this.uomRepo.find({
+      where: { code: In(allFoundCodes) }
     });
 
-    const baseOption = {
-      code: base.code,
-      name: base.name,
-      conversionToBase: 1,
-      isBase: true,
-      label: `${base.code} (base)`,
-    };
+    // 5. Map kết quả trả về
+    const result = uomDetails
+      .filter(u => u.dimension === base.dimension) // Chặn lần cuối cho chắc chắn cùng dimension
+      .map(u => {
+        const factor = validUnitsMap.get(u.code) || 0;
+        const isBase = u.code === baseCode;
 
-    const others = conversions
-      .filter(c => c.from.code !== base.code)
-      .filter(c => c.from.dimension === base.dimension) // chặn ml/l/kg...
-      .map(c => ({
-        code: c.from.code,
-        name: c.from.name,
-        conversionToBase: Number(c.factor),
-        isBase: false,
-        label: `${c.from.code} (x${Number(c.factor)} ${base.code})`,
-      }))
-      .sort((a, b) => a.conversionToBase - b.conversionToBase);
+        return {
+          code: u.code,
+          name: u.name,
+          conversionToBase: factor,
+          isBase: isBase,
+          // Label hiển thị đẹp: CAN (Base) hoặc LỐC (x6 CAN)
+          label: isBase
+            ? `${u.name} (Chuẩn)`
+            : `${u.name} (x${factor} ${base.name})`
+        };
+      })
+      .sort((a, b) => a.conversionToBase - b.conversionToBase); // Sắp xếp từ nhỏ đến lớn
 
-    return [baseOption, ...others];
+    return result;
   }
 
 

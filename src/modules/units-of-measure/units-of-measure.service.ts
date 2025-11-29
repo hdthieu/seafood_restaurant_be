@@ -129,12 +129,10 @@ export class UnitsOfMeasureService {
 
         // Nếu đổi dimension -> check đang được dùng (code bạn đã có)
         if (dto.dimension && dto.dimension !== u.dimension) {
-            const usedInInv = await this.invRepo.createQueryBuilder('i')
-                .where('i.base_uom_code = :code', { code: u.code }).getCount();
             const usedInConv = await this.convRepo.createQueryBuilder('c')
                 .leftJoin('c.from', 'f').leftJoin('c.to', 't')
                 .where('f.code = :code OR t.code = :code', { code: u.code }).getCount();
-            if (usedInInv > 0 || usedInConv > 0) {
+            if (usedInConv > 0) {
                 throw new ResponseException('UOM_IN_USE_CANNOT_CHANGE_DIMENSION', 400);
             }
         }
@@ -162,8 +160,6 @@ export class UnitsOfMeasureService {
         if (!u) throw new ResponseException('UOM_NOT_FOUND', 404);
 
         // Check if UOM is in use
-        const usedInInv = await this.invRepo.createQueryBuilder('i')
-            .where('i.base_uom_code = :code', { code: u.code }).getCount();
         const usedInConv = await this.convRepo.createQueryBuilder('c')
             .leftJoin('c.from', 'f').leftJoin('c.to', 't')
             .where('f.code = :code OR t.code = :code', { code: u.code }).getCount();
@@ -174,7 +170,7 @@ export class UnitsOfMeasureService {
         const usedInIng = await this.ingRepo.createQueryBuilder('ing')
             .where('ing.selected_uom_code = :code', { code: u.code }).getCount();
 
-        const isInUse = usedInInv > 0 || usedInConv > 0 || usedInPri > 0 || usedInPrl > 0 || usedInIng > 0;
+        const isInUse = usedInConv > 0 || usedInPri > 0 || usedInPrl > 0 || usedInIng > 0;
 
         if (isInUse) {
             // Soft delete: set inactive
@@ -186,6 +182,52 @@ export class UnitsOfMeasureService {
             await this.uomRepo.delete({ code: u.code });
             return new ResponseCommon(200, true, 'UOM_DELETED', { code: u.code });
         }
+    }
+
+    /**
+     * Kiểm tra xem một UOM có đang được sử dụng ở đâu không.
+     * Trả về số lần sử dụng theo từng bảng để UI quyết định khoá/Hệ số không cho sửa.
+     */
+    async checkUsage(code: string) {
+        const u = await this.uomRepo.findOne({ where: { code: code.toUpperCase() } });
+        if (!u) throw new ResponseException('UOM_NOT_FOUND', 404);
+
+        // Chạy song song tất cả các câu lệnh đếm cùng lúc (Tổng thời gian = Thời gian của câu lệnh lâu nhất)
+        const [usedInInv, usedInConv, usedInPri, usedInPrl, usedInIng] = await Promise.all([
+            // 1. Check tồn kho — dùng query builder để tránh lỗi typing với nested relation props
+            this.invRepo.createQueryBuilder('i')
+                .where('i.base_uom_code = :code', { code: u.code }).getCount(),
+
+            // 2. Check quy đổi (Logic OR của bạn)
+            this.convRepo.createQueryBuilder('c')
+                .leftJoin('c.from', 'f').leftJoin('c.to', 't')
+                .where('f.code = :code OR t.code = :code', { code: u.code }).getCount(),
+
+            // 3. Các check khác — dùng column names via query builder
+            this.priRepo.createQueryBuilder('pri')
+                .where('pri.received_uom_code = :code', { code: u.code }).getCount(),
+            this.prlRepo.createQueryBuilder('prl')
+                .where('prl.uom_code = :code', { code: u.code }).getCount(),
+            this.ingRepo.createQueryBuilder('ing')
+                .where('ing.selected_uom_code = :code', { code: u.code }).getCount(),
+        ]);
+
+        const total = usedInInv + usedInConv + usedInPri + usedInPrl + usedInIng;
+
+        return new ResponseCommon(200, true, 'OK', {
+            code: u.code,
+            name: u.name,
+            isActive: u.isActive,
+            counts: {
+                inventoryItems: usedInInv, // Trả về số này để FE biết tại sao bị khóa
+                conversions: usedInConv,
+                purchaseReceiptItems: usedInPri,
+                purchaseReturnLogs: usedInPrl,
+                ingredients: usedInIng,
+            },
+            // Chỉ cần tổng > 0 là coi như ĐÃ DÙNG -> Khóa edit
+            isUsed: total > 0,
+        });
     }
 
     async deactivate(code: string) {
@@ -207,6 +249,7 @@ export class UnitsOfMeasureService {
     }
 
     async findByInventoryItem(inventoryItemId: string) {
+        // 1. Lấy thông tin Item và Base Unit
         const inv = await this.invRepo.findOne({
             where: { id: inventoryItemId },
             relations: ['baseUom'],
@@ -215,32 +258,56 @@ export class UnitsOfMeasureService {
             throw new ResponseException('INVENTORY_ITEM_NOT_FOUND', 404);
         }
 
-        const base = inv.baseUom;
-        const convs = await this.convRepo.find({
-            where: [
-                { to: { code: base.code } },
-                { from: { code: base.code } },
-            ],
-            relations: ['from', 'to'],
-        });
+        const baseCode = inv.baseUom.code;
 
-        const codes = new Set<string>();
-        codes.add(base.code);
-        for (const c of convs) {
-            codes.add(c.from.code);
-            codes.add(c.to.code);
+        // 2. Logic tìm kiếm mở rộng (Graph Traversal - BFS)
+        const allRelatedCodes = new Set<string>(); // Danh sách chứa kết quả cuối cùng
+        allRelatedCodes.add(baseCode);
+
+        let currentLayerCodes = [baseCode]; // Các code cần đi kiểm tra ở vòng lặp hiện tại
+
+        while (currentLayerCodes.length > 0) {
+            // Tìm tất cả các quy đổi dính líu đến layer hiện tại
+            const foundConversions = await this.convRepo.find({
+                where: [
+                    { from: { code: In(currentLayerCodes) } },
+                    { to: { code: In(currentLayerCodes) } },
+                ],
+                relations: ['from', 'to'],
+            });
+
+            // Reset layer tiếp theo
+            const nextLayerCodes: string[] = [];
+
+            for (const c of foundConversions) {
+                // Kiểm tra fromCode: Nếu chưa có trong danh sách tổng -> Thêm vào danh sách tổng & danh sách cần kiểm tra tiếp
+                if (!allRelatedCodes.has(c.from.code)) {
+                    allRelatedCodes.add(c.from.code);
+                    nextLayerCodes.push(c.from.code);
+                }
+                // Kiểm tra toCode tương tự
+                if (!allRelatedCodes.has(c.to.code)) {
+                    allRelatedCodes.add(c.to.code);
+                    nextLayerCodes.push(c.to.code);
+                }
+            }
+
+            // Gán danh sách mới tìm được để lặp tiếp. Nếu mảng này rỗng -> while dừng.
+            currentLayerCodes = nextLayerCodes;
         }
 
+        // 3. Query lấy thông tin chi tiết UOM từ danh sách code đã tìm được
         const uoms = await this.uomRepo.find({
-            where: { code: In(Array.from(codes)) },
+            where: { code: In(Array.from(allRelatedCodes)) },
             order: { name: 'ASC' },
         });
-
+        console.log('Found UOMs:', uoms);
+        // 4. Map kết quả trả về
         return uoms.map(u => ({
             code: u.code,
             name: u.name,
             dimension: u.dimension,
-            isBase: u.code === base.code,
+            isBase: u.code === baseCode,
         }));
     }
 }
