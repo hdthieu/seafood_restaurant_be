@@ -17,6 +17,10 @@ export const configurations = {
   VNP_LOCALE: process.env.VNP_LOCALE,
   VNP_VERSION: process.env.VNP_VERSION,
   FRONTEND_URL: process.env.FRONTEND_URL,
+  // Mailer settings (used by MailService)
+  mailService: process.env.MAIL_SERVICE || 'gmail',
+  mailUser: process.env.MAIL_USER,
+  mailPass: process.env.MAIL_PASS,
 
   jwt: {
     accessSecret: process.env.JWT_ACCESS_SECRET!,
