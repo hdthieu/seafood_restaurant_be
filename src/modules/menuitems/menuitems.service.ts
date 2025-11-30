@@ -16,6 +16,7 @@ import { PageMeta } from 'src/common/common_dto/paginated';
 import { PromotionsService } from '@modules/promotions/promotions.service';
 import { InventoryItem } from '@modules/inventoryitems/entities/inventoryitem.entity';
 import { UomConversion } from '@modules/uomconversion/entities/uomconversion.entity';
+import { getConversionFactorRecursive } from 'src/common/utils/uom.util';
 
 @Injectable()
 export class MenuitemsService {
@@ -37,9 +38,16 @@ export class MenuitemsService {
     if (!uomCode || uomCode === baseCode) {
       return { baseQty: qty, selectedUomCode: uomCode ?? baseCode, selectedQty: qty };
     }
-    const conv = await this.convRepo.findOne({ where: { from: { code: uomCode }, to: { code: baseCode } }, relations: ['from', 'to'] });
-    if (!conv) throw new ResponseException(`UOM_CONVERSION_NOT_CONFIGURED`, 400);
-    return { baseQty: qty * Number(conv.factor), selectedUomCode: uomCode, selectedQty: qty };
+    // Try direct conversion first, otherwise attempt recursive (multi-step) conversion
+    const direct = await this.convRepo.findOne({ where: { from: { code: uomCode }, to: { code: baseCode } }, relations: ['from', 'to'] });
+    if (direct) {
+      return { baseQty: qty * Number(direct.factor), selectedUomCode: uomCode, selectedQty: qty };
+    }
+
+    // Fallback: support chained conversions (e.g. LOC -> CHAI -> CAN)
+    const factor = await getConversionFactorRecursive(this.dataSource.createEntityManager(), uomCode, baseCode);
+    if (!factor || factor <= 0) throw new ResponseException(`UOM_CONVERSION_NOT_CONFIGURED`, 400);
+    return { baseQty: qty * Number(factor), selectedUomCode: uomCode, selectedQty: qty };
   }
 
   async createMenuItem(dto: CreateMenuItemDto, file: Express.Multer.File) {

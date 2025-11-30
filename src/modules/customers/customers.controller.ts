@@ -21,7 +21,8 @@ import { CustomerInvoiceListResp } from './dtos/query-customer-history.dto';
 import { PageMeta } from 'src/common/common_dto/paginated';
 import { Patch } from '@nestjs/common';
 import { UpdateCustomerDto } from './dtos/update-customer.dto';
-
+import { ZodValidationPipe } from 'src/common/pipes/zod-validation.pipe';
+import { createCustomerSchema, type CreateCustomerInput } from '../../shared/schemas/customer';
 
 @Controller()
 export class CustomersController {
@@ -35,8 +36,8 @@ export class CustomersController {
 
   // POST /customers: tạo mới theo DTO chuẩn (PERSONAL/COMPANY + gender enum)
   @Post('customers')
-  @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
-  create(@Body() dto: CreateCustomerDto) {
+  @UsePipes(new ZodValidationPipe(createCustomerSchema))
+  create(@Body() dto: CreateCustomerInput) {
     return this.svc.create(dto);
   }
   @Get('customers/:id')

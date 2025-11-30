@@ -43,6 +43,8 @@ export type NotifyItemsToKitchenPayload = {
   createdAt?: string;
   items: KitchenNotifyItem[];
   staff?: string;
+   note?: string | null;
+  source?: "cashier" | "waiter" | "other";
   priority?: boolean;
 };
 @WebSocketGateway({
@@ -85,7 +87,17 @@ export class KitchenGateway implements OnGatewayConnection, OnGatewayDisconnect 
   }
 
 
-
+ emitItemNoteUpdated(payload: {
+    orderId: string;
+    orderItemId: string;
+    menuItemId: string;
+    note: string | null;
+    by: string;
+  }) {
+    this.server.to('kitchen').emit('orderitem:note_updated', payload);
+       this.server.to('waiter').emit('orderitem:note_updated', payload);
+    this.server.to('cashier').emit('orderitem:note_updated', payload);
+  }
 
 
   /** 🔹 Phát sự kiện thông báo số lượng bếp online */
@@ -221,6 +233,8 @@ emitVoidSynced(payload: {
     tableId: string;
     guestCount: number | null;
     customer: { id: string; name: string; phone?: string | null } | null;
+  //    note?: string | null;          // 👈 thêm
+  // priority?: boolean;
   }) {
     // Gửi cho thu ngân + phục vụ
     this.server.to('cashier').emit('orders:meta_updated', payload);

@@ -42,8 +42,6 @@ export class RekogService {
 
   private readonly client = new RekognitionClient({
     region: this.region,
-    // Nếu đang dùng ENV chuẩn (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_SESSION_TOKEN)
-    // thì không cần truyền credentials ở đây.
   });
 
   private readonly sts = new STSClient({ region: this.region });

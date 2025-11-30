@@ -7,109 +7,6 @@ import { LlmGateway } from "./llm.gateway";
 type UiMsg = { role: "user" | "assistant"; content: string };
 type QuestionKind = "DATA" | "RAG" | "CHAT" | "SQL" | "TIME";
 type RagRole = "KITCHEN" | "WAITER" | "CASHIER" | "MANAGER" | "ALL";
-const ROLE_SUGGESTIONS: Record<RagRole | "GENERAL", string[]> = {
-  WAITER: [
-    "Quy trình đón khách",
-    "Quy trình ghi order cho đúng",
-    "Quy trình phục vụ món ăn cho khách",
-    "Xử lý khi khách phàn nàn về món ăn",
-    "Làm sao upsell món hiệu quả?",
-    "Quy trình dọn bàn sau khi khách dùng xong",
-    "Xử lý tình huống khách say, làm đổ món, trẻ em chạy nhảy"
-  ],
-  CASHIER: [
-    "Quy trình thanh toán tiền mặt",
-    "Quy trình thanh toán thẻ hoặc QR",
-    "Quy trình hủy hoá đơn trên hệ thống",
-    "Quy trình xuất hoá đơn VAT",
-    "Quy trình hoàn tiền (refund) cho khách",
-    "Cách áp dụng khuyến mãi và voucher",
-    "Đối soát tiền mặt cuối ca"
-  ],
-  KITCHEN: [
-    "Quy trình nhận order từ hệ thống bếp",
-    "Quy trình sơ chế nguyên liệu",
-    "Quy trình chế biến món ăn đúng công thức",
-    "Quy trình ra món (PASS) cho phục vụ",
-    "Quy trình báo hết món",
-    "Quy trình xử lý món lỗi / làm lại",
-    "Quy trình vệ sinh bếp và đóng ca"
-  ],
-  MANAGER: [
-    "Checklist đầu ca cho quản lý",
-    "Checklist cuối ca cho quản lý",
-    "Quy trình xử lý khiếu nại khách hàng mức độ cao",
-    "Quy trình chấm công và tính lương nhân viên",
-    "Quy trình quản lý kho và kiểm kê tồn",
-    "Báo cáo doanh thu ngày cần xem những gì",
-    "Phân tích doanh thu tháng và top món bán chạy",
-    "Quy trình đào tạo nhân viên mới"
-  ],
-  ALL: [
-    "Nội quy làm việc chung của nhà hàng",
-    "Quy định an toàn vệ sinh thực phẩm",
-    "Quy định PCCC trong nhà hàng",
-    "Chính sách thưởng phạt nhân viên",
-    "Quy định nghỉ phép, tăng ca, đổi ca",
-    "Quy trình ứng lương và hoàn ứng"
-  ],
-  GENERAL: [
-    "Tôi là nhân viên phục vụ, tôi cần biết những quy trình gì?",
-    "Tôi là thu ngân, tôi cần xem các quy định nào?",
-    "Tôi là bếp, các SOP trong bếp gồm những gì?",
-    "Tôi là quản lý, tôi cần xem checklist vận hành",
-    "Cho tôi xem các quy định chung của nhà hàng"
-  ],
-};
-
-function detectRoleFromIntro(
-  raw: string,
-): { role: RagRole | "GENERAL"; label: string } | null {
-  const q = raw.toLowerCase().normalize("NFC").trim();
-
-  // Chỉ coi là "intro" nếu câu bắt đầu bằng mấy cụm này
-  const introMatch = q.match(/^(tôi|em|mình|anh|chị)\s+là\s+(.+)/);
-  const isNewStaff =
-    q.includes("mới vào làm") ||
-    q.includes("nhân viên mới") ||
-    q.includes("hỗ trợ tôi") ||
-    q.includes("ho tro toi") ||
-    q.includes("giúp tôi") ||
-    q.includes("giup toi");
-
-  // Trường hợp nhân viên mới hỏi chung chung
-  if (!introMatch) {
-    if (isNewStaff) {
-      return { role: "GENERAL", label: "nhân viên mới" };
-    }
-    // ⚠️ Không tự detect theo từ khoá “quản lý / phục vụ / thu ngân / bếp” nữa
-    // để các câu hỏi kiểu “quy tắc chung cho quản lý” đi qua pipeline bình thường.
-    return null;
-  }
-
-  // phần sau "tôi là ...": vd "nhân viên phục vụ", "quản lý", "bên thu ngân"
-  const rest = introMatch[2]; // đã là lowercase
-
-  if (rest.includes("phục vụ") || rest.includes("phuc vu") || rest.includes("waiter")) {
-    return { role: "WAITER", label: "nhân viên phục vụ" };
-  }
-  if (rest.includes("thu ngân") || rest.includes("thu ngan") || rest.includes("cashier")) {
-    return { role: "CASHIER", label: "thu ngân" };
-  }
-  if (rest.includes("bếp") || rest.includes("bep") || rest.includes("kitchen")) {
-    return { role: "KITCHEN", label: "bộ phận bếp" };
-  }
-  if (rest.includes("quản lý") || rest.includes("quan ly") || rest.includes("manager")) {
-    return { role: "MANAGER", label: "quản lý" };
-  }
-
-  // Trường hợp user tự xưng nhưng nói kiểu chung chung: “tôi là nhân viên mới”
-  if (rest.includes("nhân viên mới") || rest.includes("nhan vien moi")) {
-    return { role: "GENERAL", label: "nhân viên mới" };
-  }
-
-  return null;
-}
 
 const TZ_DEFAULT = process.env.TZ || "Asia/Ho_Chi_Minh";
 
@@ -357,19 +254,6 @@ Bạn là trợ lý AI thân thiện cho quản lý nhà hàng.
     this.logger.log(
       `[AiService] mode=${mode}, role=${ctx.role}, question="${question}"`,
     );
-
-       // Nếu người dùng tự giới thiệu vai trò → trả về gợi ý luôn, không cần LLM
-    const intro = detectRoleFromIntro(question);
-    if (intro) {
-      const suggestions = ROLE_SUGGESTIONS[intro.role] ?? [];
-      return {
-        role: "assistant",
-        content:
-          `Chào bạn, mình hiểu bạn đang ở vị trí **${intro.label}**.\n\n` +
-          `Bạn có thể hỏi mình về các chủ đề sau (bấm chọn hoặc gõ lại câu hỏi):`,
-        suggestions,
-      };
-    }
 
     // ép /sql → SmartSQL
     if (mode === "sql") {

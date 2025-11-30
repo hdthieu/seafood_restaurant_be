@@ -134,35 +134,45 @@ async function run() {
     console.log("ℹ️ RAG_RESET!=1 → giữ nguyên dữ liệu cũ, chỉ upsert thêm/ghi đè.");
   }
 
-  for (const f of files) {
-    const ext = path.extname(f).toLowerCase();
-    if (ext !== ".txt" && ext !== ".md") {
-      console.log("⏭ skip (not txt/md):", f);
-      continue;
-    }
-
-    const raw = await fs.readFile(f, "utf8");
-    const chunks = splitDocBySection(raw, 1200);
-
-    const role = detectRoleByPath(f);
-    const baseName = path.basename(f);
-
-    for (let i = 0; i < chunks.length; i++) {
-      const meta: any = {
-        source: baseName,
-        absPath: f,
-        index: i,
-        role, // 👈 quan trọng: KITCHEN/WAITER/CASHIER/MANAGER/ALL
-      };
-
-      console.log(`📄 docs → ${baseName} [${role}] chunk ${i}`);
-      await rag.upsertDocChunk({
-        id: randomUUID(),
-        text: chunks[i],
-        meta,
-      });
-    }
+for (const f of files) {
+  const ext = path.extname(f).toLowerCase();
+  if (ext !== ".txt" && ext !== ".md") {
+    console.log("⏭ skip (not txt/md):", f);
+    continue;
   }
+
+  const baseName = path.basename(f);
+
+  // 🚫 1) BỎ QUA CÁC FILE SOP MENU (sop_noi_quy_lao_dong.txt, sop_*.txt)
+  if (baseName.startsWith("sop_")) {
+    console.log("⏭ skip SOP menu file:", baseName);
+    continue;
+  }
+
+  const raw = await fs.readFile(f, "utf8");
+
+  const chunks = splitDocBySection(raw, 1200);
+
+  const role = detectRoleByPath(f);
+
+  for (let i = 0; i < chunks.length; i++) {
+    const meta: any = {
+      source: baseName,
+      absPath: f,
+      index: i,
+      role,
+    };
+
+    console.log(`📄 docs → ${baseName} [${role}] chunk ${i}`);
+    await rag.upsertDocChunk({
+      id: randomUUID(),
+      text: chunks[i],
+      meta,
+    });
+  }
+}
+
+
 
   await app.close();
 }

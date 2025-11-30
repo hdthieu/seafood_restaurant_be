@@ -40,7 +40,8 @@ import { KitchenTicket } from '@modules/kitchen/entities/kitchen-ticket.entity';
 import { SplitOrderDto } from './dto/split-order.dto';
 import { DeepPartial } from 'typeorm';
 import { KitchenService } from '@modules/kitchen/kitchen.service';
-import {UpdateOrderMetaDto} from './dto/update-order-meta.dto';
+import { getConversionFactorRecursive } from 'src/common/utils/uom.util';
+import { UpdateOrderMetaDto } from './dto/update-order-meta.dto';
 const ALLOWED_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   [OrderStatus.PENDING]: [OrderStatus.CONFIRMED, OrderStatus.CANCELLED],
   [OrderStatus.CONFIRMED]: [OrderStatus.PREPARING, OrderStatus.CANCELLED],
@@ -87,16 +88,36 @@ export class OrdersService {
   // Trừ kho toàn bộ đơn theo công thức: sum(Ingredient.quantity * OrderItem.quantity)
   private async consumeInventoryForOrder(em: EntityManager, order: Order) {
     const menuIds = order.items.map((it: any) => it.menuItem.id);
+    // load selectedUom and inventoryItem.baseUom to allow conversion when needed
     const ingredients = await em.getRepository(Ingredient).find({
       where: { menuItem: { id: In(menuIds) } },
-      relations: ['inventoryItem', 'menuItem'],
+      relations: ['inventoryItem', 'inventoryItem.baseUom', 'menuItem', 'selectedUom'],
     });
 
-    const needMap = new Map<string, number>(); // inventoryItemId -> required qty
+    const needMap = new Map<string, number>(); // inventoryItemId -> required qty (in base UOM)
     for (const it of order.items as any[]) {
       const ingForMenu = ingredients.filter((ing) => ing.menuItem.id === it.menuItem.id);
       for (const ing of ingForMenu) {
-        const need = Number(ing.quantity) * it.quantity;
+        // Prefer explicit stored base quantity
+        let basePerMenu = Number(ing.quantity || 0);
+
+        // If base quantity is missing or zero, try to compute from selectedQty + selectedUom
+        if (!basePerMenu || basePerMenu <= 0) {
+          if (ing.selectedUom && ing.selectedQty && ing.inventoryItem && ing.inventoryItem.baseUom) {
+            const fromCode = (ing.selectedUom as any).code;
+            const toCode = (ing.inventoryItem.baseUom as any).code;
+            const factor = await getConversionFactorRecursive(em, fromCode, toCode);
+            if (!factor || factor <= 0) {
+              throw new BadRequestException(`NO_CONVERSION_DEFINED_FOR_INGREDIENT:${ing.id}`);
+            }
+            basePerMenu = Number(ing.selectedQty) * factor;
+          } else {
+            // fallback: if nothing to compute, treat as zero
+            basePerMenu = 0;
+          }
+        }
+
+        const need = basePerMenu * Number(it.quantity || 0);
         needMap.set(ing.inventoryItem.id, (needMap.get(ing.inventoryItem.id) ?? 0) + need);
       }
     }
@@ -112,16 +133,32 @@ export class OrdersService {
   ) {
     if (!deltas.length) return;
 
+    // load selectedUom and inventoryItem.baseUom to allow conversion when needed
     const ingredients = await em.getRepository(Ingredient).find({
       where: { menuItem: { id: In(deltas.map((d) => d.menuItemId)) } },
-      relations: ['inventoryItem', 'menuItem'],
+      relations: ['inventoryItem', 'inventoryItem.baseUom', 'menuItem', 'selectedUom'],
     });
 
     const needMap = new Map<string, number>();
     for (const d of deltas) {
       const list = ingredients.filter((ing) => ing.menuItem.id === d.menuItemId);
       for (const ing of list) {
-        const need = Number(ing.quantity) * d.quantity;
+        let basePerMenu = Number(ing.quantity || 0);
+        if (!basePerMenu || basePerMenu <= 0) {
+          if (ing.selectedUom && ing.selectedQty && ing.inventoryItem && ing.inventoryItem.baseUom) {
+            const fromCode = (ing.selectedUom as any).code;
+            const toCode = (ing.inventoryItem.baseUom as any).code;
+            const factor = await getConversionFactorRecursive(em, fromCode, toCode);
+            if (!factor || factor <= 0) {
+              throw new BadRequestException(`NO_CONVERSION_DEFINED_FOR_INGREDIENT:${ing.id}`);
+            }
+            basePerMenu = Number(ing.selectedQty) * factor;
+          } else {
+            basePerMenu = 0;
+          }
+        }
+
+        const need = basePerMenu * Number(d.quantity || 0);
         needMap.set(ing.inventoryItem.id, (needMap.get(ing.inventoryItem.id) ?? 0) + need);
       }
     }
@@ -304,50 +341,50 @@ export class OrdersService {
 
   /** LIST (paging + optional status / excludeStatus) */
   async list(params: { page: number; limit: number; status?: OrderStatus; excludeStatus?: string }) {
-  const qb = this.orderRepo
-    .createQueryBuilder('o')
-    .leftJoinAndSelect('o.table', 'table')
-    .leftJoinAndSelect('o.customer', 'customer') // 👈 THÊM DÒNG NÀY
-    .leftJoinAndSelect(
-      'o.items',
-      'items',
-      'items.status != :cancelled',
-      { cancelled: 'CANCELLED' },
-    )
-    .leftJoinAndSelect('items.menuItem', 'menuItem');
+    const qb = this.orderRepo
+      .createQueryBuilder('o')
+      .leftJoinAndSelect('o.table', 'table')
+      .leftJoinAndSelect('o.customer', 'customer') // 👈 THÊM DÒNG NÀY
+      .leftJoinAndSelect(
+        'o.items',
+        'items',
+        'items.status != :cancelled',
+        { cancelled: 'CANCELLED' },
+      )
+      .leftJoinAndSelect('items.menuItem', 'menuItem');
 
-  if (params.status) {
-    qb.andWhere('o.status = :st', { st: params.status });
-  }
-
-  if (params.excludeStatus) {
-    const arr = params.excludeStatus.split(',') as OrderStatus[];
-    qb.andWhere('o.status NOT IN (:...ex)', { ex: arr });
-  }
-
-  qb.orderBy('o.createdAt', 'DESC')
-    .skip((params.page - 1) * params.limit)
-    .take(params.limit);
-
-  const [rows, total] = await qb.getManyAndCount();
-
-  // lọc lại items CANCELLED cho chắc
-  for (const o of rows) {
-    if (Array.isArray(o.items)) {
-      o.items = o.items.filter((it) => it.status !== 'CANCELLED');
+    if (params.status) {
+      qb.andWhere('o.status = :st', { st: params.status });
     }
-  }
 
-  return {
-    data: rows,
-    meta: {
-      page: params.page,
-      limit: params.limit,
-      total,
-      totalPages: Math.ceil(total / params.limit),
-    },
-  };
-}
+    if (params.excludeStatus) {
+      const arr = params.excludeStatus.split(',') as OrderStatus[];
+      qb.andWhere('o.status NOT IN (:...ex)', { ex: arr });
+    }
+
+    qb.orderBy('o.createdAt', 'DESC')
+      .skip((params.page - 1) * params.limit)
+      .take(params.limit);
+
+    const [rows, total] = await qb.getManyAndCount();
+
+    // lọc lại items CANCELLED cho chắc
+    for (const o of rows) {
+      if (Array.isArray(o.items)) {
+        o.items = o.items.filter((it) => it.status !== 'CANCELLED');
+      }
+    }
+
+    return {
+      data: rows,
+      meta: {
+        page: params.page,
+        limit: params.limit,
+        total,
+        totalPages: Math.ceil(total / params.limit),
+      },
+    };
+  }
 
 
   /** DETAIL */
@@ -638,23 +675,23 @@ export class OrdersService {
             const savedTicket = await ktRepo.save(ktRepo.create(partial));
 
             // Emit socket báo bếp
-//             this.gw.emitNotifyItemsToKitchen({
-//   orderId: order.id,
-//   tableName: order.table?.name ?? '',
-//   batchId,
-//   createdAt: new Date().toISOString(),
-//   // staff: userId || 'SYSTEM',          
-//   priority: false,
-//   items: [
-//     {
-//       ticketId: savedTicket.id,
-//       menuItemId: row.menuItem.id,
-//       name: row.menuItem.name,
-//       qty: delta,
-//       orderItemId: row.id,
-//     },
-//   ],
-// });
+            //             this.gw.emitNotifyItemsToKitchen({
+            //   orderId: order.id,
+            //   tableName: order.table?.name ?? '',
+            //   batchId,
+            //   createdAt: new Date().toISOString(),
+            //   // staff: userId || 'SYSTEM',          
+            //   priority: false,
+            //   items: [
+            //     {
+            //       ticketId: savedTicket.id,
+            //       menuItemId: row.menuItem.id,
+            //       name: row.menuItem.name,
+            //       qty: delta,
+            //       orderItemId: row.id,
+            //     },
+            //   ],
+            // });
           } catch (err) {
             // rollback về savepoint để transaction không bị abort
             await qr.query('ROLLBACK TO SAVEPOINT kt_savepoint');
@@ -1098,43 +1135,43 @@ export class OrdersService {
 
 
   async updateMeta(id: string, dto: UpdateOrderMetaDto) {
-  const order = await this.orderRepo.findOne({
-    where: { id },
-    relations: ['customer'],
-  });
-  if (!order) throw new NotFoundException('Order not found');
+    const order = await this.orderRepo.findOne({
+      where: { id },
+      relations: ['customer'],
+    });
+    if (!order) throw new NotFoundException('Order not found');
 
-  if (dto.customerId !== undefined) {
-    if (dto.customerId === null || dto.customerId === '') {
-      order.customer = null;
-    } else {
-      const customer = await this.customerRepo.findOneBy({ id: dto.customerId });
-      if (!customer) throw new NotFoundException('Customer not found');
-      order.customer = customer;
+    if (dto.customerId !== undefined) {
+      if (dto.customerId === null || dto.customerId === '') {
+        order.customer = null;
+      } else {
+        const customer = await this.customerRepo.findOneBy({ id: dto.customerId });
+        if (!customer) throw new NotFoundException('Customer not found');
+        order.customer = customer;
+      }
     }
-  }
 
-  if (dto.guestCount !== undefined) {
-    order.guestCount = dto.guestCount;
-  }
+    if (dto.guestCount !== undefined) {
+      order.guestCount = dto.guestCount;
+    }
 
-  await this.orderRepo.save(order);
+    await this.orderRepo.save(order);
 
-   this.gw.emitOrderMetaUpdated({
+    this.gw.emitOrderMetaUpdated({
       orderId: order.id,
       tableId: order.table?.id,
       guestCount: order.guestCount ?? null,
       customer: order.customer
         ? {
-            id: order.customer.id,
-            name: order.customer.name,
-            phone: order.customer.phone ?? null,
-          }
+          id: order.customer.id,
+          name: order.customer.name,
+          phone: order.customer.phone ?? null,
+        }
         : null,
     });
 
-  return order;
-}
+    return order;
+  }
 
 
 }
