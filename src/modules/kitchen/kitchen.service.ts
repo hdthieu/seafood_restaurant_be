@@ -145,13 +145,13 @@ export class KitchenService {
   }
 
 
-  async listByStatus(status: ItemStatus, page = 1, limit = 200) {
+ async listByStatus(status: ItemStatus, page = 1, limit = 200) {
   const qb = this.ticketRepo
     .createQueryBuilder('kt')
     .innerJoinAndSelect('kt.order', 'o')
     .leftJoinAndSelect('o.table', 'tbl')
     .innerJoinAndSelect('kt.menuItem', 'mi')
-    .leftJoinAndSelect('kt.batch', 'b')     // nếu cần xem batch.note thì để, không thì bỏ
+    .leftJoinAndSelect('kt.batch', 'b') // đã join batch
     .where('kt.status = :st', { st: status })
     .addOrderBy('kt.createdAt', 'DESC')
     .addOrderBy('kt.id', 'ASC')
@@ -173,8 +173,12 @@ export class KitchenService {
         ? { id: t.order.table.id, name: t.order.table.name }
         : null,
     },
-    // 👇 lấy note từ chính KitchenTicket
     note: (t as any).note ?? null,
+
+    // 🔥 THÊM 3 DÒNG NÀY (tuỳ bạn dùng hết hay không)
+    batchId: t.batch?.id ?? null,
+    batchNote: t.batch?.note ?? null,
+    priority: t.batch?.priority ?? false,
   }));
 
   return { data, total, page, limit };
