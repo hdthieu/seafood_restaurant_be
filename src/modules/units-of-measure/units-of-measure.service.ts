@@ -159,10 +159,17 @@ export class UnitsOfMeasureService {
         const u = await this.uomRepo.findOne({ where: { code: code.toUpperCase() } });
         if (!u) throw new ResponseException('UOM_NOT_FOUND', 404);
 
-        // Check if UOM is in use
-        const usedInConv = await this.convRepo.createQueryBuilder('c')
-            .leftJoin('c.from', 'f').leftJoin('c.to', 't')
-            .where('f.code = :code OR t.code = :code', { code: u.code }).getCount();
+        // --- SỬA ĐỔI 1: Tách logic kiểm tra Conversion ---
+        
+        // Chỉ coi là "Đang sử dụng" nếu đơn vị này là ĐÍCH ĐẾN (Base Unit) của một quy đổi khác.
+        // Ví dụ: Đang xóa "Lon" mà có "Thùng" quy đổi từ "Lon" -> Chặn.
+        const usedAsBase = await this.convRepo.createQueryBuilder('c')
+            .leftJoin('c.to', 't')
+            .where('t.code = :code', { code: u.code }) 
+            .getCount();
+
+        // KHÔNG kiểm tra 'c.from' ở đây nữa.
+
         const usedInPri = await this.priRepo.createQueryBuilder('pri')
             .where('pri.received_uom_code = :code', { code: u.code }).getCount();
         const usedInPrl = await this.prlRepo.createQueryBuilder('prl')
@@ -170,7 +177,8 @@ export class UnitsOfMeasureService {
         const usedInIng = await this.ingRepo.createQueryBuilder('ing')
             .where('ing.selected_uom_code = :code', { code: u.code }).getCount();
 
-        const isInUse = usedInConv > 0 || usedInPri > 0 || usedInPrl > 0 || usedInIng > 0;
+        // Kiểm tra tổng hợp
+        const isInUse = usedAsBase > 0 || usedInPri > 0 || usedInPrl > 0 || usedInIng > 0;
 
         if (isInUse) {
             // Soft delete: set inactive
@@ -179,7 +187,16 @@ export class UnitsOfMeasureService {
             return new ResponseCommon(200, true, 'UOM_DEACTIVATED', { code: u.code });
         } else {
             // Hard delete
+            
+            // --- SỬA ĐỔI 2: Dọn dẹp bảng Conversion trước khi xóa Unit ---
+            
+            // Nếu đơn vị này có định nghĩa quy đổi (nó là 'from'), hãy xóa định nghĩa đó đi trước.
+            // Ví dụ: Xóa dòng "1 Thùng = 24 Lon" trong bảng conversion.
+            await this.convRepo.delete({ from: { code: u.code } });
+
+            // Sau đó mới xóa đơn vị tính
             await this.uomRepo.delete({ code: u.code });
+            
             return new ResponseCommon(200, true, 'UOM_DELETED', { code: u.code });
         }
     }
