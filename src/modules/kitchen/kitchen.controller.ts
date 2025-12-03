@@ -11,23 +11,40 @@ export class KitchenController {
   constructor(private readonly svc: KitchenService) {}
 
   @Post('/orders/:orderId/notify-items')
-  async notifyItems(
-    @Param('orderId') orderId: string,
-    @Body() body: { items: { menuItemId: string; delta: number }[]; priority?: boolean; note?: string, tableName: string, source?: "cashier" | "waiter" | "other" },
-    @Req() req: any,
-  ) {
-    const staff = req.user?.name ?? 'Thu ngân';
-    const tableName = 'Bàn ?'; // TODO: lấy từ DB theo orderId
-    return this.svc.notifyItems({
-      orderId,
-       tableName: body.tableName,  
-      staff,
-      itemsDelta: body.items,
-      priority: body.priority,
-      note: body.note,
-       source: body.source ?? "cashier",
-    });
-  }
+async notifyItems(
+  @Param('orderId') orderId: string,
+  @Body()
+  body: {
+    items: { menuItemId: string; delta: number }[];
+    priority?: boolean;
+    note?: string;
+    tableName: string;
+    source?: 'cashier' | 'waiter' | 'other';
+  },
+  @CurrentUser() user: any,   // 👈 dùng decorator giống bên dưới
+) {
+  const source = body.source ?? 'cashier';
+
+  // ƯU TIÊN: tên đầy đủ / username / name
+  const staff =
+    user?.profile?.fullName ??
+    user?.fullName ??
+    user?.username ??
+    user?.name ??
+    // fallback theo nguồn
+    (source === 'waiter' ? 'Phục vụ' : 'Thu ngân');
+
+  return this.svc.notifyItems({
+    orderId,
+    tableName: body.tableName,   // dùng tableName FE gửi lên
+    staff,
+    itemsDelta: body.items,
+    priority: body.priority,
+    note: body.note,
+    source,
+  });
+}
+
 
  // src/modules/kitchen/kitchen.controller.ts
 @Get('/tickets')

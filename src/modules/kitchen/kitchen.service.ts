@@ -66,12 +66,13 @@ export class KitchenService {
     note?: string;
     source?: "cashier" | "waiter" | "other";
   }) {
+     const priority = !!payload.priority;   
     const batch = await this.batchRepo.save(
       this.batchRepo.create({
         order: { id: payload.orderId } as any,
         tableName: payload.tableName,
         staff: payload.staff,
-        priority: !!payload.priority,
+          priority,     
         note: payload.note ?? null,
 
       }),
@@ -136,7 +137,7 @@ export class KitchenService {
       })),
 
       staff: payload.staff,
-      priority: payload.priority,
+       priority, 
        note: payload.note ?? null,
     source: payload.source ?? "cashier", 
     });
