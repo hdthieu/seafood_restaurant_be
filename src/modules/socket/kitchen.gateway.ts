@@ -79,12 +79,21 @@ export class KitchenGateway implements OnGatewayConnection, OnGatewayDisconnect 
    emitOrdersMerged(payload: { fromOrderId: string; toOrderId: string; fromTableId?: string | null; toTableId?: string | null }) {
     this.server.to('cashier').emit('orders:merged', payload);
     this.server.to('waiter').emit('orders:merged', payload);
+      this.server.to('kitchen').emit('orders:merged', payload);
   }
 
-  emitOrdersSplit(payload: { fromOrderId: string; toOrderId: string }) {
-    this.server.to('cashier').emit('orders:split', payload);
-    this.server.to('waiter').emit('orders:split', payload);
-  }
+  emitOrdersSplit(payload: {
+  fromOrderId: string;
+  toOrderId: string;
+  fromTable?: string | null;
+  toTable?: string | null;
+    movedMenuItemIds?: string[];
+}) {
+  this.server.to('cashier').emit('orders:split', payload);
+  this.server.to('waiter').emit('orders:split', payload);
+  this.server.to('kitchen').emit('orders:split', payload);
+}
+
 
 
  emitItemNoteUpdated(payload: {

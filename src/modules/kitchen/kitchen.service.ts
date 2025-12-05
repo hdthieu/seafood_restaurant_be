@@ -66,12 +66,13 @@ export class KitchenService {
     note?: string;
     source?: "cashier" | "waiter" | "other";
   }) {
+     const priority = !!payload.priority;   
     const batch = await this.batchRepo.save(
       this.batchRepo.create({
         order: { id: payload.orderId } as any,
         tableName: payload.tableName,
         staff: payload.staff,
-        priority: !!payload.priority,
+          priority,     
         note: payload.note ?? null,
 
       }),
@@ -136,7 +137,7 @@ export class KitchenService {
       })),
 
       staff: payload.staff,
-      priority: payload.priority,
+       priority, 
        note: payload.note ?? null,
     source: payload.source ?? "cashier", 
     });
@@ -145,13 +146,13 @@ export class KitchenService {
   }
 
 
-  async listByStatus(status: ItemStatus, page = 1, limit = 200) {
+ async listByStatus(status: ItemStatus, page = 1, limit = 200) {
   const qb = this.ticketRepo
     .createQueryBuilder('kt')
     .innerJoinAndSelect('kt.order', 'o')
     .leftJoinAndSelect('o.table', 'tbl')
     .innerJoinAndSelect('kt.menuItem', 'mi')
-    .leftJoinAndSelect('kt.batch', 'b')     // nếu cần xem batch.note thì để, không thì bỏ
+    .leftJoinAndSelect('kt.batch', 'b') // đã join batch
     .where('kt.status = :st', { st: status })
     .addOrderBy('kt.createdAt', 'DESC')
     .addOrderBy('kt.id', 'ASC')
@@ -173,8 +174,12 @@ export class KitchenService {
         ? { id: t.order.table.id, name: t.order.table.name }
         : null,
     },
-    // 👇 lấy note từ chính KitchenTicket
     note: (t as any).note ?? null,
+
+    // 🔥 THÊM 3 DÒNG NÀY (tuỳ bạn dùng hết hay không)
+    batchId: t.batch?.id ?? null,
+    batchNote: t.batch?.note ?? null,
+    priority: t.batch?.priority ?? false,
   }));
 
   return { data, total, page, limit };
@@ -485,18 +490,7 @@ export class KitchenService {
     return { patches, remainToVoid: qtyToVoid - effectiveQty };
   }
 
-
-
-
-
-
-
-
-
-
-
-  // kitchen.service.ts
-  async cancelFromKitchen(opts: {
+    async cancelFromKitchen(opts: {
     ticketId: string;
     qtyToVoid?: number;
     reason?: string;
@@ -527,7 +521,6 @@ export class KitchenService {
           throw new BadRequestException("TICKET_QTY_INVALID");
         }
 
-        // 👉 số lượng thực sự muốn hủy (nếu không gửi thì mặc định hủy hết)
         const cancelQty = Math.max(
           1,
           Math.min(ticketQty, Number(qtyToVoid) || ticketQty),
@@ -543,6 +536,7 @@ export class KitchenService {
           if (oi) {
             const after = (oi.quantity || 0) - cancelQty;
             if (after <= 0) {
+              // hết lượng → xoá luôn dòng item
               await oiRepo.delete(oi.id);
             } else {
               oi.quantity = after;
@@ -553,23 +547,34 @@ export class KitchenService {
 
         // ----- cập nhật KitchenTicket -----
         if (remainQty <= 0) {
-          // hủy hết ticket
+          // huỷ hết vé
           t.status = ItemStatus.CANCELLED;
           t.cancelReason = reason ?? null;
           t.cancelledAt = new Date();
           t.cancelledBy = by ?? null;
           await tRepo.save(t);
         } else {
-          // chỉ hủy một phần → giảm qty, giữ status
+          // huỷ 1 phần vé → giảm qty
           (t as any).qty = remainQty;
           await tRepo.save(t);
         }
+await this.orderItemsSvc['logVoid'](em, {
+        orderId: t.order.id,
+        menuItemId: t.menuItem?.id ?? (t as any).menuItemId,
+        qty: cancelQty,
+        source: 'kitchen',
+        by,
+        reason,
+      });
+
+      // 🔥 recompute status order
+      await this.orderItemsSvc.recomputeOrderStatus(em, t.order.id);
 
         return {
           orderId: t.order.id,
           menuItemId: t.menuItem?.id ?? (t as any).menuItemId,
           orderItemId: t.orderItemId ?? null,
-          qty: cancelQty,            // 👈 chỉ số lượng vừa hủy
+          qty: cancelQty,
           reason,
           by,
           ticketId: t.id,
@@ -578,7 +583,7 @@ export class KitchenService {
     );
 
     if (payload) {
-      // 1) Nếu anh còn cần "tickets_voided" cho chỗ khác thì vẫn giữ:
+      // giữ nguyên mớ socket emit bạn đang có
       this.gw.server.to("kitchen").emit("kitchen:tickets_voided", {
         orderId: payload.orderId,
         ticketIds: [payload.ticketId],
@@ -592,20 +597,17 @@ export class KitchenService {
         ],
       });
 
-      // 2) QUAN TRỌNG: bắn "kitchen:void_synced" cho cả 3 room,
-      // để FE bếp nhận được và chạy onVoidedFromNewGateway
       this.gw.server.to("kitchen").emit("kitchen:void_synced", payload);
       this.gw.server.to("cashier").emit("kitchen:void_synced", payload);
       this.gw.server.to("waiter").emit("kitchen:void_synced", payload);
 
-      // 3) Nếu còn dùng event này, giữ lại
       this.gw.server.to("cashier").emit("kitchen:ticket_cancelled", payload);
       this.gw.server.to("waiter").emit("kitchen:ticket_cancelled", payload);
     }
 
-
     return { ok: true, ticketId };
   }
+
 
 
 

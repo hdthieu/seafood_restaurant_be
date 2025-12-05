@@ -15,6 +15,8 @@ import { OrderitemsModule } from 'src/modules/orderitems/orderitems.module';
 import { KitchenModule } from '../kitchen/kitchen.module';
 import {KitchenTicket } from '../kitchen/entities/kitchen-ticket.entity'; 
 import {KitchenGateway} from '../socket/kitchen.gateway';
+import { VoidEvent } from './entities/void-event.entity';
+import {VoidEventsController} from './void-events.controller';
 @Module({
   imports: [
     TypeOrmModule.forFeature([
@@ -26,13 +28,14 @@ import {KitchenGateway} from '../socket/kitchen.gateway';
       InventoryItem,
       InventoryTransaction,
       RestaurantTable,
-      KitchenTicket
+      KitchenTicket,
+      VoidEvent,
     ]),
     KitchenModule,
     CustomersModule,
     OrderitemsModule,
   ],
-  controllers: [OrdersController],
+  controllers: [OrdersController, VoidEventsController],
   providers: [OrdersService,KitchenGateway],
   exports: [OrdersService],
 })

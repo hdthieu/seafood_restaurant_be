@@ -24,10 +24,10 @@ export class Order {
     @Column('enum', { enum: OrderStatus, default: OrderStatus.PENDING })
     status: OrderStatus;
 
-    @CreateDateColumn()
+    @CreateDateColumn({ type: 'timestamptz' })
     createdAt: Date;
 
-    @UpdateDateColumn()
+    @UpdateDateColumn({ type: 'timestamptz' })
     updatedAt: Date;
 
     @Column({ type: 'enum', enum: OrderType, default: OrderType.DINE_IN })

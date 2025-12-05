@@ -1,6 +1,6 @@
 import { Embeddings } from "@langchain/core/embeddings";
 import type { AsyncCallerParams } from "@langchain/core/utils/async_caller";
-import { LlmGateway } from "../ai/llm.gateway"; // tuỳ bạn để path
+import { LlmGateway } from "../ai/llm.gateway"; 
 
 export class GatewayEmbeddings extends Embeddings {
   constructor(private readonly llm: LlmGateway, params?: AsyncCallerParams) {

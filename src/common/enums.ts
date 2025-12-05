@@ -181,6 +181,7 @@ export enum Channel { DINEIN = 'DINEIN', TAKEAWAY = 'TAKEAWAY', DELIVERY = 'DELI
 export enum CashbookType {
   RECEIPT = 'RECEIPT',
   PAYMENT = 'PAYMENT',
+   SALES_RETURN_REFUND = 'SALES_RETURN_REFUND',
 }
 
 export enum CounterpartyGroup {
@@ -242,4 +243,22 @@ export enum PayrollSlipStatus {
   CLOSED = 'CLOSED',
   PARTIALLY_PAID = 'PARTIALLY_PAID',
   PAID = 'PAID',
+}
+
+export enum SalesReturnStatus {
+  DRAFT = 'DRAFT',
+  COMPLETED = 'COMPLETED',
+  CANCELLED = 'CANCELLED',
+}
+
+export enum SalesReturnType {
+  FULL = 'FULL',      // trả toàn bộ hoá đơn
+  PARTIAL = 'PARTIAL',// trả một phần
+}
+
+export enum RefundMethod {
+  CASH = 'CASH',
+  BANK_TRANSFER = 'BANK_TRANSFER',
+  CARD = 'CARD',
+  OTHER = 'OTHER',
 }

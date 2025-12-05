@@ -43,56 +43,53 @@ export class ReportService {
     }).format(d); // ví dụ 2025-09-18
   }
 
-  /** KPI tổng quan */
-  async summary(range: RangeKey) {
-    const { start, end } = resolveRange(range);
-    const TZ = this.TZ; // 'Asia/Ho_Chi_Minh'
 
-    // ---------- Doanh thu ----------
-    const revRow = await this.invRepo
-      .createQueryBuilder('inv')
-      .select('COALESCE(SUM(CAST(inv.total_amount AS numeric)), 0)', 'revenue')
-      .where('inv.status = :st', { st: InvoiceStatus.PAID })
-      .andWhere(`inv.updated_at AT TIME ZONE :tz BETWEEN :start AND :end`, { tz: TZ, start, end })
-      .getRawOne<{ revenue: string }>();
-    const revenue = Number(revRow?.revenue ?? 0);
+async summary(range: RangeKey) {
+  const { start, end } = resolveRange(range);
+  const TZ = this.TZ; 
 
+  // 1) Doanh thu = SUM(final_amount) invoice PAID trong khoảng
+  const revRow = await this.invRepo
+    .createQueryBuilder('inv')
+    .select('COALESCE(SUM(CAST(inv.final_amount AS numeric)), 0)', 'revenue')
+    .where('inv.status = :st', { st: InvoiceStatus.PAID })
+    .andWhere(`inv.updated_at AT TIME ZONE :tz BETWEEN :start AND :end`, {
+      tz: TZ,
+      start,
+      end,
+    })
+    .getRawOne<{ revenue: string }>();
+  const revenue = Number(revRow?.revenue ?? 0);
 
+  // 2) ĐƠN ĐÃ XONG = số invoice PAID trong khoảng
+  const doneRow = await this.invRepo
+    .createQueryBuilder('inv')
+    .select('COUNT(1)', 'c')
+    .where('inv.status = :st', { st: InvoiceStatus.PAID })
+    .andWhere(`inv.updated_at AT TIME ZONE :tz BETWEEN :start AND :end`, {
+      tz: TZ,
+      start,
+      end,
+    })
+    .getRawOne<{ c: string }>();
+  const ordersDone = Number(doneRow?.c ?? 0);
 
-    // Đơn đã xong (PAID trong range)
-    const doneRow = await this.orderRepo
-      .createQueryBuilder('o')
-      .select('COUNT(1)', 'c')
-      .where('o.status = :st', { st: OrderStatus.PAID })
-      .andWhere(`"o"."updatedAt" AT TIME ZONE :tz BETWEEN :start AND :end`, {  // 👈 sửa ở đây
-        tz: this.TZ, start, end
-      })
-      .getRawOne<{ c: string }>();
-    const ordersDone = Number(doneRow?.c ?? 0);
+  // 3) ĐANG PHỤC VỤ = số BÀN đang có order mở hiện tại
+  const inServiceRow = await this.orderRepo
+    .createQueryBuilder('o')
+    .select('COUNT(DISTINCT "o"."tableId")', 'c')
+    .where('o.status IN (:...sts)', {
+      sts: [OrderStatus.PENDING, OrderStatus.CONFIRMED],
+    })
+    .andWhere('"o"."tableId" IS NOT NULL')
+    .andWhere('"o"."merged_into_id" IS NULL')
+    .getRawOne<{ c: string }>();
+  const inService = Number(inServiceRow?.c ?? 0);
 
-    // Đang phục vụ (PENDING/CONFIRMED trong range)
-    const inServiceRow = await this.orderRepo
-      .createQueryBuilder('o')
-      .select('COUNT(1)', 'c')
-      .where('o.status IN (:...sts)', { sts: [OrderStatus.PENDING, OrderStatus.CONFIRMED] })
-      .andWhere(`"o"."updatedAt" AT TIME ZONE :tz BETWEEN :start AND :end`, {  // 👈 và ở đây
-        tz: this.TZ, start, end
-      })
-      .getRawOne<{ c: string }>();
-    const inService = Number(inServiceRow?.c ?? 0);
+  // ❌ Không tính customers nữa
+  return { revenue, ordersDone, inService };
+}
 
-    // ---------- Khách (distinct customer_id của invoice PAID trong range) ----------
-    const cusRow = await this.invRepo
-      .createQueryBuilder('inv')
-      .select('COUNT(DISTINCT inv.customer_id)', 'customers')
-      .where('inv.status = :st', { st: InvoiceStatus.PAID })
-      .andWhere('inv.customer_id IS NOT NULL')
-      .andWhere(`inv.updated_at AT TIME ZONE :tz BETWEEN :start AND :end`, { tz: TZ, start, end })
-      .getRawOne<{ customers: string }>();
-    const customers = Number(cusRow?.customers ?? 0);
-
-    return { revenue, ordersDone, inService, customers };
-  }
 
   /** Chuỗi doanh số theo ngày/giờ/thứ (TZ VN) */
   async salesSeries(range: RangeKey, granularity: 'day' | 'hour' | 'dow') {

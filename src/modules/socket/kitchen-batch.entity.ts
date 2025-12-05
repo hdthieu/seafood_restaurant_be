@@ -42,5 +42,5 @@ export class KitchenTicket {
   @Column({ type: 'enum', enum: ItemStatus, default: ItemStatus.PENDING })
   status: ItemStatus;
 
-  @CreateDateColumn() createdAt: Date;
+  @CreateDateColumn({ type: 'timestamptz' })createdAt: Date;
 }

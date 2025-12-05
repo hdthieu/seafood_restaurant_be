@@ -21,7 +21,7 @@ export const configurations = {
   mailService: process.env.MAIL_SERVICE || 'gmail',
   mailUser: process.env.MAIL_USER,
   mailPass: process.env.MAIL_PASS,
-
+  aws_Access:process.env.AWS_ACCESS_KEY_ID,
   jwt: {
     accessSecret: process.env.JWT_ACCESS_SECRET!,
     refreshSecret: process.env.JWT_REFRESH_SECRET!,

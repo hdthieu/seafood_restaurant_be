@@ -21,7 +21,8 @@ import { Payment } from 'src/modules/payments/entities/payment.entity';
 import { Order } from 'src/modules/order/entities/order.entity';
 import { Customer } from "src/modules/customers/entities/customers.entity";
 import { InvoicePromotion } from "@modules/promotions/entities/invoicepromotion.entity";
-// invoices.entity.ts
+import { SalesReturn } from 'src/modules/returns/entities/sales-return.entity';
+
 @Entity('invoices')
 export class Invoice {
   @PrimaryGeneratedColumn('uuid') id: string;
@@ -72,4 +73,8 @@ export class Invoice {
 
   @OneToMany(() => InvoicePromotion, (invPromo) => invPromo.invoice, { cascade: true })
   invoicePromotions: InvoicePromotion[];
+
+
+    @OneToMany(() => SalesReturn, (r) => r.invoice)
+  returns: SalesReturn[];
 }
