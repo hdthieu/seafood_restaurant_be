@@ -7,55 +7,106 @@ import * as fs from "node:fs/promises";
 import * as fss from "node:fs";
 import * as path from "node:path";
 import fg from "fast-glob";
-import { randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 
-function splitText(text: string, max = 1600): string[] {
-  const lines = text.split(/\r?\n/);
+/* ─────────────────────────────────────────────
+   1) Helpers: chunking
+   ───────────────────────────────────────────── */
+
+function splitByParagraph(text: string, max = 1400): string[] {
+  const paras = text
+    .split(/\n{2,}/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+
   const out: string[] = [];
-  let buf: string[] = [];
-  let len = 0;
-  for (const ln of lines) {
-    const l = ln.length + 1;
-    if (len + l > max && buf.length) {
-      out.push(buf.join("\n"));
-      buf = [];
-      len = 0;
-    }
-    buf.push(ln);
-    len += l;
-  }
-  if (buf.length) out.push(buf.join("\n"));
-  return out;
-}
+  let buf = "";
 
-// Chia docs .txt/.md theo heading "##"
-function splitDocBySection(text: string, max = 1200): string[] {
-  const parts = text.split(/^##\s+/m);
-  const out: string[] = [];
+  const flush = () => {
+    const trimmed = buf.trim();
+    if (trimmed) out.push(trimmed);
+    buf = "";
+  };
 
-  if (parts[0]?.trim()) {
-    out.push(...splitText(parts[0].trim(), max));
-  }
+  for (const p of paras) {
+    const candidate = buf ? `${buf}\n\n${p}` : p;
 
-  for (let i = 1; i < parts.length; i++) {
-    const body = parts[i];
-
-    const nl = body.indexOf("\n");
-    const heading = (nl === -1 ? body : body.slice(0, nl)).trim();
-    const rest = nl === -1 ? "" : body.slice(nl + 1);
-
-    let sectionText = `## ${heading}\n${rest}`.trim();
-    if (!sectionText) continue;
-
-    if (sectionText.length <= max) {
-      out.push(sectionText);
+    if (candidate.length <= max) {
+      buf = candidate;
     } else {
-      out.push(...splitText(sectionText, max));
+      flush();
+
+      if (p.length <= max) {
+        buf = p;
+      } else {
+        let start = 0;
+        while (start < p.length) {
+          out.push(p.slice(start, start + max).trim());
+          start += max;
+        }
+        buf = "";
+      }
     }
   }
 
+  flush();
   return out;
 }
+
+function cleanRawText(raw: string): string {
+  return raw
+    .replace(/^===== FILE:[^\n]*\n/gi, "")
+    .replace(/===== END FILE =====/gi, "")
+    .trim();
+}
+
+function splitDocBySection(raw: string, max = 1400): string[] {
+  const text = cleanRawText(raw);
+  const sections = text.split(/^##\s+/m);
+  const results: string[] = [];
+
+  if (sections[0]?.trim()) {
+    results.push(...splitByParagraph(sections[0].trim(), max));
+  }
+
+  for (let i = 1; i < sections.length; i++) {
+    const sec = sections[i];
+
+    const nlIndex = sec.indexOf("\n");
+    const heading = (nlIndex === -1 ? sec : sec.slice(0, nlIndex)).trim();
+    const body = nlIndex === -1 ? "" : sec.slice(nlIndex + 1).trim();
+
+    if (!heading && !body) continue;
+
+    const full = (`## ${heading}\n${body}`).trim();
+
+    if (full.length <= max) {
+      results.push(full);
+    } else {
+      const paragraphs = splitByParagraph(body, max);
+      if (paragraphs.length === 0) {
+        results.push(...splitByParagraph(full, max));
+        continue;
+      }
+
+      const [firstPara, ...rest] = paragraphs;
+      let firstChunk = (`## ${heading}\n${firstPara}`).trim();
+      if (firstChunk.length <= max) {
+        results.push(firstChunk);
+      } else {
+        results.push(...splitByParagraph(firstChunk, max));
+      }
+
+      results.push(...rest);
+    }
+  }
+
+  return results;
+}
+
+/* ─────────────────────────────────────────────
+   2) Helpers: file & role detection
+   ───────────────────────────────────────────── */
 
 const fileExists = (p: string) => {
   try {
@@ -67,19 +118,15 @@ const fileExists = (p: string) => {
 
 const DOC_ROOT = path.join(process.cwd(), "docs");
 
-// map theo THƯ MỤC
-function detectRoleByPath(filePath: string):
-  | "KITCHEN"
-  | "WAITER"
-  | "CASHIER"
-  | "MANAGER"
-  | "ALL" {
+type RagRole = "KITCHEN" | "WAITER" | "CASHIER" | "MANAGER" | "ALL";
+
+function detectRoleByPath(filePath: string): RagRole {
   const s = filePath.toLowerCase().replace(/\\/g, "/");
   if (s.includes("/kitchen/")) return "KITCHEN";
   if (s.includes("/waiter/")) return "WAITER";
   if (s.includes("/cashier/")) return "CASHIER";
   if (s.includes("/manager/")) return "MANAGER";
-  return "ALL"; // general, hr, ...
+  return "ALL";
 }
 
 function buildPatterns(cliArgs: string[]): string[] {
@@ -107,8 +154,28 @@ async function readTargets(cliArgs: string[]) {
     const abs = path.resolve(process.cwd(), arg);
     if (fileExists(abs) && !files.includes(abs)) files.push(abs);
   }
+
   return files;
 }
+
+/** UUID v5-like deterministic từ baseName + index (Qdrant chấp nhận như UUID) */
+function makeDeterministicUUID(baseName: string, index: number): string {
+  const hash = createHash("sha1")
+    .update(`${baseName}::${index}`)
+    .digest("hex"); // 40 kí tự
+  // format thành 8-4-4-4-12 = 32 hex (bỏ bớt phần dư)
+  return [
+    hash.slice(0, 8),
+    hash.slice(8, 12),
+    hash.slice(12, 16),
+    hash.slice(16, 20),
+    hash.slice(20, 32),
+  ].join("-");
+}
+
+/* ─────────────────────────────────────────────
+   3) MAIN
+   ───────────────────────────────────────────── */
 
 async function run() {
   const app = await NestFactory.createApplicationContext(AppModule, {
@@ -123,7 +190,8 @@ async function run() {
   if (!files.length) {
     console.log(
       "⚠️ Không tìm thấy file docs.\n" +
-        "Ví dụ: npx ts-node -r tsconfig-paths/register -r dotenv/config src/scripts/rag.ingest.ts ./docs/**/*.txt",
+        "Ví dụ: npx ts-node -r tsconfig-paths/register -r dotenv/config " +
+        "src/scripts/rag.ingest.ts ./docs/**/*.txt",
     );
   }
 
@@ -134,45 +202,48 @@ async function run() {
     console.log("ℹ️ RAG_RESET!=1 → giữ nguyên dữ liệu cũ, chỉ upsert thêm/ghi đè.");
   }
 
-for (const f of files) {
-  const ext = path.extname(f).toLowerCase();
-  if (ext !== ".txt" && ext !== ".md") {
-    console.log("⏭ skip (not txt/md):", f);
-    continue;
+  for (const f of files) {
+    const ext = path.extname(f).toLowerCase();
+    if (ext !== ".txt" && ext !== ".md") {
+      console.log("⏭ skip (not txt/md):", f);
+      continue;
+    }
+
+    const baseName = path.basename(f);
+
+    // Nếu có file nào muốn skip (ví dụ sop_ menu), giữ rule này
+    if (baseName.startsWith("sop_")) {
+      console.log("⏭ skip SOP menu file:", baseName);
+      continue;
+    }
+
+    const raw = await fs.readFile(f, "utf8");
+    const chunks = splitDocBySection(raw, 1400);
+    const role = detectRoleByPath(f);
+
+    console.log(
+      `📚 Ingest file: ${baseName} (role=${role}) → ${chunks.length} chunk(s)`,
+    );
+
+    for (let i = 0; i < chunks.length; i++) {
+      const meta: any = {
+        source: baseName,
+        absPath: f,
+        index: i,
+        role,
+      };
+
+      const pointId = makeDeterministicUUID(baseName, i);
+
+      console.log(`   ↳ chunk ${i} (id=${pointId})`);
+
+      await rag.upsertDocChunk({
+        id: pointId,
+        text: chunks[i],
+        meta,
+      });
+    }
   }
-
-  const baseName = path.basename(f);
-
-  // 🚫 1) BỎ QUA CÁC FILE SOP MENU (sop_noi_quy_lao_dong.txt, sop_*.txt)
-  if (baseName.startsWith("sop_")) {
-    console.log("⏭ skip SOP menu file:", baseName);
-    continue;
-  }
-
-  const raw = await fs.readFile(f, "utf8");
-
-  const chunks = splitDocBySection(raw, 1200);
-
-  const role = detectRoleByPath(f);
-
-  for (let i = 0; i < chunks.length; i++) {
-    const meta: any = {
-      source: baseName,
-      absPath: f,
-      index: i,
-      role,
-    };
-
-    console.log(`📄 docs → ${baseName} [${role}] chunk ${i}`);
-    await rag.upsertDocChunk({
-      id: randomUUID(),
-      text: chunks[i],
-      meta,
-    });
-  }
-}
-
-
 
   await app.close();
 }

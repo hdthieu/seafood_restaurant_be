@@ -103,6 +103,15 @@ export class PurchasereturnService {
         const baseQty = this.roundQty(qty * factor);
 
         const before = Number(inv.quantity);
+        console.log('RETURN_STOCK_CHECK', {
+  invId: inv.id,
+  before,
+  baseQty,
+  factor,
+  qty,
+  receivedUomCode,
+  baseCode,
+});
         if (before + 1e-6 < baseQty) throw new ResponseException(null, 400, `INSUFFICIENT_STOCK_FOR_RETURN:${inv.id}`);
         const after = this.roundQty(before - baseQty);
         inv.quantity = after as any;
@@ -632,44 +641,69 @@ export class PurchasereturnService {
     }
 
     // === TRƯỜNG HỢP POSTED (Giữ nguyên logic cũ, chỉ cho sửa tiền trả) ===
-    if (pr.status === PurchaseReturnStatus.POSTED) {
-      const forbidden = ['items', 'supplierId', 'reason', 'discount'];
-      for (const k of forbidden) {
-        if ((dto as any)[k] !== undefined) {
-          throw new ResponseException(null, 400, 'CANNOT_UPDATE_POSTED_OTHER_THAN_REFUND_AMOUNT');
-        }
+   
+  // === TRƯỜNG HỢP POSTED (chỉ cho sửa tiền & số cần hoàn, tạo bút toán phần chênh lệch) ===
+  if (pr.status === PurchaseReturnStatus.POSTED) {
+    const forbidden = ['items', 'supplierId', 'reason', 'discount'];
+    for (const k of forbidden) {
+      if ((dto as any)[k] !== undefined) {
+        // Không cho sửa các trường này khi đã POSTED
+        throw new ResponseException(null, 400, 'CANNOT_UPDATE_POSTED_OTHER_THAN_MONEY');
       }
-
-      if ((dto as any).refundAmount == null && (dto as any).paidAmount == null) {
-        throw new ResponseException(null, 400, 'MUST_PROVIDE_REFUND_OR_PAID_AMOUNT');
-      }
-
-      return this.ds.transaction(async (em) => {
-        const prTx = await em.getRepository(PurchaseReturn).findOne({ where: { id: pr.id } });
-        if (!prTx) throw new ResponseException(null, 404, 'PURCHASE_RETURN_NOT_FOUND_IN_TX');
-
-        const ra = (dto as any).refundAmount != null ? this.roundMoney(Number((dto as any).refundAmount ?? 0)) : this.roundMoney(Number(prTx.refundAmount ?? 0));
-        if (ra < 0) throw new ResponseException(null, 400, 'INVALID_REFUND_AMOUNT');
-
-        const paNew = (dto as any).paidAmount != null ? this.roundMoney(Number((dto as any).paidAmount ?? 0)) : this.roundMoney(Number(prTx.paidAmount ?? 0));
-        if (paNew < 0) throw new ResponseException(null, 400, 'INVALID_PAID_AMOUNT');
-        if (paNew > ra) throw new ResponseException(null, 400, 'PAID_AMOUNT_EXCEEDS_REFUND');
-
-        const paidBefore = this.roundMoney(Number(prTx.paidAmount ?? 0));
-        const delta = this.roundMoney(paNew - paidBefore);
-
-        prTx.refundAmount = ra;
-        prTx.paidAmount = paNew;
-
-        await em.getRepository(PurchaseReturn).save(prTx);
-
-        if (delta > 0) {
-          await this.cashbookService.postReceiptFromPurchaseReturn(em, prTx, delta);
-        }
-
-        return prTx;
-      });
     }
+
+    // Bắt buộc phải gửi ít nhất 1 trong 2: refundAmount hoặc paidAmount
+    if ((dto as any).refundAmount == null && (dto as any).paidAmount == null) {
+      throw new ResponseException(null, 400, 'MUST_PROVIDE_REFUND_OR_PAID_AMOUNT');
+    }
+
+    return this.ds.transaction(async (em) => {
+      const prTx = await em.getRepository(PurchaseReturn).findOne({
+        where: { id: pr.id },
+        relations: ['supplier'],
+      });
+      if (!prTx) throw new ResponseException(null, 404, 'PURCHASE_RETURN_NOT_FOUND_IN_TX');
+
+      // Số cần hoàn mới (nếu không gửi thì giữ như cũ)
+      const ra = (dto as any).refundAmount != null
+        ? this.roundMoney(Number((dto as any).refundAmount ?? 0))
+        : this.roundMoney(Number(prTx.refundAmount ?? 0));
+
+      if (ra < 0) throw new ResponseException(null, 400, 'INVALID_REFUND_AMOUNT');
+
+      // Tổng NCC đã trả mới (FE gửi TỔNG MỚI, KHÔNG gửi delta)
+      const paNew = (dto as any).paidAmount != null
+        ? this.roundMoney(Number((dto as any).paidAmount ?? 0))
+        : this.roundMoney(Number(prTx.paidAmount ?? 0));
+
+      if (paNew < 0) throw new ResponseException(null, 400, 'INVALID_PAID_AMOUNT');
+      if (paNew > ra) throw new ResponseException(null, 400, 'PAID_AMOUNT_EXCEEDS_REFUND');
+
+      const paidBefore = this.roundMoney(Number(prTx.paidAmount ?? 0));
+      const delta = this.roundMoney(paNew - paidBefore);
+
+      // Cập nhật lại header
+      prTx.refundAmount = ra;
+      prTx.paidAmount = paNew;
+      prTx.debt = this.roundMoney(ra - paNew); // cập nhật NCC còn nợ
+
+      await em.getRepository(PurchaseReturn).save(prTx);
+
+      // Tạo bút toán phần chênh lệch:
+      // - delta > 0  => NCC trả thêm tiền => PHIẾU THU
+      // - delta < 0  => trả lại bớt cho NCC => PHIẾU CHI
+      if (delta > 0) {
+        await this.cashbookService.postReceiptFromPurchaseReturn(em, prTx, delta);
+      } else if (delta < 0) {
+        await this.cashbookService.postPaymentFromPurchaseReturn(em, prTx, -delta);
+      }
+
+      return prTx;
+    });
+  }
+
+
+
     throw new ResponseException(null, 400, 'CANNOT_UPDATE_IN_CURRENT_STATUS');
   }
 

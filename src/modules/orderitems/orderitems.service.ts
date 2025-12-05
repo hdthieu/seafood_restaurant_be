@@ -13,8 +13,9 @@ import {
 
 import { OrderItem } from './entities/orderitem.entity';
 import { Order } from 'src/modules/order/entities/order.entity';
+import { VoidEvent } from '../order/entities/void-event.entity';
 import { OrderStatusHistory } from '../orderstatushistory/entities/orderstatushistory.entity';
-
+import { User } from 'src/modules/user/entities/user.entity';
 import { ItemStatus, OrderStatus } from 'src/common/enums';
 import { UpdateItemsStatusDto } from './dto/update-items-status.dto';
 import { Ingredient } from '../ingredient/entities/ingredient.entity';
@@ -216,16 +217,29 @@ async cancelItems(dto: CancelItemsDto , userId: string) {
       it.cancelledBy = staff;
     }
     await iRepo.save(rows);
-
-    // ✅ DỌN TICKET BẾP: soft-delete theo orderItemId
+for (const it of rows) {
+      await this.logVoid(em, {
+        orderId: it.order.id,
+        menuItemId: it.menuItem.id,
+        qty: Number(it.quantity),
+        source: 'cashier',       // hoặc 'waiter' tùy API
+        by: staff,
+        reason,
+      });
+    }
+    //  DỌN TICKET BẾP: soft-delete theo orderItemId
     await tRepo.softDelete({ orderItemId: In(itemIds) });
 
-    // // ✅ Emit cho bếp ẩn ngay (FE dùng orderItemId làm key)
+    // //  Emit cho bếp ẩn ngay (FE dùng orderItemId làm key)
     // this.gw.emitTicketsVoided({
     //   orderId: rows[0].order.id,
     //   ticketIds: itemIds,        // <-- quan trọng
     //  by: "cashier",
     // });
+
+
+
+
 for (const it of rows) {
   this.gw.emitVoidSynced({
     orderId: it.order.id,
@@ -305,6 +319,14 @@ async cancelPartial(dto: CancelPartialDto, userId: string) {
       });
       await iRepo.save(cancelled);
     }
+await this.logVoid(em, {
+  orderId: it.order.id,
+  menuItemId: it.menuItem.id,
+  qty: dto.qty,
+  source: 'cashier',
+  by: staff,
+  reason: dto.reason ?? null,
+});
 
     // GỠ TICKET Ở BẾP (nếu bạn đã tách KitchenTicket)
     await this.kitchenSvc.voidTicketsByMenu({
@@ -473,5 +495,50 @@ async moveOne(itemId: string, to: ItemStatus) {
 
   return { ok: true, id: it.id, note };
 }
+
+
+
+private async logVoid(
+  em: EntityManager,
+  params: {
+    orderId: string;
+    menuItemId: string;
+    qty: number;
+    source: 'cashier' | 'waiter' | 'kitchen';
+    by?: string | null;      // userId
+    reason?: string | null;
+  },
+) {
+  const order = await em.getRepository(Order).findOne({
+    where: { id: params.orderId },
+    relations: ['table'],
+  });
+  if (!order) return;
+
+  const evRepo = em.getRepository(VoidEvent);
+
+let byUser: User | null = null;
+
+if (params.by) {
+  byUser = await em.getRepository(User).findOne({
+    where: { id: params.by },
+    relations: ['profile'],
+  });
+}
+
+  const ev = evRepo.create({
+    order,
+    table: order.table ?? null,
+    menuItem: { id: params.menuItemId } as any,
+    qty: params.qty,
+    source: params.source,
+    by: params.by ?? null, 
+    reason: params.reason ?? null,
+    createdBy: byUser,
+  });
+
+  await evRepo.save(ev);
+}
+
 
 }

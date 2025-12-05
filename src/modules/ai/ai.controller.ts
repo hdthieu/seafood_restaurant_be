@@ -1,7 +1,9 @@
 import { Body, Controller, Post } from "@nestjs/common";
 import { AiService } from "./ai.service";
 import { ChatRequestDto, ChatResponseDto } from "../ai/dto/ai.chat.dto";
-
+import { JwtAuthGuard } from "@modules/core/auth/guards/jwt-auth.guard";
+import { UseGuards } from "@nestjs/common";
+@UseGuards(JwtAuthGuard)
 @Controller("api/ai")
 export class AiController {
   constructor(private readonly ai: AiService) {}

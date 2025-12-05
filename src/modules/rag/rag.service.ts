@@ -5,7 +5,7 @@ import { LlmGateway } from "../ai/llm.gateway";
 import { GatewayEmbeddings } from "./langchain-embeddings";
 import { QdrantVectorStore } from "@langchain/qdrant";
 import { Document } from "@langchain/core/documents";
-
+export type RagRole = "KITCHEN" | "WAITER" | "CASHIER" | "MANAGER" | "ALL";
 export type RagHit = {
   text: string;
   score?: number;
@@ -213,24 +213,25 @@ export class RagService {
       )
       .join("\n\n---\n\n");
 
-    const sys = `
+   const sys = `
 Bạn là trợ lý nội bộ của nhà hàng.
 
 NHIỆM VỤ:
-- Chỉ dựa vào phần "Tài liệu" bên dưới để trả lời.
+- Chỉ dựa vào phần "Tài liệu" để trả lời.
 - Trả lời NGẮN GỌN, đúng TRỌNG TÂM câu hỏi.
 - Nếu câu hỏi dạng "quy trình", "các bước", "workflow":
-  → Chỉ trích đúng các bước liên quan, theo dạng:
+  → Trả lời theo dạng:
     1) ...
     2) ...
     3) ...
-- Không được đưa nội dung từ các phần SOP khác nếu không liên quan.
-- Nếu tài liệu có 1 phần liên quan, phải dùng phần đó để trả lời.
-- Chỉ trả đúng câu: "Không tìm thấy trong tài liệu."
-  khi thật sự không có thông tin nào liên quan.
+- Nếu tài liệu có thông tin liên quan, BẮT BUỘC phải dùng để trả lời.
+- Chỉ được trả lời đúng 1 câu:
+  "Không tìm thấy trong tài liệu."
+  khi thật sự KHÔNG có thông tin liên quan NÀO trong toàn bộ tài liệu.
 
-Trả lời tiếng Việt.
+Trả lời tiếng Việt thân thiện, rõ ràng.
 `.trim();
+
 
     const usr = `Câu hỏi: ${question}\n\nTài liệu:\n${context || "(trống)"}`;
 
@@ -526,185 +527,233 @@ Hãy trả về danh sách chỉ số (ví dụ: "0, 2, 1, 3").
     return reordered;
   }
 
-  // ========== Fallback chọn doc tốt nhất (khi rerank lỗi) ==========
+ async askWithLangChain(
+  question: string,
+  opts?: {
+    topK?: number;
+    role?: "KITCHEN" | "WAITER" | "CASHIER" | "MANAGER" | "ALL";
+    scoreThreshold?: number; // tạm chưa dùng vì LangChain không trả score
+  },
+) {
+  await this.ensureCollection(this.docCollection);
+  await this.ensureDocPayloadIndexes();
 
+  const topK = opts?.topK ?? Number(process.env.RAG_TOPK || 40);
+  const role = opts?.role;
 
+  const store = await this.getVectorStore();
 
-  // ========== askWithLangChain (vector + expand + rerank + fallback) ==========
+  // ===== 1) Filter theo role =====
+  const must: any[] = [];
+  const q = question.toLowerCase();
+  let deptRole: RagRole | null = null;
 
-  async askWithLangChain(
-    question: string,
-    opts?: {
-      topK?: number;
-      role?: "KITCHEN" | "WAITER" | "CASHIER" | "MANAGER" | "ALL";
-      scoreThreshold?: number;
-    },
+  if (q.includes("bếp") || q.includes("bep") || q.includes("kitchen")) {
+    deptRole = "KITCHEN";
+  } else if (
+    q.includes("phục vụ") ||
+    q.includes("phuc vu") ||
+    q.includes("waiter")
   ) {
-    await this.ensureCollection(this.docCollection);
-    await this.ensureDocPayloadIndexes();
+    deptRole = "WAITER";
+  } else if (
+    q.includes("thu ngân") ||
+    q.includes("thu ngan") ||
+    q.includes("cashier")
+  ) {
+    deptRole = "CASHIER";
+  } else if (
+    q.includes("quản lý") ||
+    q.includes("quan ly") ||
+    q.includes("manager")
+  ) {
+    deptRole = "MANAGER";
+  }
 
-    const topK = opts?.topK ?? Number(process.env.RAG_TOPK || 40);
-    const role = opts?.role;
+ let roleFilter: RagRole | null = null;
 
-    const store = await this.getVectorStore();
+// đoán bộ phận theo câu hỏi
+if (deptRole) {
+  roleFilter = deptRole;
+} else if (role && role !== "ALL" && role !== "MANAGER") {
+  // 👈 MANAGER coi như ALL, không filter
+  roleFilter = role;
+}
 
-    const must: any[] = [];
+if (roleFilter) {
+  must.push({
+    key: "metadata.role",
+    match: { any: [roleFilter, "ALL"] },
+  });
+}
 
-    // đoán bộ phận
-    const q = question.toLowerCase();
-    let deptRole:
-      | "KITCHEN"
-      | "WAITER"
-      | "CASHIER"
-      | "MANAGER"
-      | null = null;
 
-    if (q.includes("bếp") || q.includes("bep") || q.includes("kitchen")) {
-      deptRole = "KITCHEN";
-    } else if (
-      q.includes("phục vụ") ||
-      q.includes("phuc vu") ||
-      q.includes("waiter")
-    ) {
-      deptRole = "WAITER";
-    } else if (
-      q.includes("thu ngân") ||
-      q.includes("thu ngan") ||
-      q.includes("cashier")
-    ) {
-      deptRole = "CASHIER";
-    } else if (
-      q.includes("quản lý") ||
-      q.includes("quan ly") ||
-      q.includes("manager")
-    ) {
-      deptRole = "MANAGER";
-    }
+  const filter = must.length ? { must } : undefined;
 
-    let roleFilter:
-      | "KITCHEN"
-      | "WAITER"
-      | "CASHIER"
-      | "MANAGER"
-      | null = null;
-    if (deptRole) {
-      roleFilter = deptRole;
-    } else if (role && role !== "ALL" && role !== "MANAGER") {
-      roleFilter = role;
-    }
+  // ===== 2) Query expansion + vector search =====
+  const enrichedQuestion = this.buildEnrichedQuestion(question);
 
-    if (roleFilter) {
-      must.push({
-        key: "metadata.role",
-        match: { any: [roleFilter, "ALL"] },
-      });
-    }
+  const docs = (await store.similaritySearch(
+    enrichedQuestion,
+    topK,
+    filter,
+  )) as Document[];
 
-    const filter = must.length ? { must } : undefined;
-
-    // 1) Query expansion
-    const enrichedQuestion = this.buildEnrichedQuestion(question);
-
-    // 2) Vector search
-    const docs = (await store.similaritySearch(
-      enrichedQuestion,
-      topK,
-      filter,
-    )) as Document[];
-
+  this.log.log(
+    `[RAG] [LangChain] query="${question}" enriched="${enrichedQuestion}" docs=${docs.length}`,
+  );
+  docs.forEach((d: any, i) => {
     this.log.log(
-      `[RAG] [LangChain] query="${question}" enriched="${enrichedQuestion}" docs=${docs.length}`,
+      `[RAG] [${i}] src=${d.metadata?.source} idx=${d.metadata?.index} role=${d.metadata?.role}`,
     );
-    docs.forEach((d: any, i) => {
-      this.log.log(
-        `[RAG] [${i}] src=${d.metadata?.source} idx=${d.metadata?.index} role=${d.metadata?.role}`,
-      );
-    });
+  });
 
-    if (!docs.length) {
-      return {
-        answer: "Không tìm thấy trong tài liệu.",
-        sources: [],
-      };
-    }
+  if (!docs.length) {
+    return {
+      answer: "Không tìm thấy trong tài liệu.",
+      sources: [],
+    };
+  }
 
-    // 3) LLM rerank (B) – an toàn nhất, nhưng có thể timeout
-    let rankedDocs = docs;
-    try {
-      rankedDocs = await this.rerankDocsWithLLM(docs, question);
-    } catch (e: any) {
-      this.log.warn(
-        `[RAG] rerankDocsWithLLM error: ${e?.message || e}`,
-      );
-      // nếu lỗi thì rankedDocs giữ nguyên = docs
-    }
+  // ===== 3) Rerank bằng LLM (nếu lỗi thì giữ nguyên) =====
+  let rankedDocs = docs;
+  try {
+    rankedDocs = await this.rerankDocsWithLLM(docs, question);
+  } catch (e: any) {
+    this.log.warn(`[RAG] rerankDocsWithLLM error: ${e?.message || e}`);
+  }
 
-    // 4) Fallback heuristic chọn doc tốt nhất
-    const best = rankedDocs[0];
-    const bestSource = (best as any).metadata?.source as
-      | string
-      | undefined;
+  // ===== 4) Chọn doc dùng làm context (giới hạn cho gọn) =====
+  const MAX_CONTEXT_DOCS = 6;
 
-    // 5) Lấy tất cả chunk cùng file (để ghép nguyên văn)
-    let sameSourceDocs: any[] = [];
+  // Option: ưu tiên các chunk cùng source với doc tốt nhất, nhưng vẫn giới hạn số lượng
+  const bestSource = (rankedDocs[0] as any).metadata?.source as
+    | string
+    | undefined;
 
-    if (bestSource) {
-      const sourceFilter = {
+  let selectedDocs: Document[];
+  if (bestSource) {
+    const sameSource = rankedDocs.filter(
+      (d: any) => d.metadata?.source === bestSource,
+    );
+    sameSource.sort(
+      (a: any, b: any) => (a.metadata?.index ?? 0) - (b.metadata?.index ?? 0),
+    );
+    selectedDocs = sameSource.slice(0, MAX_CONTEXT_DOCS);
+  } else {
+    selectedDocs = rankedDocs.slice(0, MAX_CONTEXT_DOCS);
+  }
+
+  const context = selectedDocs
+    .map((d: any, i) => {
+      let txt = d.pageContent ?? d.page_content ?? "";
+      txt = String(txt)
+        .replace(/^=+\s*FILE:[^\n]*\n/gi, "")
+        .trim();
+      return `[#${i + 1}] source=${d.metadata?.source ?? ""}\n${txt}`;
+    })
+    .join("\n\n---\n\n");
+
+  // ===== 5) Gọi LLM trả lời dựa trên context =====
+  const sys = `
+Bạn là trợ lý nội bộ của nhà hàng.
+
+NHIỆM VỤ:
+- Chỉ dựa vào phần "Tài liệu" để trả lời.
+- Trả lời NGẮN GỌN, đúng TRỌNG TÂM câu hỏi.
+- Nếu câu hỏi dạng "quy trình", "các bước", "workflow":
+  → Trả lời theo dạng:
+    1) ...
+    2) ...
+    3) ...
+- Không bịa, không thêm nội dung bên ngoài.
+- Nếu thật sự không có thông tin liên quan, trả lời đúng 1 câu:
+  "Không tìm thấy trong tài liệu."
+
+Trả lời tiếng Việt thân thiện, rõ ràng.
+`.trim();
+
+  const usr = `
+Câu hỏi: ${question}
+
+Tài liệu:
+${context || "(trống)"}
+`.trim();
+
+  // ... sau khi build `context` và gọi LLM:
+
+let answer = "";
+try {
+  answer = (await this.llm.chat(sys, usr, 28_000)) || "";
+} catch (e) {
+  this.log.warn(
+    `[RAG.askWithLangChain] llm.chat error: ${
+      e instanceof Error ? e.message : e
+    }`,
+  );
+}
+
+// ===== Fallback thông minh =====
+const hasDocs = rankedDocs.length > 0;
+const normAnswer = (answer || "").toLowerCase().normalize("NFC");
+
+// Nếu LLM bảo "không tìm thấy" nhưng thực ra MÌNH có docs → không cho nói câu đó
+const looksLikeNotFound =
+  normAnswer.includes("không tìm thấy trong tài liệu") ||
+  normAnswer.includes("khong tim thay trong tai lieu");
+
+if ((!answer || !answer.trim()) && hasDocs) {
+  // LLM im luôn → show context
+  this.log.warn(
+    `[RAG.askWithLangChain] Empty answer but has docs, using context fallback.`,
+  );
+  answer =
+    "Theo tài liệu nội bộ, thông tin liên quan như sau:\n\n" + context;
+} else if (looksLikeNotFound && hasDocs) {
+  // LLM nói "không tìm thấy" mà thực tế có doc → override
+  this.log.warn(
+    `[RAG.askWithLangChain] LLM said 'không tìm thấy' but docs exist, overriding with context.`,
+  );
+  answer =
+    "Theo tài liệu nội bộ, hệ thống tìm được các nội dung sau (bạn xem và áp dụng phù hợp):\n\n" +
+    context;
+}
+
+// Nếu thực sự KHÔNG có docs → mới cho nói "Không tìm thấy trong tài liệu."
+if (!answer?.trim() && !hasDocs) {
+  answer = "Không tìm thấy trong tài liệu.";
+}
+
+return {
+  answer: answer.trim(),
+  sources: selectedDocs.map((d: any, i) => ({
+    index: i + 1,
+    source: d.metadata?.source,
+    role: d.metadata?.role,
+  })),
+};
+}
+// src/modules/rag/rag.service.ts
+
+async deleteDocsBySource(source: string) {
+  await this.ensureCollection(this.docCollection);
+  try {
+    await this.qdrant.delete(this.docCollection as any, {
+      filter: {
         must: [
           {
             key: "metadata.source",
-            match: { value: bestSource },
+            match: { value: source },
           },
         ],
-      };
-
-      const allDocsForSource = (await store.similaritySearch(
-        bestSource,
-        64,
-        sourceFilter,
-      )) as any[];
-
-      sameSourceDocs = allDocsForSource;
-    } else {
-      sameSourceDocs = rankedDocs as any[];
-    }
-
-    sameSourceDocs.sort(
-      (a, b) => (a.metadata?.index ?? 0) - (b.metadata?.index ?? 0),
+      },
+    } as any);
+    this.log.log(`[RAG] Deleted docs for source=${source}`);
+  } catch (e: any) {
+    this.log.warn(
+      `[RAG] deleteDocsBySource(${source}) error: ${e?.message || e}`,
     );
-
-    let answerText = sameSourceDocs
-      .map((d) => {
-        let txt = (d.pageContent ||
-          (d as any).page_content ||
-          "") as string;
-
-        txt = txt.replace(/^=+\s*FILE:[^\n]*\n/gi, "").trim();
-
-        return txt;
-      })
-      .filter((t) => t.length > 0)
-      .join("\n\n");
-
-    // Cắt block UI nếu lỡ còn
-    answerText = answerText
-      .replace(
-        /Tài liệu quy định[\s\S]*?Nguồn tham chiếu[^\n]*\n?/gi,
-        "",
-      )
-      .trim();
-
-    if (!answerText.trim()) {
-      answerText = "Không tìm thấy trong tài liệu.";
-    }
-
-    return {
-      answer: answerText,
-      sources: sameSourceDocs.map((d: any) => ({
-        source: d.metadata?.source,
-        index: d.metadata?.index,
-        score: d.metadata?.score,
-      })),
-    };
   }
+}
+
 }

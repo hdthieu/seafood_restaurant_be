@@ -28,7 +28,8 @@ export class KitchenTicket {
  
    @Column({ name: 'order_item_id', type: 'uuid', nullable: true })
   orderItemId?: string | null;
-  @CreateDateColumn() createdAt: Date;
+   @CreateDateColumn({ type: 'timestamptz' })
+  createdAt: Date;
 
   @Column({ type: 'varchar', length: 255, nullable: true })
 cancelReason?: string | null;
