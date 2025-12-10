@@ -40,12 +40,14 @@ export type WaiterOrderCancelledPayload = {
   orderId: string;
   tableName: string | null;
   title: string;
-  message: string | null | undefined;  // ✔ Cho phép null/undefined
-  createdAt: string | Date;
+  message: string;
+  createdAt: Date | string;
   reason?: string | null;
   by?: string | null;
-  waiterId?: string;
+  waiterId: string;                // 👈 thêm
 };
+
+
 
 export type NotifyItemsToKitchenPayload = {
   orderId: string;
@@ -105,17 +107,22 @@ export class KitchenGateway implements OnGatewayConnection, OnGatewayDisconnect 
   this.server.to('kitchen').emit('orders:split', payload);
 }
 
-emitWaiterOrderCancelled(payload: WaiterOrderCancelledPayload) {
-    // bắn cho tất cả waiter (để chắc chắn nhận được)
-    this.server.to('waiter').emit('waiter:order_cancelled', payload);
 
-    // nếu có waiterId thì bắn thêm vào room riêng
-    if (payload.waiterId) {
-      this.server
-        .to(`waiter:${payload.waiterId}`)
-        .emit('waiter:order_cancelled', payload);
-    }
-  }
+emitWaiterOrderCancelled(payload: WaiterOrderCancelledPayload) {
+  const norm = {
+    ...payload,
+    createdAt:
+      payload.createdAt instanceof Date
+        ? payload.createdAt.toISOString()
+        : payload.createdAt,
+  };
+
+  // ✅ gửi đúng room waiter:<waiterId>
+  this.server
+    .to(`waiter:${payload.waiterId}`)
+    .emit('waiter:order_cancelled', norm);
+}
+
 
  emitItemNoteUpdated(payload: {
     orderId: string;

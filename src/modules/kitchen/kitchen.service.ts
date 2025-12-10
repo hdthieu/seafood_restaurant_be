@@ -38,11 +38,13 @@ type KitchenVoidPayload = {
   orderId: string;
   menuItemId: string;
   orderItemId: string | null;
+  menuItemName?: string | null;   // 👈 THÊM
   qty: number;
   reason?: string;
   by?: string;
   ticketId: string;
 };
+
 const LIVE_STATUSES = ['PENDING', 'CONFIRMED', 'PREPARING', 'READY', 'SERVED'] as const;
 @Injectable()
 export class KitchenService {
@@ -59,42 +61,82 @@ export class KitchenService {
     private readonly dataSource: DataSource,
      private readonly waiterNotifSvc: WaiterNotificationsService, 
   ) { }
+
 private async notifyWaiterOrderCancelled(opts: {
   orderId: string;
   reason?: string;
-  by?: string;
+  by?: string;              // 'kitchen' | 'cashier' | 'system'
+  menuItemName?: string | null;
+  qty?: number;
 }) {
   const order = await this.orderRepo.findOne({
     where: { id: opts.orderId },
     relations: ['createdBy', 'table'],
   });
-
   if (!order?.createdBy?.id) return;
 
   const waiterId = order.createdBy.id;
 
+  // rawBy = lưu DB
+  const rawBy: 'kitchen' | 'cashier' | 'system' =
+    opts.by === 'kitchen' || opts.by === 'cashier' ? opts.by : 'system';
+
+  // byLabel = hiển thị
+  const byLabel =
+    rawBy === 'kitchen' ? 'Bếp'
+    : rawBy === 'cashier' ? 'Thu ngân'
+    : 'Hệ thống';
+
+  const headerLine = order.table
+    ? `Bàn ${order.table.name} - Bởi: ${byLabel}`
+    : `Bởi: ${byLabel}`;
+
+  const itemLine = opts.menuItemName
+    ? `Món: ${opts.menuItemName}${
+        opts.qty && opts.qty > 1 ? ` x${opts.qty}` : ''
+      }`
+    : '';
+
+  // 👇 thêm dòng “Đã huỷ: X phần” cho rõ
+  const qtyLine =
+    opts.qty && opts.qty > 0 ? `Đã huỷ: ${opts.qty} phần` : '';
+
+  const reasonLine = opts.reason ? `Lý do: ${opts.reason}` : '';
+
+  const message = [headerLine, itemLine, qtyLine, reasonLine]
+    .filter(Boolean)
+    .join('\n');
+
+  // lưu DB: truyền message đã build, KHÔNG để service tự thêm lý do nữa
   const noti = await this.waiterNotifSvc.createOrderCancelled({
     waiterId,
     order,
     reason: opts.reason,
-    by: opts.by,
+    by: rawBy,
+    title: 'Món trong đơn đã bị huỷ',
+    message,                         // 👈 QUAN TRỌNG
   });
 
+  // payload socket
   const payload = {
     id: noti.id,
     orderId: order.id,
     tableName: order.table?.name ?? null,
     title: noti.title,
-    message: noti.message,
-    createdAt: noti.createdAt,
-    reason: opts.reason,
-    by: opts.by,
-    waiterId, // 👈 để gateway biết room riêng
+    message,
+    createdAt: noti.createdAt.toISOString?.() ?? noti.createdAt,
+    reason: opts.reason ?? null,
+    by: byLabel,
+    waiterId,
   };
 
-  // ✅ gọi helper vừa thêm
   this.gw.emitWaiterOrderCancelled(payload);
 }
+
+
+
+
+
 
 
 
@@ -627,6 +669,7 @@ await this.orderItemsSvc['logVoid'](em, {
           orderId: t.order.id,
           menuItemId: t.menuItem?.id ?? (t as any).menuItemId,
           orderItemId: t.orderItemId ?? null,
+           menuItemName: t.menuItem?.name ?? null, 
           qty: cancelQty,
           reason,
           by,
@@ -658,10 +701,12 @@ await this.orderItemsSvc['logVoid'](em, {
       this.gw.server.to("waiter").emit("kitchen:ticket_cancelled", payload);
 
        await this.notifyWaiterOrderCancelled({
-      orderId: payload.orderId,
-      reason: payload.reason,
-      by: payload.by,
-    });
+    orderId: payload.orderId,
+    reason: payload.reason,
+    by:"kitchen",
+    menuItemName: payload.menuItemName ?? null,
+    qty: payload.qty,
+  });
     }
 
     return { ok: true, ticketId };

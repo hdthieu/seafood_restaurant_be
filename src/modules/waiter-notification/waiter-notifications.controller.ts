@@ -2,6 +2,7 @@ import { Controller, Get, Patch, Param, UseGuards } from '@nestjs/common';
 import { WaiterNotificationsService } from './waiter-notifications.service';
 import { JwtAuthGuard } from 'src/modules/core/auth/guards/jwt-auth.guard';
 import { CurrentUser } from 'src/common/decorators/user.decorator';
+import { Body } from '@nestjs/common';
 
 @Controller('waiter-notifications')
 @UseGuards(JwtAuthGuard)
@@ -22,4 +23,12 @@ export class WaiterNotificationsController {
   async markRead(@Param('id') id: string, @CurrentUser() user: any) {
     return this.svc.markAsRead(id, user.id);
   }
+  @Patch('read-many')
+async markManyRead(
+  @Body('ids') ids: string[],
+  @CurrentUser() user: any,
+) {
+  return this.svc.markManyAsRead(ids ?? [], user.id);
 }
+}
+
