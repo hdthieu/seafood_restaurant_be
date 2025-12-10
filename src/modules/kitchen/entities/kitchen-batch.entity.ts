@@ -15,5 +15,6 @@ export class KitchenBatch {
 
   @Column({ type: 'text', nullable: true }) note?: string | null;
 
-  @CreateDateColumn() createdAt: Date;
+    @CreateDateColumn({ type: 'timestamptz' })
+  createdAt: Date;
 }

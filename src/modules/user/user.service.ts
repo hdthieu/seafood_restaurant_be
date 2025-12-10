@@ -33,21 +33,72 @@ export class UserService {
     return this.userRepository.save(user);
   }
 
-  async createUser(dto: CreateUserDto): Promise<User> {
-    const hashedPassword = await bcrypt.hash(dto.password, 10);
+ async createUser(dto: CreateUserDto): Promise<User> {
+  // chuẩn hóa dữ liệu vào
+  const email = dto.email?.trim();
+  const username = dto.username?.trim();
+  const phone = dto.phoneNumber?.trim();
 
-    const user = this.userRepository.create({
-      email: dto.email,
-      phoneNumber: dto.phoneNumber,
-      username: dto.username,
-      password: hashedPassword,
-      role: dto.role,
-      status: UserStatus.ACTIVE,
-      profile: dto.profile ? this.profileRepository.create(dto.profile) : undefined,
+  // 1. Check trùng email
+  if (email) {
+    const existedEmail = await this.userRepository.findOne({
+      where: { email, isDelete: false },
     });
-
-    return this.userRepository.save(user);
+    if (existedEmail) {
+      throw new ResponseException(
+        null,
+        400,
+        'Email đã tồn tại trong hệ thống',
+      );
+    }
   }
+
+  // 2. Check trùng username (nếu có)
+  if (username) {
+    const existedUsername = await this.userRepository.findOne({
+      where: { username, isDelete: false },
+    });
+    if (existedUsername) {
+      throw new ResponseException(
+        null,
+        400,
+        'Username đã được sử dụng',
+      );
+    }
+  }
+
+  // 3. Check trùng SĐT
+  if (phone) {
+    const existedPhone = await this.userRepository.findOne({
+      where: { phoneNumber: phone, isDelete: false },
+    });
+    if (existedPhone) {
+      throw new ResponseException(
+        null,
+        400,
+        'Số điện thoại đã tồn tại trong hệ thống',
+      );
+    }
+  }
+
+  // 4. Hash password + tạo user
+  const hashedPassword = await bcrypt.hash(dto.password, 10);
+
+  const user = this.userRepository.create({
+    email,
+    phoneNumber: phone,
+    username,
+    password: hashedPassword,
+    role: dto.role,
+    status: UserStatus.ACTIVE,
+    profile: dto.profile
+      ? this.profileRepository.create(dto.profile)
+      : undefined,
+  });
+
+  return this.userRepository.save(user);
+}
+
 
   // function get list user
   async getListUser(q: QueryUserDto, currentUserId: string) {

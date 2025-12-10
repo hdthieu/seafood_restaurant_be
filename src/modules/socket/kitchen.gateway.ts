@@ -35,6 +35,19 @@ export type TicketsVoidedPayload = {
   // ❷ case mới: hủy theo tổng qty của từng món
   items?: Array<{ menuItemId: string; qty: number; reason?: string | null; by?: string | null }>;
 };
+export type WaiterOrderCancelledPayload = {
+  id: string;
+  orderId: string;
+  tableName: string | null;
+  title: string;
+  message: string;
+  createdAt: Date | string;
+  reason?: string | null;
+  by?: string | null;
+  waiterId: string;                // 👈 thêm
+};
+
+
 
 export type NotifyItemsToKitchenPayload = {
   orderId: string;
@@ -94,6 +107,21 @@ export class KitchenGateway implements OnGatewayConnection, OnGatewayDisconnect 
   this.server.to('kitchen').emit('orders:split', payload);
 }
 
+
+emitWaiterOrderCancelled(payload: WaiterOrderCancelledPayload) {
+  const norm = {
+    ...payload,
+    createdAt:
+      payload.createdAt instanceof Date
+        ? payload.createdAt.toISOString()
+        : payload.createdAt,
+  };
+
+  // ✅ gửi đúng room waiter:<waiterId>
+  this.server
+    .to(`waiter:${payload.waiterId}`)
+    .emit('waiter:order_cancelled', norm);
+}
 
 
  emitItemNoteUpdated(payload: {

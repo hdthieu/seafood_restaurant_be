@@ -12,7 +12,8 @@ import { OrderItem } from '@modules/orderitems/entities/orderitem.entity';
 import { OrderItemsService } from '@modules/orderitems/orderitems.service';
 import { forwardRef } from '@nestjs/common';
 import { Inject } from '@nestjs/common';
-
+import { WaiterNotificationsService } from 'src/modules/waiter-notification/waiter-notifications.service';
+import { Order } from 'src/modules/order/entities/order.entity';
 // thông báo ngược lại bếp 
 type ProgressRow = {
   menuItemId: string;
@@ -37,11 +38,13 @@ type KitchenVoidPayload = {
   orderId: string;
   menuItemId: string;
   orderItemId: string | null;
+  menuItemName?: string | null;   // 👈 THÊM
   qty: number;
   reason?: string;
   by?: string;
   ticketId: string;
 };
+
 const LIVE_STATUSES = ['PENDING', 'CONFIRMED', 'PREPARING', 'READY', 'SERVED'] as const;
 @Injectable()
 export class KitchenService {
@@ -51,11 +54,91 @@ export class KitchenService {
     @InjectRepository(KitchenTicket) private readonly ticketRepo: Repository<KitchenTicket>,
     @InjectRepository(MenuItem) private readonly menuRepo: Repository<MenuItem>,
     @InjectRepository(OrderItem) private readonly orderItemRepo: Repository<OrderItem>,
+      @InjectRepository(Order) private readonly orderRepo: Repository<Order>, 
     private readonly gw: KitchenGateway,
     @Inject(forwardRef(() => OrderItemsService))
     private readonly orderItemsSvc: OrderItemsService,
     private readonly dataSource: DataSource,
+     private readonly waiterNotifSvc: WaiterNotificationsService, 
   ) { }
+
+private async notifyWaiterOrderCancelled(opts: {
+  orderId: string;
+  reason?: string;
+  by?: string;              // 'kitchen' | 'cashier' | 'system'
+  menuItemName?: string | null;
+  qty?: number;
+}) {
+  const order = await this.orderRepo.findOne({
+    where: { id: opts.orderId },
+    relations: ['createdBy', 'table'],
+  });
+  if (!order?.createdBy?.id) return;
+
+  const waiterId = order.createdBy.id;
+
+  // rawBy = lưu DB
+  const rawBy: 'kitchen' | 'cashier' | 'system' =
+    opts.by === 'kitchen' || opts.by === 'cashier' ? opts.by : 'system';
+
+  // byLabel = hiển thị
+  const byLabel =
+    rawBy === 'kitchen' ? 'Bếp'
+    : rawBy === 'cashier' ? 'Thu ngân'
+    : 'Hệ thống';
+
+  const headerLine = order.table
+    ? `Bàn ${order.table.name} - Bởi: ${byLabel}`
+    : `Bởi: ${byLabel}`;
+
+  const itemLine = opts.menuItemName
+    ? `Món: ${opts.menuItemName}${
+        opts.qty && opts.qty > 1 ? ` x${opts.qty}` : ''
+      }`
+    : '';
+
+  // 👇 thêm dòng “Đã huỷ: X phần” cho rõ
+  const qtyLine =
+    opts.qty && opts.qty > 0 ? `Đã huỷ: ${opts.qty} phần` : '';
+
+  const reasonLine = opts.reason ? `Lý do: ${opts.reason}` : '';
+
+  const message = [headerLine, itemLine, qtyLine, reasonLine]
+    .filter(Boolean)
+    .join('\n');
+
+  // lưu DB: truyền message đã build, KHÔNG để service tự thêm lý do nữa
+  const noti = await this.waiterNotifSvc.createOrderCancelled({
+    waiterId,
+    order,
+    reason: opts.reason,
+    by: rawBy,
+    title: 'Món trong đơn đã bị huỷ',
+    message,                         // 👈 QUAN TRỌNG
+  });
+
+  // payload socket
+  const payload = {
+    id: noti.id,
+    orderId: order.id,
+    tableName: order.table?.name ?? null,
+    title: noti.title,
+    message,
+    createdAt: noti.createdAt.toISOString?.() ?? noti.createdAt,
+    reason: opts.reason ?? null,
+    by: byLabel,
+    waiterId,
+  };
+
+  this.gw.emitWaiterOrderCancelled(payload);
+}
+
+
+
+
+
+
+
 
   async notifyItems(payload: {
     orderId: string;
@@ -256,52 +339,64 @@ export class KitchenService {
 
 
   async getNotifyHistory(orderId: string): Promise<NotifyBatchDTO[]> {
-    // 1 query gộp theo batch + menuItem
-    const raw = await this.ticketRepo
-      .createQueryBuilder('t')
-      .innerJoin('t.batch', 'b')
-      .innerJoin('t.menuItem', 'mi')
-      .select('b.id', 'batchId')
-      .addSelect('b.createdAt', 'createdAt')
-      .addSelect('b.staff', 'staff')
-      .addSelect('b.tableName', 'tableName')
-      .addSelect('b.priority', 'priority')
-      .addSelect('b.note', 'note')
-      .addSelect('mi.id', 'menuItemId')
-      .addSelect('mi.name', 'name')
-      .addSelect('SUM(t.qty)', 'qty')
-      .where('b.orderId = :oid', { oid: orderId })
-      .groupBy('b.id')
-      .addGroupBy('b.createdAt')
-      .addGroupBy('b.staff')
-      .addGroupBy('b.tableName')
-      .addGroupBy('b.priority')
-      .addGroupBy('b.note')
-      .addGroupBy('mi.id')
-      .addGroupBy('mi.name')
-      .orderBy('b.createdAt', 'DESC')
-      .getRawMany<{
-        batchId: string; createdAt: Date; staff: string; tableName: string;
-        priority: boolean; note: string | null; menuItemId: string; name: string; qty: string;
-      }>();
+  const raw = await this.ticketRepo
+    .createQueryBuilder('t')
+    .innerJoin('t.batch', 'b')
+    .innerJoin('t.menuItem', 'mi')
+    .select('b.id', 'batchId')
+    .addSelect('b.createdAt', 'createdAt')
+    .addSelect('b.staff', 'staff')           // 👈 chính là tên người gửi
+    .addSelect('b.tableName', 'tableName')
+    .addSelect('b.priority', 'priority')
+    .addSelect('b.note', 'note')
+    .addSelect('mi.id', 'menuItemId')
+    .addSelect('mi.name', 'name')
+    .addSelect('SUM(t.qty)', 'qty')
+    .where('b.orderId = :oid', { oid: orderId })
+    .groupBy('b.id')
+    .addGroupBy('b.createdAt')
+    .addGroupBy('b.staff')
+    .addGroupBy('b.tableName')
+    .addGroupBy('b.priority')
+    .addGroupBy('b.note')
+    .addGroupBy('mi.id')
+    .addGroupBy('mi.name')
+    .orderBy('b.createdAt', 'DESC')
+    .getRawMany<{
+      batchId: string;
+      createdAt: Date;
+      staff: string;
+      tableName: string;
+      priority: boolean;
+      note: string | null;
+      menuItemId: string;
+      name: string;
+      qty: string;
+    }>();
 
-    // fold theo batchId
-    const map = new Map<string, NotifyBatchDTO>();
-    for (const r of raw) {
-      const b = map.get(r.batchId) ?? {
-        id: r.batchId,
-        createdAt: new Date(r.createdAt).toISOString(),
-        staff: r.staff,
-        tableName: r.tableName,
-        note: r.note,
-        priority: r.priority,
-        items: [],
-      };
-      b.items.push({ menuItemId: r.menuItemId, name: r.name, qty: Number(r.qty) || 0 });
-      map.set(r.batchId, b);
-    }
-    return Array.from(map.values());
+  const map = new Map<string, NotifyBatchDTO>();
+
+  for (const r of raw) {
+    const b = map.get(r.batchId) ?? {
+      id: r.batchId,
+      createdAt: r.createdAt.toISOString(), // ➜ FE new Date() tự convert local time
+      staff: r.staff,                       // ➜ tên người gửi
+      tableName: r.tableName,
+      note: r.note,
+      priority: r.priority,
+      items: [],
+    };
+    b.items.push({
+      menuItemId: r.menuItemId,
+      name: r.name,
+      qty: Number(r.qty) || 0,
+    });
+    map.set(r.batchId, b);
   }
+
+  return Array.from(map.values());
+}
+
 
 
 
@@ -574,6 +669,7 @@ await this.orderItemsSvc['logVoid'](em, {
           orderId: t.order.id,
           menuItemId: t.menuItem?.id ?? (t as any).menuItemId,
           orderItemId: t.orderItemId ?? null,
+           menuItemName: t.menuItem?.name ?? null, 
           qty: cancelQty,
           reason,
           by,
@@ -603,6 +699,14 @@ await this.orderItemsSvc['logVoid'](em, {
 
       this.gw.server.to("cashier").emit("kitchen:ticket_cancelled", payload);
       this.gw.server.to("waiter").emit("kitchen:ticket_cancelled", payload);
+
+       await this.notifyWaiterOrderCancelled({
+    orderId: payload.orderId,
+    reason: payload.reason,
+    by:"kitchen",
+    menuItemName: payload.menuItemName ?? null,
+    qty: payload.qty,
+  });
     }
 
     return { ok: true, ticketId };

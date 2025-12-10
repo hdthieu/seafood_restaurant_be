@@ -5,12 +5,17 @@ import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
 import { ItemStatus } from 'src/common/enums';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { CurrentUser } from 'src/common/decorators/user.decorator';
+import { User } from 'src/modules/user/entities/user.entity';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 @Controller('kitchen')
 @UseGuards(JwtAuthGuard)
 export class KitchenController {
   constructor(private readonly svc: KitchenService) {}
+  @InjectRepository(User)
+    private readonly userRepo: Repository<User>
 
-  @Post('/orders/:orderId/notify-items')
+@Post('/orders/:orderId/notify-items')
 async notifyItems(
   @Param('orderId') orderId: string,
   @Body()
@@ -21,29 +26,30 @@ async notifyItems(
     tableName: string;
     source?: 'cashier' | 'waiter' | 'other';
   },
-  @CurrentUser() user: any,   // 👈 dùng decorator giống bên dưới
+  @CurrentUser() user: any,
 ) {
   const source = body.source ?? 'cashier';
+  const dbUser = await this.userRepo.findOne({
+    where: { id: user.id },
+  });
 
-  // ƯU TIÊN: tên đầy đủ / username / name
   const staff =
-    user?.profile?.fullName ??
-    user?.fullName ??
-    user?.username ??
-    user?.name ??
-    // fallback theo nguồn
+    dbUser?.profile?.fullName ??        
+    dbUser?.username ??
+    dbUser?.email?.split('@')[0] ??
     (source === 'waiter' ? 'Phục vụ' : 'Thu ngân');
 
   return this.svc.notifyItems({
     orderId,
-    tableName: body.tableName,   // dùng tableName FE gửi lên
-    staff,
+    tableName: body.tableName,
+    staff,                              
     itemsDelta: body.items,
     priority: body.priority,
     note: body.note,
     source,
   });
 }
+
 
 
  // src/modules/kitchen/kitchen.controller.ts

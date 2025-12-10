@@ -41,6 +41,7 @@ import { LlmGateway } from "@modules/ai/llm.gateway";
 import { PayrollModule } from "@modules/payroll/payroll.module";
 import { MailModule } from './modules/mail/mail.module';
 import { ReturnsModule } from './modules/returns/returns.module';
+import { WaiterNotificationsModule } from './modules/waiter-notification/waiter-notifications.module';
 @Module({
   imports: [ConfigModule.forRoot({
     isGlobal: true,
@@ -106,7 +107,7 @@ import { ReturnsModule } from './modules/returns/returns.module';
     autoLoadEntities: true,
     // logging: ['error', 'warn', 'query'],
   }),
-    UserModule, ProfileModule, MenuitemsModule, OrdersModule, OrderitemsModule, InventoryitemsModule, InventorytransactionModule, InvoiceModule, OrderstatushistoryModule, RestauranttableModule, AuthModule, AreaModule, ConfigS3Module, IngredientModule, CategoryModule, PaymentModule, CustomersModule, SupplierModule, PurchasereceiptModule, PurchasereceiptitemModule, SuppliergroupModule, ReportModule, UnitsOfMeasureModule, UomconversionModule, MenucomboitemModule, PromotionsModule, FaceModule, CashbookModule, SocketModule, KitchenModule, PurchasereturnModule, AiModule, RagModule, PayrollModule, MailModule, ReturnsModule],
+    UserModule, ProfileModule, MenuitemsModule, OrdersModule, OrderitemsModule, InventoryitemsModule, InventorytransactionModule, InvoiceModule, OrderstatushistoryModule, RestauranttableModule, AuthModule, AreaModule, ConfigS3Module, IngredientModule, CategoryModule, PaymentModule, CustomersModule, SupplierModule, PurchasereceiptModule, PurchasereceiptitemModule, SuppliergroupModule, ReportModule, UnitsOfMeasureModule, UomconversionModule, MenucomboitemModule, PromotionsModule, FaceModule, CashbookModule, SocketModule, KitchenModule, PurchasereturnModule, AiModule, RagModule, PayrollModule, MailModule, ReturnsModule, WaiterNotificationsModule],
   controllers: [AppController],
   providers: [AppService, LlmGateway],
 })

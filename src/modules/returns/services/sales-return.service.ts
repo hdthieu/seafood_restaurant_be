@@ -16,7 +16,6 @@ import {
   CashbookType,
   CounterpartyGroup,
 } from 'src/common/enums';
-import { User } from 'src/modules/user/entities/user.entity';
 import { CashbookEntry } from 'src/modules/cashbook/entities/cashbook.entity';
 import { CashType } from 'src/modules/cashbook/entities/cash_types.entity';
 import { Ingredient } from 'src/modules/ingredient/entities/ingredient.entity';
@@ -25,8 +24,6 @@ import { InventoryTransaction } from 'src/modules/inventorytransaction/entities/
 import { In } from 'typeorm';
 import { getConversionFactorRecursive } from 'src/common/utils/uom.util';
 import { InventoryAction } from 'src/common/enums'; 
-import { UseGuards } from '@nestjs/common';
-import { Query } from '@nestjs/common';
 @Injectable()
 export class SalesReturnService {
   constructor(private readonly ds: DataSource) {}
@@ -42,7 +39,7 @@ async getDetail(id: string) {
       'invoice.order.table',
       'customer',
       'cashier',
-      'cashier.profile',      // 👈 thêm profile
+      'cashier.profile',
       'items',
       'items.menuItem',
     ],
@@ -55,8 +52,9 @@ async getDetail(id: string) {
 
   const cashierName =
     profile?.fullName ??
-    profile?.full_name ??   // tuỳ bạn đặt trong entity
+    profile?.full_name ??
     cashier?.username ??
+    cashier?.email ??   // 👈 thêm fallback email
     null;
 
   return {
@@ -69,13 +67,14 @@ async getDetail(id: string) {
     refundAmount: Number(ret.refundAmount ?? 0),
     createdAt: ret.createdAt,
 
-    // 👇 trả thẳng ra ngoài đúng shape FE đang dùng
     invoiceId: ret.invoice?.id ?? null,
     invoiceNumber: ret.invoice?.invoiceNumber ?? null,
     tableName: ret.invoice?.order?.table?.name ?? null,
 
     customerName: ret.customer?.name ?? 'Khách lẻ',
-    cashierName, // 👈 đã tính ở trên
+
+    cashierId: cashier?.id ?? null,      // 👈 thêm cho dễ debug
+    cashierName,
 
     items: (ret.items ?? []).map((it) => ({
       id: it.id,
@@ -87,6 +86,7 @@ async getDetail(id: string) {
     })),
   };
 }
+
 
 
 async list(opts: {
@@ -126,38 +126,41 @@ async list(opts: {
 
   const [rows, total] = await qb.getManyAndCount();
 
-  return {
-    data: rows.map((r: any) => {
-      const cashier = r.cashier;
-      const profile = cashier?.profile;
-      const cashierName =
-        profile?.fullName ??
-        profile?.full_name ??
-        cashier?.username ??
-        null;
+return {
+  data: rows.map((r: any) => {
+    const cashier = r.cashier;
+    const profile = cashier?.profile;
+    const cashierName =
+      profile?.fullName ??
+      profile?.full_name ??
+      cashier?.username ??
+      cashier?.email ??   // 👈 thêm fallback
+      null;
 
-      return {
-        id: r.id,
-        returnNumber: r.returnNumber,
-        createdAt: r.createdAt,
-        status: r.status,
-        refundMethod: r.refundMethod,
-        goodsAmount: Number(r.goodsAmount ?? 0),
-        discountAmount: Number(r.discountAmount ?? 0),
-        refundAmount: Number(r.refundAmount ?? 0),
-        invoiceId: r.invoice?.id ?? null,
-        invoiceNumber: r.invoice?.invoiceNumber ?? null,
-        customerName: r.customer?.name ?? null,
-        cashierName, // 👈
-      };
-    }),
-    meta: {
-      page,
-      limit,
-      total,
-      totalPages: Math.ceil(total / limit) || 1,
-    },
-  };
+    return {
+      id: r.id,
+      returnNumber: r.returnNumber,
+      createdAt: r.createdAt,
+      status: r.status,
+      refundMethod: r.refundMethod,
+      goodsAmount: Number(r.goodsAmount ?? 0),
+      discountAmount: Number(r.discountAmount ?? 0),
+      refundAmount: Number(r.refundAmount ?? 0),
+      invoiceId: r.invoice?.id ?? null,
+      invoiceNumber: r.invoice?.invoiceNumber ?? null,
+      customerName: r.customer?.name ?? null,
+      cashierId: cashier?.id ?? null,   // 👈 thêm
+      cashierName,
+    };
+  }),
+  meta: {
+    page,
+    limit,
+    total,
+    totalPages: Math.ceil(total / limit) || 1,
+  },
+};
+
 }
 
 
@@ -276,7 +279,9 @@ async list(opts: {
   }
 
   /* ========== 3. TẠO PHIẾU TRẢ + PHIẾU CHI HOÀN TIỀN ========== */
- async create(dto: CreateSalesReturnDto, cashier: User) {
+
+
+async create(dto: CreateSalesReturnDto, cashierId?: string | null) {
   return this.ds.transaction(async (em) => {
     const invRepo = em.getRepository(Invoice);
     const orderItemRepo = em.getRepository(OrderItem);
@@ -355,9 +360,10 @@ async list(opts: {
       goodsAmount: goodsAmount.toFixed(2),
       discountAmount: discountAmount.toFixed(2),
       refundAmount: refundAmount.toFixed(2),
-      refundMethod: dto.refundMethod,       // CASH / BANK_TRANSFER / CARD
+      refundMethod: dto.refundMethod,
       customer: invoice.customer ?? null,
-      cashier: cashier ? ({ id: cashier.id } as any) : null,
+      // 👇 gán theo id
+      cashier: { id: cashierId } as any,
       note: dto.note ?? null,
     });
 
@@ -367,11 +373,10 @@ async list(opts: {
       ri.return = ret;
     }
     await returnItemRepo.save(itemsToSave);
-      await this.restoreInventoryForSalesReturn(em, itemsToSave, ret.id);
+    await this.restoreInventoryForSalesReturn(em, itemsToSave, ret.id);
 
     // 2) Phiếu chi hoàn tiền
     if (refundAmount > 0) {
-      // TÊN cash_type CỐ ĐỊNH cho nghiệp vụ này
       const REFUND_CASH_TYPE_NAME = 'Chi tiền hoàn trả khách';
 
       const cashType = await cashTypeRepo.findOne({
@@ -401,9 +406,10 @@ async list(opts: {
         invoice,
         purchaseReceipt: null,
         purchaseReturn: null,
-        sourceCode: ret.returnNumber, // link ngược về phiếu trả
+        sourceCode: ret.returnNumber,
 
-        staff: cashier ?? null,
+        // 👇 staff cũng dùng id
+          staff: { id: cashierId } as any,
       });
 
       await cashbookRepo.save(cb);
