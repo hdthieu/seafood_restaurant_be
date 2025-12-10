@@ -8,7 +8,7 @@ import { CurrentUser } from 'src/common/decorators/user.decorator';
 import { QueryUserDto } from './dto/query-user.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
-
+@UseGuards(JwtAuthGuard)
 @Controller('user')
 export class UserController {
   constructor(private readonly userService: UserService) { }

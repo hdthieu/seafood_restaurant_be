@@ -12,6 +12,7 @@ import { SalesReturnService } from "./services/sales-return.service";
 import { CreateSalesReturnDto } from "./dto/create-sales-return.dto";
 import { JwtAuthGuard } from "@modules/core/auth/guards/jwt-auth.guard";
 import { CurrentUser } from "src/common/decorators/user.decorator";
+import { UnauthorizedException } from "@nestjs/common";
 @Controller("returns")
 @UseGuards(JwtAuthGuard)
 export class ReturnsController {
@@ -62,13 +63,20 @@ export class ReturnsController {
     return { data };
   }
 
-  @Post()
-  create(@Body() dto: CreateSalesReturnDto, @Req() req: any,
-  @CurrentUser() user: any
+@Post()
+create(
+  @Body() dto: CreateSalesReturnDto,
+  @CurrentUser() user: any,
 ) {
-   
+  //   payload thật sự có field id
+  const cashierId: string | undefined = user?.id;
 
-
-    return this.svc.create(dto, user.id);
+  if (!cashierId) {
+    // cho chắc, nếu sau này đổi payload thì sẽ biết ngay
+    throw new UnauthorizedException('CURRENT_USER_MISSING_ID');
   }
+
+  return this.svc.create(dto, cashierId);
+}
+
 }

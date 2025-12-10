@@ -9,10 +9,13 @@ import { KitchenGateway } from '../socket/kitchen.gateway';
 import { MenuItem } from '../menuitems/entities/menuitem.entity';
 import {OrderitemsModule} from '../orderitems/orderitems.module';
 import { forwardRef } from '@nestjs/common';
+import { User } from '../user/entities/user.entity';
+import { WaiterNotificationsModule } from '../waiter-notification/waiter-notifications.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([KitchenBatch, KitchenTicket, MenuItem]),
-forwardRef(() => OrderitemsModule)
+  imports: [TypeOrmModule.forFeature([KitchenBatch, KitchenTicket, MenuItem, User, ]),
+forwardRef(() => OrderitemsModule),
+WaiterNotificationsModule
 ],
   controllers: [KitchenController],
   providers: [KitchenService, KitchenGateway],

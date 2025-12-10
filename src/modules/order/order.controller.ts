@@ -130,58 +130,88 @@ async listTablesHasOpenOrders(
 ) {
   const { excludeOrderId, excludeTableId } = query;
 
-  const qb = this.orderRepo.createQueryBuilder('o')
+  const qb = this.orderRepo
+    .createQueryBuilder('o')
     .leftJoin('o.table', 't')
+    .leftJoin('o.items', 'oi')
     .select('t.id', 'tableId')
     .addSelect('t.name', 'tableName')
-    .where('o.status NOT IN (:...ended)', { ended: [OrderStatus.PAID, OrderStatus.CANCELLED, OrderStatus.MERGED] });
+    // số đơn mở trên bàn
+    .addSelect('COUNT(DISTINCT o.id)', 'orderCount')
+    // tổng tiền tất cả đơn mở trên bàn
+    .addSelect('COALESCE(SUM(oi.quantity * oi.price), 0)', 'totalAmount')
+    .where('o.status NOT IN (:...ended)', {
+      ended: [OrderStatus.PAID, OrderStatus.CANCELLED, OrderStatus.MERGED],
+    });
 
-  if (excludeOrderId)
+  if (excludeOrderId) {
     qb.andWhere('o.id <> :excludeOrderId', { excludeOrderId });
-  if (excludeTableId)
+  }
+  if (excludeTableId) {
     qb.andWhere('t.id <> :excludeTableId', { excludeTableId });
+  }
 
   const rows = await qb
     .groupBy('t.id')
     .addGroupBy('t.name')
     .orderBy('t.name', 'ASC')
-    .getRawMany<{ tableId: string; tableName: string }>();
+    .getRawMany<{
+      tableId: string;
+      tableName: string;
+      orderCount: string;
+      totalAmount: string;
+    }>();
 
-  return rows;
+  // ép về number cho FE dùng
+  return rows.map((r) => ({
+    tableId: r.tableId,
+    tableName: r.tableName,
+    orderCount: Number(r.orderCount) || 0,
+    totalAmount: Number(r.totalAmount) || 0,
+  }));
 }
+
 
   // === B) Danh sách ĐƠN mở trong 1 bàn ===
   // FE hook: useOpenOrdersInTable(tableId) -> GET /orders/open-in-table?tableId=...
   // Trả về: [{ id, tableName, customerName, itemsCount, total }]
   @Get('open-in-table')
-  async openInTable(
-    @Query(new ValidationPipe({ transform: true, whitelist: true }))
-    query: OpenInTableQueryDto,
-  ) {
-    const { tableId, excludeOrderId } = query;
+async openInTable(
+  @Query(new ValidationPipe({ transform: true, whitelist: true }))
+  query: OpenInTableQueryDto,
+) {
+  const { tableId, excludeOrderId } = query;
 
-    // Không có tableId thì trả mảng rỗng (FE đã enable theo UUID)
-    if (!tableId) return [];
+  if (!tableId) return [];
 
-    const rows = await this.orderRepo.find({
-      where: {
-        table: { id: tableId } as any,
-        id: excludeOrderId ? Not(excludeOrderId) : undefined,
-        status: Not(In([OrderStatus.PAID, OrderStatus.CANCELLED,OrderStatus.MERGED])),
-      },
-      relations: ['table', 'items'], // nếu muốn đếm items ngay
-      order: { createdAt: 'ASC' },
-    });
+  const rows = await this.orderRepo
+    .createQueryBuilder('o')
+    .leftJoin('o.table', 't')
+    .leftJoin('o.items', 'oi')
+    .select('o.id', 'id')
+    .addSelect('t.name', 'tableName')
+    .addSelect('COUNT(oi.id)', 'itemsCount')
+    .addSelect('COALESCE(SUM(oi.quantity * oi.price), 0)', 'total')
+    .where('t.id = :tableId', { tableId })
+    .andWhere('o.status NOT IN (:...ended)', {
+      ended: [OrderStatus.PAID, OrderStatus.CANCELLED, OrderStatus.MERGED],
+    })
+    .andWhere(excludeOrderId ? 'o.id <> :excludeOrderId' : '1=1', {
+      excludeOrderId,
+    })
+    .groupBy('o.id')
+    .addGroupBy('t.name')
+    .orderBy('o.createdAt', 'ASC')
+    .getRawMany();
+  
+  return rows.map(r => ({
+    id: r.id,
+    tableName: r.tableName,
+    itemsCount: Number(r.itemsCount),
+    total: Number(r.total),
+  }));
+}
 
-    return rows.map(o => ({
-      id: o.id,
-      tableName: o.table?.name ?? '',
-      // customerName: o.customerName ?? null, // nếu có cột
-      itemsCount: Array.isArray(o.items) ? o.items.length : 0,
-      total: Number((o as any).total ?? 0), // nếu có cột total
-      createdAt: o.createdAt,
-    }));
-  }
   @Get(':id')
   @ApiOperation({ summary: 'Chi tiết đơn' })
   detail(@Param('id', new ParseUUIDPipe()) id: string) {
