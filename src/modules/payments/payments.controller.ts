@@ -26,6 +26,7 @@ import { PaymentMethod, PaymentStatus, InvoiceStatus } from 'src/common/enums';
 import { PayOSService } from './payos.service';
 import { HttpCode, HttpStatus } from '@nestjs/common';
 import { Head } from '@nestjs/common';
+import {Payment} from "./entities/payment.entity";
 @ApiTags('payments')
 @Controller('payments')
 export class PaymentController {
@@ -37,6 +38,7 @@ export class PaymentController {
     @InjectRepository(Invoice) private readonly invRepo: Repository<Invoice>,
     private readonly payOS: PayOSService,
      private readonly gateway: PaymentsGateway,  
+    @InjectRepository(Payment) private readonly paymentRepo: Repository<Payment>,
    
   ) {}
 
@@ -115,12 +117,30 @@ async mockVietQrSuccess(@Body() dto: { invoiceId: string; amount?: number }) {
    * Lưu ý: cần bật "rawBody" cho route này ở main.ts để verify chữ ký.
    */
 
-// payments.controller.ts
 @Post('payos/create-link')
 async createPayOSLink(@Body() dto: { invoiceId: string; amount: number; buyerName?: string }) {
-  const orderCode = Date.now();
   const description = `INV:${dto.invoiceId.slice(0, 12)}`;
 
+  // 1) Kiểm tra payment PENDING hiện có
+  const pending = await this.svc.findOrCreatePendingPayosPayment(
+    dto.invoiceId,
+    dto.amount,
+  );
+
+  // 2) Nếu pending đã có metadata PayOS → TRẢ QR CŨ, không gọi PayOS nữa
+  if (pending.meta?.payos?.checkoutUrl) {
+    return {
+      paymentLinkId: pending.meta.payos.paymentLinkId,
+      qrCode: pending.meta.payos.qrCode,
+      checkoutUrl: pending.meta.payos.checkoutUrl,
+      orderCode: pending.meta.payos.orderCode,
+      amount: pending.meta.payos.amount,
+      description: pending.meta.payos.description,
+    };
+  }
+
+  // 3) Chưa từng call PayOS → call lần đầu
+  const orderCode = Number(pending.externalTxnId);
   const link = await this.payOS.createPaymentLink({
     orderCode,
     amount: dto.amount,
@@ -128,43 +148,47 @@ async createPayOSLink(@Body() dto: { invoiceId: string; amount: number; buyerNam
     buyerName: dto.buyerName,
   });
 
-  // ✅ Tạo payment ở trạng thái PENDING, KHÔNG cập nhật invoice total/status
-  await this.svc.createPendingPayment({
-    invoiceId: dto.invoiceId,
-    amount: dto.amount,
-    method: PaymentMethod.VIETQR,   // hoặc 'PAYOS' nếu bạn tách kênh
-    externalTxnId: String(orderCode),
-    note: description,
-  });
+  // 4) Lưu metadata để các lần sau dùng lại
+  pending.meta = {
+    payos: {
+      paymentLinkId: link.paymentLinkId,
+      qrCode: link.qrCode,
+      checkoutUrl: link.checkoutUrl,
+      orderCode: link.orderCode,
+      amount: link.amount,
+      description,
+    }
+  };
+  await this.paymentRepo.save(pending);
 
   return link;
 }
 
 
 
- @Get('return')
-  returnPage(@Query() q: any, @Res() res: Response) {
-    // q có thể chứa orderCode/paymentLinkId/status...
-    res.type('html').send(`
-      <!doctype html><meta charset="utf-8" />
-      <title>Thanh toán thành công</title>
-      <p>Thanh toán đã ghi nhận. Bạn có thể đóng cửa sổ này.</p>
-      <script>
-        // Nếu app mobile có deep link thì mở (tùy chọn):
-        // location.href = 'mypos://payos/return';
-        setTimeout(()=>window.close(), 1500);
-      </script>
-    `);
-  }
+//  @Get('return')
+//   returnPage(@Query() q: any, @Res() res: Response) {
+//     // q có thể chứa orderCode/paymentLinkId/status...
+//     res.type('html').send(`
+//       <!doctype html><meta charset="utf-8" />
+//       <title>Thanh toán thành công</title>
+//       <p>Thanh toán đã ghi nhận. Bạn có thể đóng cửa sổ này.</p>
+//       <script>
+//         // Nếu app mobile có deep link thì mở (tùy chọn):
+//         // location.href = 'mypos://payos/return';
+//         setTimeout(()=>window.close(), 1500);
+//       </script>
+//     `);
+//   }
 
-  @Get('cancel')
-  cancelPage(@Res() res: Response) {
-    res.type('html').send(`
-      <!doctype html><meta charset="utf-8" />
-      <title>Đã hủy thanh toán</title>
-      <p>Bạn đã hủy thanh toán. Bạn có thể đóng cửa sổ này.</p>
-    `);
-  }
+//   @Get('cancel')
+//   cancelPage(@Res() res: Response) {
+//     res.type('html').send(`
+//       <!doctype html><meta charset="utf-8" />
+//       <title>Đã hủy thanh toán</title>
+//       <p>Bạn đã hủy thanh toán. Bạn có thể đóng cửa sổ này.</p>
+//     `);
+//   }
 @Get('payos/return')
 async payosReturn(@Query() q: any, @Res() res: Response) {
   // q có thể gồm: code/status/orderCode/paymentLinkId/...
@@ -279,71 +303,71 @@ if (Math.abs(amount - remaining) > TOL) {
    * 3) VNPay: create URL, return redirect, IPN, polling theo txnRef
    * ---------------------------------------------------------------- */
 
-  /** Tạo URL thanh toán VNPay */
- @Post('vnpay/create')
-async createVNPay(@Body() dto: { orderId?: string; invoiceId?: string; amount?: number; bankCode?: string }, @Req() req: Request) {
-  const ip =
-    (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ||
-    (req.socket?.remoteAddress as string) ||
-    '127.0.0.1';
+//   /** Tạo URL thanh toán VNPay */
+//  @Post('vnpay/create')
+// async createVNPay(@Body() dto: { orderId?: string; invoiceId?: string; amount?: number; bankCode?: string }, @Req() req: Request) {
+//   const ip =
+//     (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ||
+//     (req.socket?.remoteAddress as string) ||
+//     '127.0.0.1';
 
-  // ✅ Bổ sung: nếu chưa có invoiceId mà có orderId -> tạo (idempotent)
-  let invoiceId = dto.invoiceId;
-  if (!invoiceId && dto.orderId) {
-    const inv = await this.invoiceSvc.createFromOrder(dto.orderId);
-    invoiceId = inv.id;
-  }
-  if (!invoiceId) {
-    throw new BadRequestException('MISSING_INVOICE_OR_ORDER');
-  }
+//   // ✅ Bổ sung: nếu chưa có invoiceId mà có orderId -> tạo (idempotent)
+//   let invoiceId = dto.invoiceId;
+//   if (!invoiceId && dto.orderId) {
+//     const inv = await this.invoiceSvc.createFromOrder(dto.orderId);
+//     invoiceId = inv.id;
+//   }
+//   if (!invoiceId) {
+//     throw new BadRequestException('MISSING_INVOICE_OR_ORDER');
+//   }
 
-  // gọi service tạo URL với invoiceId đã chắc chắn tồn tại
-  return this.svc.createVNPayUrl({ invoiceId, amount: dto.amount, bankCode: dto.bankCode, ipAddress: ip });
-}
+//   // gọi service tạo URL với invoiceId đã chắc chắn tồn tại
+//   return this.svc.createVNPayUrl({ invoiceId, amount: dto.amount, bankCode: dto.bankCode, ipAddress: ip });
+// }
 
 
-  /** Browser return: verify checksum & redirect về FE (success/fail) */
-  @Get('vnpay/return')
-  @ApiOperation({ summary: 'VNPay return (browser redirect)' })
-  async vnpReturn(@Query() q: any, @Res() res: Response) {
-    // tùy chọn: đánh dấu PAID ngay ở bước return nếu mã phản hồi OK
-    try {
-      await this.svc.tryMarkPaidFromReturn(q);
-    } catch {}
+  // /** Browser return: verify checksum & redirect về FE (success/fail) */
+  // @Get('vnpay/return')
+  // @ApiOperation({ summary: 'VNPay return (browser redirect)' })
+  // async vnpReturn(@Query() q: any, @Res() res: Response) {
+  //   // tùy chọn: đánh dấu PAID ngay ở bước return nếu mã phản hồi OK
+  //   try {
+  //     await this.svc.tryMarkPaidFromReturn(q);
+  //   } catch {}
 
-    const r = await this.svc.handleVnpReturn(q);
-    const FRONTEND_URL = (process.env.FRONTEND_URL || '').replace(/\/+$/, '');
-    const status = r.ok && r.code === '00' ? 'success' : 'fail';
+  //   const r = await this.svc.handleVnpReturn(q);
+  //   const FRONTEND_URL = (process.env.FRONTEND_URL || '').replace(/\/+$/, '');
+  //   const status = r.ok && r.code === '00' ? 'success' : 'fail';
 
-    const params = new URLSearchParams({
-      status,
-      invoiceId: r.invoiceId || '',
-      txnRef: String(q.vnp_TxnRef || ''),
-      amount: String(Number(q.vnp_Amount || 0) / 100),
-      bankCode: q.vnp_BankCode || '',
-      code: r.code || '',
-    });
+  //   const params = new URLSearchParams({
+  //     status,
+  //     invoiceId: r.invoiceId || '',
+  //     txnRef: String(q.vnp_TxnRef || ''),
+  //     amount: String(Number(q.vnp_Amount || 0) / 100),
+  //     bankCode: q.vnp_BankCode || '',
+  //     code: r.code || '',
+  //   });
 
-    const target =
-      status === 'success'
-        ? `${FRONTEND_URL}/checkout/success?${params.toString()}`
-        : `${FRONTEND_URL}/checkout/fail?${params.toString()}`;
+  //   const target =
+  //     status === 'success'
+  //       ? `${FRONTEND_URL}/checkout/success?${params.toString()}`
+  //       : `${FRONTEND_URL}/checkout/fail?${params.toString()}`;
 
-    return res.redirect(target);
-  }
+  //   return res.redirect(target);
+  // }
 
-  /** IPN (server-to-server) từ VNPay */
-  @Get('vnpay/ipn')
-  @ApiOperation({ summary: 'VNPay IPN (server-to-server)' })
-  async vnpIpn(@Query() q: any) {
-    return this.svc.handleVnpIpn(q);
-  }
+  // /** IPN (server-to-server) từ VNPay */
+  // @Get('vnpay/ipn')
+  // @ApiOperation({ summary: 'VNPay IPN (server-to-server)' })
+  // async vnpIpn(@Query() q: any) {
+  //   return this.svc.handleVnpIpn(q);
+  // }
 
-  /** FE poll trạng thái giao dịch VNPay theo txnRef */
-  @Get('vnpay/status')
-  @ApiOperation({ summary: 'Lấy trạng thái giao dịch VNPay theo txnRef' })
-  async getVNPayStatus(@Query('txnRef') txnRef: string) {
-    if (!txnRef) return { status: 'INVALID', message: 'Missing txnRef' };
-    return this.svc.getStatusByTxnRef(txnRef);
-  }
+  // /** FE poll trạng thái giao dịch VNPay theo txnRef */
+  // @Get('vnpay/status')
+  // @ApiOperation({ summary: 'Lấy trạng thái giao dịch VNPay theo txnRef' })
+  // async getVNPayStatus(@Query('txnRef') txnRef: string) {
+  //   if (!txnRef) return { status: 'INVALID', message: 'Missing txnRef' };
+  //   return this.svc.getStatusByTxnRef(txnRef);
+  // }
 }

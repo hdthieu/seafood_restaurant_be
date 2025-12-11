@@ -35,130 +35,94 @@ export class InvoicesService {
 
 
   async createFromOrder(
-    orderId: string,
-    body: { customerId?: string | null; guestCount?: number } = {},
-    userId?: string,
-  ) {
-    return this.ds.transaction(async (em) => {
-      const oRepo = em.getRepository(Order);
-      const invRepo = em.getRepository(Invoice);
+  orderId: string,
+  body: { customerId?: string | null; guestCount?: number } = {},
+  userId?: string,
+) {
+  return this.ds.transaction(async (em) => {
+    const oRepo = em.getRepository(Order);
+    const invRepo = em.getRepository(Invoice);
 
-      // 1) Lấy order + items + table
-      const order = await oRepo.findOne({
-        where: { id: orderId },
-        relations: [
-          'items',
-          'items.menuItem',
-          'items.menuItem.category',
-          'table',
-        ],
-      });
-      if (!order) throw new NotFoundException('ORDER_NOT_FOUND');
+    const order = await oRepo.findOne({
+      where: { id: orderId },
+      relations: [
+        'items',
+        'items.menuItem',
+        'items.menuItem.category',
+        'table',
+        'customer',
+      ],
+    });
+    if (!order) throw new NotFoundException('ORDER_NOT_FOUND');
 
-      const calcTotalFromOrder = () =>
-        (order.items ?? []).reduce(
-          (s, it) => s + Number(it.price ?? 0) * Number(it.quantity ?? 0),
-          0,
-        );
+    const calcTotalFromOrder = () =>
+      (order.items ?? []).reduce(
+        (s, it) => s + Number(it.price ?? 0) * Number(it.quantity ?? 0),
+        0,
+      );
 
-      // 2) Đã có invoice -> cập nhật
-      let existed = await invRepo.findOne({
-        where: { order: { id: orderId } },
-        relations: [
-          'order',
-          'order.items',
-          'order.items.menuItem',
-          'order.items.menuItem.category',
-          'order.table',
-          'customer',
-          'payments',
-          'invoicePromotions',
-          'invoicePromotions.promotion',
-        ],
-      });
+    // ---- canonical: ưu tiên body, fallback order ----
+    const canonicalCustomerId =
+      (body.customerId !== undefined ? body.customerId : order.customer?.id) ?? null;
 
-      if (existed) {
-        let touched = false;
+    const canonicalGuestCountRaw =
+      body.guestCount !== undefined && body.guestCount !== null
+        ? body.guestCount
+        : (order as any).guestCount ?? null;
 
-        // update customer / guestCount nếu có truyền vào
-        if (typeof body.customerId !== 'undefined') {
-          existed.customer = body.customerId
-            ? ({ id: body.customerId } as any)
-            : null;
+    const canonicalGuestCount =
+      canonicalGuestCountRaw === null || canonicalGuestCountRaw === undefined || canonicalGuestCountRaw === ''
+        ? null
+        : Number(canonicalGuestCountRaw);
+
+    // 2) Đã có invoice -> chỉ cập nhật nhẹ, KHÔNG autoApply/recompute
+    let existed = await invRepo.findOne({
+      where: { order: { id: orderId } },
+      relations: [
+        'order',
+        'order.items',
+        'order.items.menuItem',
+        'order.items.menuItem.category',
+        'order.table',
+        'customer',
+        'payments',
+        'invoicePromotions',
+        'invoicePromotions.promotion',
+      ],
+    });
+
+    if (existed) {
+      let touched = false;
+
+      if (existed.status === InvoiceStatus.UNPAID) {
+        existed.customer = canonicalCustomerId
+          ? ({ id: canonicalCustomerId } as any)
+          : null;
+        existed.guestCount =
+          typeof canonicalGuestCount === 'number' ? canonicalGuestCount : null;
+        touched = true;
+
+        // Đồng bộ totalAmount theo Order nếu cần
+        const total = calcTotalFromOrder();
+        if (Number(existed.totalAmount) !== total) {
+          existed.totalAmount = total.toFixed(2) as any;
           touched = true;
         }
-        if (typeof body.guestCount === 'number') {
-          existed.guestCount = body.guestCount;
-          touched = true;
-        }
-
-        // set cashier nếu chưa có
-        if (!existed.cashier && userId) {
-          existed.cashier = { id: userId } as any;
-          touched = true;
-        }
-
-        // Đồng bộ tổng tiền khi còn UNPAID
-        if (existed.status === InvoiceStatus.UNPAID) {
-          const total = calcTotalFromOrder();
-          // tạm giữ discount hiện có, recompute sau khi auto-apply
-          if (Number(existed.totalAmount) !== total) {
-            existed.totalAmount = total.toFixed(2) as any;
-            touched = true;
-          }
-        }
-
-        if (touched) existed = await invRepo.save(existed);
-
-        // Auto-apply lại khuyến mãi theo order hiện tại (UNPAID)
-        if (existed.status === InvoiceStatus.UNPAID) {
-          await this.autoApplyPromotions(em, existed.id);
-          await this.recomputeInvoiceTotals(em, existed.id);
-        }
-
-        const full = await invRepo.findOne({
-          where: { id: existed.id },
-          relations: [
-            'order',
-            'order.items',
-            'order.items.menuItem',
-            'order.items.menuItem.category',
-            'order.table',
-            'customer',
-            'payments',
-            'invoicePromotions',
-            'invoicePromotions.promotion',
-          ],
-        });
-        return full!;
       }
 
-      // 3) Chưa có invoice -> tạo mới
-      const total = calcTotalFromOrder();
-      const payload: DeepPartial<Invoice> = {
-        invoiceNumber: await this.genNumber(),
-        order: { id: orderId } as any,
-        guestCount:
-          typeof body.guestCount === 'number' ? body.guestCount : null,
-        customer: body.customerId
-          ? ({ id: body.customerId } as any)
-          : null,
-        totalAmount: total.toFixed(2),
-        discountTotal: '0',
-        finalAmount: total.toFixed(2),
-        status: InvoiceStatus.UNPAID,
-        cashier: userId ? ({ id: userId } as any) : null,
-      };
+      if (!existed.cashier && userId) {
+        existed.cashier = { id: userId } as any;
+        touched = true;
+      }
 
-      const created = await invRepo.save(invRepo.create(payload));
+      if (touched) {
+        existed = await invRepo.save(existed);
+      }
 
-      // Tự áp khuyến mãi + tính lại tổng
-      await this.autoApplyPromotions(em, created.id);
-      await this.recomputeInvoiceTotals(em, created.id);
+      // ❌ KHÔNG gọi autoApplyPromotions/recompute ở đây nữa
 
-      // 4) Trả về FULL relations
       const full = await invRepo.findOne({
-        where: { id: created.id },
+        where: { id: existed.id },
         relations: [
           'order',
           'order.items',
@@ -172,8 +136,51 @@ export class InvoicesService {
         ],
       });
       return full!;
+    }
+
+    // 3) Chưa có invoice -> tạo mới + auto apply
+    const total = calcTotalFromOrder();
+    const payload: DeepPartial<Invoice> = {
+      invoiceNumber: await this.genNumber(),
+      order: { id: orderId } as any,
+      guestCount:
+        typeof canonicalGuestCount === 'number' ? canonicalGuestCount : null,
+      customer: canonicalCustomerId
+        ? ({ id: canonicalCustomerId } as any)
+        : null,
+      totalAmount: total.toFixed(2),
+      discountTotal: '0',
+      finalAmount: total.toFixed(2),
+      status: InvoiceStatus.UNPAID,
+      cashier: userId ? ({ id: userId } as any) : null,
+    };
+
+    const created = await invRepo.save(invRepo.create(payload));
+
+    // Chỉ auto apply lần đầu
+    await this.autoApplyPromotions(em, created.id);
+    await this.recomputeInvoiceTotals(em, created.id);
+
+    const full = await invRepo.findOne({
+      where: { id: created.id },
+      relations: [
+        'order',
+        'order.items',
+        'order.items.menuItem',
+        'order.items.menuItem.category',
+        'order.table',
+        'customer',
+        'payments',
+        'invoicePromotions',
+        'invoicePromotions.promotion',
+      ],
     });
-  }
+    return full!;
+  });
+}
+
+
+
 
 
   async addPayment(

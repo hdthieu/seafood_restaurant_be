@@ -48,8 +48,8 @@ export class Payment {
   @Column({ type: 'varchar', length: 16, nullable: true })
   responseCode!: string | null;
 
-  @CreateDateColumn()
-  createdAt!: Date;
+  @CreateDateColumn({ type: 'timestamptz' })
+    createdAt: Date;
 
   // yyyyMMddHHmmss GMT+7 → tối đa 14 ký tự
   @Column({ type: 'varchar', length: 14, nullable: true })
@@ -61,4 +61,19 @@ export class Payment {
 
   @Column({ type: 'text', nullable: true })
   note?: string;
+
+  
+  @Column({ type: 'jsonb', nullable: true })
+  meta?: {
+    payos?: {
+      paymentLinkId?: string;
+      qrCode?: string;
+      checkoutUrl?: string;
+      orderCode?: number;
+      amount?: number;
+      description?: string;
+    };
+    // nếu sau này cần thêm provider khác thì nhét thêm ở đây
+  } | null;
 }
+
