@@ -49,69 +49,69 @@ export class PaymentService {
 
   /** Tạo URL VNPay + lưu payment PENDING để FE polling */
   /** Tạo URL VNPay + lưu payment PENDING để FE polling */
-  async createVNPayUrl(dto: CreateVNPayParams) {
-    // cần payments để tính remaining
-    const inv = await this.invoiceRepo.findOne({ where: { id: dto.invoiceId }, relations: ['payments'] });
-    if (!inv) throw new ResponseException('INVOICE_NOT_FOUND', 400);
+  // async createVNPayUrl(dto: CreateVNPayParams) {
+  //   // cần payments để tính remaining
+  //   const inv = await this.invoiceRepo.findOne({ where: { id: dto.invoiceId }, relations: ['payments'] });
+  //   if (!inv) throw new ResponseException('INVOICE_NOT_FOUND', 400);
 
-    const paid = (inv.payments ?? [])
-      .filter(p => p.status === PaymentStatus.SUCCESS)
-      .reduce((s, p) => s + Number(p.amount), 0);
+  //   const paid = (inv.payments ?? [])
+  //     .filter(p => p.status === PaymentStatus.SUCCESS)
+  //     .reduce((s, p) => s + Number(p.amount), 0);
 
-    const total = Number(inv.totalAmount);
-    const remaining = Math.max(0, total - paid);
+  //   const total = Number(inv.totalAmount);
+  //   const remaining = Math.max(0, total - paid);
 
-    // amount FE truyền vào (nếu có) nhưng KHÔNG vượt remaining
-    const want = Math.round(Number(dto.amount ?? remaining));
-    const amount = Math.min(want, remaining);
+  //   // amount FE truyền vào (nếu có) nhưng KHÔNG vượt remaining
+  //   const want = Math.round(Number(dto.amount ?? remaining));
+  //   const amount = Math.min(want, remaining);
 
-    if (!amount || amount <= 0) throw new ResponseException('INVALID_AMOUNT', 400);
+  //   if (!amount || amount <= 0) throw new ResponseException('INVALID_AMOUNT', 400);
 
-    const { tmnCode, hashSecret, vnpUrl, returnUrl, version, locale } = this.config;
+  //   const { tmnCode, hashSecret, vnpUrl, returnUrl, version, locale } = this.config;
 
-    const vnp_TxnRef = Date.now().toString();
-    const vnp_CreateDate = nowYmdHisGMT7();
-    const expireIn = Number.isFinite(dto.expireInMinutes) ? Math.max(1, Number(dto.expireInMinutes)) : 15;
-    const vnp_ExpireDate = addMinutesYmdHisGMT7(expireIn);
+  //   const vnp_TxnRef = Date.now().toString();
+  //   const vnp_CreateDate = nowYmdHisGMT7();
+  //   const expireIn = Number.isFinite(dto.expireInMinutes) ? Math.max(1, Number(dto.expireInMinutes)) : 15;
+  //   const vnp_ExpireDate = addMinutesYmdHisGMT7(expireIn);
 
-    const params: Record<string, string | number> = {
-      vnp_Version: version,
-      vnp_Command: 'pay',
-      vnp_TmnCode: tmnCode,
-      vnp_Locale: locale,
-      vnp_CurrCode: 'VND',
-      vnp_TxnRef,
-      vnp_OrderInfo: `INV:${inv.id}`,
-      vnp_OrderType: 'other',
-      vnp_Amount: amount * 100,             // ✅ dùng remaining
-      vnp_ReturnUrl: returnUrl,
-      vnp_IpAddr: dto.ipAddress || '127.0.0.1',
-      vnp_CreateDate,
-      vnp_ExpireDate,
-    };
+  //   const params: Record<string, string | number> = {
+  //     vnp_Version: version,
+  //     vnp_Command: 'pay',
+  //     vnp_TmnCode: tmnCode,
+  //     vnp_Locale: locale,
+  //     vnp_CurrCode: 'VND',
+  //     vnp_TxnRef,
+  //     vnp_OrderInfo: `INV:${inv.id}`,
+  //     vnp_OrderType: 'other',
+  //     vnp_Amount: amount * 100,             // ✅ dùng remaining
+  //     vnp_ReturnUrl: returnUrl,
+  //     vnp_IpAddr: dto.ipAddress || '127.0.0.1',
+  //     vnp_CreateDate,
+  //     vnp_ExpireDate,
+  //   };
 
-    const sorted = sortObject(params);
-    const signData = toQueryString(sorted);
-    const vnp_SecureHash = hmacSHA512(hashSecret, signData);
-    const payUrl = `${vnpUrl}?${signData}&vnp_SecureHash=${vnp_SecureHash}`;
+  //   const sorted = sortObject(params);
+  //   const signData = toQueryString(sorted);
+  //   const vnp_SecureHash = hmacSHA512(hashSecret, signData);
+  //   const payUrl = `${vnpUrl}?${signData}&vnp_SecureHash=${vnp_SecureHash}`;
 
-    // Lưu payment PENDING với số tiền dự kiến (remaining)
-    await this.paymentRepo.save(
-      this.paymentRepo.create({
-        invoice: inv,
-        amount,
-        method: PaymentMethod.VIETQR,
-        txnRef: vnp_TxnRef,
-        status: PaymentStatus.PENDING,
-        expireAt: vnp_ExpireDate,
-      }),
-    );
+  //   // Lưu payment PENDING với số tiền dự kiến (remaining)
+  //   await this.paymentRepo.save(
+  //     this.paymentRepo.create({
+  //       invoice: inv,
+  //       amount,
+  //       method: PaymentMethod.VIETQR,
+  //       txnRef: vnp_TxnRef,
+  //       status: PaymentStatus.PENDING,
+  //       expireAt: vnp_ExpireDate,
+  //     }),
+  //   );
 
-    console.log('[VNPay][createVNPayUrl] payUrl =', payUrl);
-    console.log('[VNPay][createVNPayUrl] params =', params);
+  //   console.log('[VNPay][createVNPayUrl] payUrl =', payUrl);
+  //   console.log('[VNPay][createVNPayUrl] params =', params);
 
-    return { payUrl, invoiceId: inv.id, vnp_TxnRef, expireAt: vnp_ExpireDate };
-  }
+  //   return { payUrl, invoiceId: inv.id, vnp_TxnRef, expireAt: vnp_ExpireDate };
+  // }
 
 
   /** Return (browser): chỉ xác thực checksum & redirect về FE */
@@ -290,6 +290,39 @@ export class PaymentService {
 
     return true;
   }
+// payment.service.ts
+
+async findOrCreatePendingPayosPayment(invoiceId: string, amount: number) {
+  // load invoice + payments để check pending
+  const inv = await this.invoiceRepo.findOne({
+    where: { id: invoiceId },
+    relations: ['payments'],
+  });
+  if (!inv) throw new BadRequestException('INVOICE_NOT_FOUND');
+
+  // 1) Nếu đã có thanh toán VIETQR đang PENDING cho invoice này -> dùng lại
+  const existing = (inv.payments ?? []).find(
+    (p) => p.method === PaymentMethod.VIETQR && p.status === PaymentStatus.PENDING,
+  );
+  if (existing) {
+    return existing; // KHÔNG tạo thêm dòng mới
+  }
+
+  // 2) Chưa có -> tạo payment PENDING mới + sinh orderCode
+  const orderCode = Date.now(); // hoặc gen khác miễn unique
+
+  const p = this.paymentRepo.create({
+    invoice: { id: inv.id } as any,
+    amount: Math.round(Number(amount || 0)),
+    method: PaymentMethod.VIETQR,
+    status: PaymentStatus.PENDING,
+    externalTxnId: String(orderCode), // để webhook lookup theo orderCode
+    note: `PAYOS:${orderCode}`,
+    expireAt: null,
+  } as DeepPartial<Payment>);
+
+  return this.paymentRepo.save(p);
+}
 
 
   //vietqr 

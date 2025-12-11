@@ -6,7 +6,7 @@ import { Query, Get } from '@nestjs/common';
 import { QueryInvoicesDto } from './dto/query-invoices.dto';
 import { JwtAuthGuard } from '../core/auth/guards/jwt-auth.guard';
 import { CurrentUser } from 'src/common/decorators/user.decorator';
-import { Roles } from 'src/common/decorators/roles.decorator';
+import { CreateFromOrderDto } from './dto/create-from-order.dto';
 import { ApplyPromotionsDto } from './dto/apply-promotions.dto';
 import { ApiBearerAuth } from '@nestjs/swagger';
 @UseGuards(JwtAuthGuard)
@@ -18,10 +18,9 @@ export class InvoicesController {
   @Post('from-order/:orderId')
   createFromOrder(
     @Param('orderId') orderId: string,
-    @Body() body: { guestCount?: number; customerId?: string | null },
     @CurrentUser() user: any
   ) {
-    return this.svc.createFromOrder(orderId, body, user.id);
+    return this.svc.createFromOrder(orderId,user.id);
   }
 
   @Post(':id/payments')
