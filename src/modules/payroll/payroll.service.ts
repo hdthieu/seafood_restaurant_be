@@ -85,117 +85,131 @@ export class PayrollService {
 
   // ---- CREATE PAYROLL ----
   async createPayroll(dto: CreatePayrollDto) {
-    return this.dataSource.transaction(async (em) => {
-      const from = new Date(dto.workDateFrom);
-      const to = new Date(dto.workDateTo);
+  return this.dataSource.transaction(async (em) => {
+    // Date dùng cho lưu payroll + tính công
+    const fromDate = new Date(dto.workDateFrom);
+    const toDate = new Date(dto.workDateTo);
 
-      let settings = await em.getRepository(SalarySetting).find({ relations: ['staff'] });
+    // String YYYY-MM-DD dùng cho query invoice (tránh lệch timezone)
+    const fromStr = dto.workDateFrom.slice(0, 10);
+    const toStr = dto.workDateTo.slice(0, 10);
 
-      if (!dto.applyAllStaff && dto.staffIds?.length) {
-        settings = settings.filter((s) => dto.staffIds!.includes(s.staff.id));
-      }
-
-      if (!settings.length) {
-        throw new ResponseException('NO_STAFF', 400, 'NO_STAFF_FOR_PAYROLL_CALCULATION');
-      }
-
-      let payroll = em.getRepository(Payroll).create({
-        code: this.genPayrollCode(),
-        name: dto.name ?? `Bảng lương ${from.getMonth() + 1}/${from.getFullYear()}`,
-        workDateFrom: from,
-        workDateTo: to,
-        payCycle: dto.payCycle,
-        status: PayrollStatus.TEMP,
-        totalAmount: '0',
-        paidAmount: '0',
-        remainingAmount: '0',
-      });
-      payroll = await em.save(payroll);
-
-      let total = 0;
-
-      for (const setting of settings) {
-        const workingUnits = await this.calcWorkingUnits(
-          setting.staff.id,
-          from,
-          to,
-          setting.salaryType,
-        );
-
-        const basic = Number(setting.baseAmount) * workingUnits;
-
-        const meta = (setting.meta ?? {}) as SalaryMeta;
-
-        // 1) Doanh thu cá nhân
-        const revenue =
-          meta.bonusEnabled && meta.bonusType === 'PERSONAL_REVENUE'
-            ? await this.getPersonalRevenue(setting.staff.id, from, to, em)
-            : 0;
-
-        const bonusAmount = this.calcCommissionFromRules(
-          revenue,
-          meta.bonusRules ?? [],
-        );
-
-        // 2) Phụ cấp (ví dụ theo ngày công)
-        const workingDays = workingUnits; // nếu salaryType PER_STANDARD_DAY
-        const allowanceAmount = this.calcAllowance(workingDays, meta);
-
-        // 3) Giảm trừ
-        // TODO: sau này bạn query attendance để ra lateTimes / lateMinutes / earlyTimes / earlyMinutes
-        // 3) Giảm trừ: lấy dữ liệu đi muộn / về sớm từ Attendance
-        const violations = await this.getLateEarlyViolations(
-          setting.staff.id,
-          from,
-          to,
-        );
-
-        const deductionAmount = this.calcDeduction(meta, violations);
-
-
-        const overtimeAmount = 0;
-        const commissionAmount = 0; // nếu bạn muốn tách riêng hoa hồng
-
-        const totalAmount =
-          basic +
-          overtimeAmount +
-          bonusAmount +
-          commissionAmount +
-          allowanceAmount -
-          deductionAmount;
-
-        total += totalAmount;
-
-        const slip = em.getRepository(PayrollSlip).create({
-          code: this.genSlipCode(),
-          payroll,
-          staff: setting.staff,
-          workingUnits,
-          basicSalary: String(basic),
-          overtimeAmount: String(overtimeAmount),
-          bonusAmount: String(bonusAmount),
-          commissionAmount: String(commissionAmount),
-          allowanceAmount: String(allowanceAmount),
-          deductionAmount: String(deductionAmount),
-          totalAmount: String(totalAmount),
-          paidAmount: '0',
-          remainingAmount: String(totalAmount),
-          status: PayrollSlipStatus.CLOSED,
-        });
-
-        await em.save(slip);
-      }
-
-
-
-      payroll.totalAmount = String(total);
-      payroll.remainingAmount = String(total);
-      payroll.status = PayrollStatus.CLOSED;
-      await em.save(payroll);
-
-      return new ResponseCommon(201, true, 'CREATE_PAYROLL_SUCCESS', payroll);
+    let settings = await em.getRepository(SalarySetting).find({
+      relations: ['staff'],
     });
-  }
+
+    if (!dto.applyAllStaff && dto.staffIds?.length) {
+      settings = settings.filter((s) => dto.staffIds!.includes(s.staff.id));
+    }
+
+    if (!settings.length) {
+      throw new ResponseException(
+        'NO_STAFF',
+        400,
+        'NO_STAFF_FOR_PAYROLL_CALCULATION',
+      );
+    }
+
+    let payroll = em.getRepository(Payroll).create({
+      code: this.genPayrollCode(),
+      name:
+        dto.name ??
+        `Bảng lương ${fromDate.getMonth() + 1}/${fromDate.getFullYear()}`,
+      workDateFrom: fromDate,
+      workDateTo: toDate,
+      payCycle: dto.payCycle,
+      status: PayrollStatus.TEMP,
+      totalAmount: '0',
+      paidAmount: '0',
+      remainingAmount: '0',
+    });
+    payroll = await em.save(payroll);
+
+    let total = 0;
+
+    for (const setting of settings) {
+      const workingUnits = await this.calcWorkingUnits(
+        setting.staff.id,
+        fromDate,
+        toDate,
+        setting.salaryType,
+      );
+
+      const basic = Number(setting.baseAmount) * workingUnits;
+
+      const meta = (setting.meta ?? {}) as SalaryMeta;
+
+      // 1) Doanh thu cá nhân (dùng fromStr/toStr để khỏi lệch ngày)
+      const revenue =
+        meta.bonusEnabled && meta.bonusType === 'PERSONAL_REVENUE'
+          ? await this.getPersonalRevenue(
+              setting.staff.id,
+              fromStr,
+              toStr,
+              em,
+            )
+          : 0;
+
+      const bonusAmount = this.calcCommissionFromRules(
+        revenue,
+        meta.bonusRules ?? [],
+      );
+
+      // 2) Phụ cấp
+      const workingDays = workingUnits;
+      const allowanceAmount = this.calcAllowance(workingDays, meta);
+
+      // 3) Giảm trừ (vẫn dùng Date)
+      const violations = await this.getLateEarlyViolations(
+        setting.staff.id,
+        fromDate,
+        toDate,
+      );
+
+      const deductionAmount = this.calcDeduction(meta, violations);
+
+      const overtimeAmount = 0;
+      const commissionAmount = 0;
+
+      const totalAmount =
+        basic +
+        overtimeAmount +
+        bonusAmount +
+        commissionAmount +
+        allowanceAmount -
+        deductionAmount;
+
+      total += totalAmount;
+
+      const slip = em.getRepository(PayrollSlip).create({
+        code: this.genSlipCode(),
+        payroll,
+        staff: setting.staff,
+        workingUnits,
+        basicSalary: String(basic),
+        overtimeAmount: String(overtimeAmount),
+        bonusAmount: String(bonusAmount),
+        commissionAmount: String(commissionAmount),
+        allowanceAmount: String(allowanceAmount),
+        deductionAmount: String(deductionAmount),
+        totalAmount: String(totalAmount),
+        paidAmount: '0',
+        remainingAmount: String(totalAmount),
+        status: PayrollSlipStatus.CLOSED,
+      });
+
+      await em.save(slip);
+    }
+
+    payroll.totalAmount = String(total);
+    payroll.remainingAmount = String(total);
+    payroll.status = PayrollStatus.CLOSED;
+    await em.save(payroll);
+
+    return new ResponseCommon(201, true, 'CREATE_PAYROLL_SUCCESS', payroll);
+  });
+}
+
 
   private readonly STANDARD_DAY_HOURS = 8; // 1 ngày công = 8h
 
@@ -549,31 +563,36 @@ export class PayrollService {
   }
 
 
+private async getPersonalRevenue(
+  staffId: string,
+  fromStr: string,  // "YYYY-MM-DD"
+  toStr: string,    // "YYYY-MM-DD"
+  manager: EntityManager,
+): Promise<number> {
+  const qb = manager
+    .getRepository(Invoice)
+    .createQueryBuilder('inv')
+    .innerJoin('inv.order', 'ord')           // hóa đơn -> đơn
+    .innerJoin('ord.createdBy', 'creator')   // đơn -> người tạo
+    .where('creator.id = :sid', { sid: staffId })
+    .andWhere('"inv"."status" = :st', { st: InvoiceStatus.PAID }) // chỉ đơn đã thanh toán
+    .andWhere('"inv"."created_at"::date BETWEEN :from AND :to', {
+      from: fromStr,
+      to: toStr,
+    })
+    .select('COALESCE(SUM("inv"."final_amount"), 0)', 'sum');     // tính theo final_amount
 
-  private async getPersonalRevenue(
-    staffId: string,
-    from: Date,
-    to: Date,
-    manager: EntityManager,
-  ): Promise<number> {
-    const qb = manager
-      .getRepository(Invoice)
-      .createQueryBuilder('inv')
-      .innerJoin('inv.order', 'ord')
-      .innerJoin('ord.createdBy', 'creator') // 👈 người tạo order
-      .where('creator.id = :sid', { sid: staffId })
-      .andWhere('inv.createdAt BETWEEN :from AND :to', { from, to })
-      .andWhere('inv.status = :st', { st: InvoiceStatus.PAID })
-      .select(
-        'COALESCE(SUM(COALESCE(inv.finalAmount, inv.totalAmount)), 0)',
-        'sum',
-      );
+  const raw = await qb.getRawOne<{ sum: string }>();
+  const revenue = Number(raw?.sum ?? 0);
 
-    const { sum } =
-      (await qb.getRawOne<{ sum: string }>()) ?? { sum: '0' };
+  console.log('[PAYROLL][Revenue]', { staffId, fromStr, toStr, revenue });
 
-    return Number(sum || 0);
-  }
+  return revenue;
+}
+
+ 
+
+
 
   // private calcDeductionFromViolations(
   //   meta: SalaryMeta,

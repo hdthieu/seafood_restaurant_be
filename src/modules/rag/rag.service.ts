@@ -2,10 +2,9 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { QdrantClient } from "@qdrant/js-client-rest";
 import { LlmGateway } from "../ai/llm.gateway";
-import { GatewayEmbeddings } from "./langchain-embeddings";
-import { QdrantVectorStore } from "@langchain/qdrant";
-import { Document } from "@langchain/core/documents";
+
 export type RagRole = "KITCHEN" | "WAITER" | "CASHIER" | "MANAGER" | "ALL";
+
 export type RagHit = {
   text: string;
   score?: number;
@@ -17,6 +16,7 @@ export type RagHit = {
 @Injectable()
 export class RagService {
   private readonly log = new Logger("RAG");
+
   private readonly qdrant = new QdrantClient({
     url: process.env.QDRANT_URL || "http://localhost:6333",
     apiKey: process.env.QDRANT_API_KEY || undefined,
@@ -40,9 +40,10 @@ export class RagService {
 
   private async getEmbedDim(): Promise<number> {
     const v = await this.embed("probe");
-    const arr = Array.isArray(v) && Array.isArray((v as any)[0])
-      ? (v as number[][])[0]
-      : (v as number[]);
+    const arr =
+      Array.isArray(v) && Array.isArray((v as any)[0])
+        ? (v as number[][])[0]
+        : (v as number[]);
     if (!arr?.length) throw new Error("Cannot infer embedding dimension");
     return arr.length;
   }
@@ -79,6 +80,16 @@ export class RagService {
     }
 
     return dim;
+  }
+
+  private normalizeVector(v: any): number[] {
+    if (Array.isArray(v)) {
+      if (Array.isArray(v[0])) {
+        return v[0] as number[];
+      }
+      return v as number[];
+    }
+    throw new Error("Embedding vector is invalid");
   }
 
   // ========== UPSERT ==========
@@ -132,23 +143,13 @@ export class RagService {
     });
   }
 
-  private normalizeVector(v: any): number[] {
-    if (Array.isArray(v)) {
-      if (Array.isArray(v[0])) {
-        return v[0] as number[];
-      }
-      return v as number[];
-    }
-    throw new Error("Embedding vector is invalid");
-  }
-
-  // ========== RAW SEARCH (Qdrant REST) ==========
+  // ========== RAW SEARCH ==========
 
   async searchDocs(
     question: string,
     topK = Number(process.env.RAG_TOPK || 16),
     scoreThreshold = Number(process.env.RAG_SCORE_THRESHOLD || 0.05),
-    filter?: any,
+    filter?: any, // hiện tại luôn undefined (không filter role)
   ) {
     await this.ensureCollection(this.docCollection);
     await this.ensureDocPayloadIndexes();
@@ -173,21 +174,21 @@ export class RagService {
       .sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
   }
 
+  // Không dùng role để filter nữa → query toàn bộ docs
   async query(
     question: string,
-    topK = Number(process.env.RAG_TOPK || 16),
-    scoreThreshold?: number,
+    opts?: { topK?: number; scoreThreshold?: number },
   ): Promise<RagHit[]> {
+    const topK = opts?.topK ?? Number(process.env.RAG_TOPK || 16);
     const threshold =
-      typeof scoreThreshold === "number"
-        ? scoreThreshold
-        : Number(process.env.RAG_SCORE_THRESHOLD || 0.18);
+      typeof opts?.scoreThreshold === "number"
+        ? opts.scoreThreshold
+        : Number(process.env.RAG_SCORE_THRESHOLD || 0.12);
 
-    const hits = await this.searchDocs(question, topK, threshold);
+    const hits = await this.searchDocs(question, topK, threshold, undefined);
 
     return (hits || []).map((h: any) => {
       const meta = (h.payload?.metadata || {}) as any;
-
       return {
         text:
           (h.payload?.page_content as string) ||
@@ -201,62 +202,74 @@ export class RagService {
     });
   }
 
-  // ========== RAG.ask (LLM tóm tắt) ==========
+  // ========== LIGHT RAG ==========
 
-  async ask(question: string, topK = Number(process.env.RAG_TOPK || 4)) {
-    const hits = await this.query(question, topK);
+  async askLight(
+    question: string,
+    opts?: { topK?: number },
+  ): Promise<{
+    answer: string;
+    sources: { index: number; score?: number; source?: string }[];
+  }> {
+    const hits = await this.query(question, {
+      topK: opts?.topK,
+    });
 
     const context = hits
       .map(
         (h, i) =>
-          `[${i + 1}] (${(h.score || 0).toFixed(3)}) ${h.source || ""}\n${h.text}`,
+          `[${i + 1}] (${(h.score ?? 0).toFixed(3)}) ${h.source || ""}\n${h.text}`,
       )
       .join("\n\n---\n\n");
 
-   const sys = `
-Bạn là trợ lý nội bộ của nhà hàng.
-
-NHIỆM VỤ:
-- Chỉ dựa vào phần "Tài liệu" để trả lời.
-- Trả lời NGẮN GỌN, đúng TRỌNG TÂM câu hỏi.
-- Nếu câu hỏi dạng "quy trình", "các bước", "workflow":
-  → Trả lời theo dạng:
-    1) ...
-    2) ...
-    3) ...
-- Nếu tài liệu có thông tin liên quan, BẮT BUỘC phải dùng để trả lời.
-- Chỉ được trả lời đúng 1 câu:
-  "Không tìm thấy trong tài liệu."
-  khi thật sự KHÔNG có thông tin liên quan NÀO trong toàn bộ tài liệu.
-
-Trả lời tiếng Việt thân thiện, rõ ràng.
+    const sys = `
+Bạn là trợ lý nội bộ cho nhà hàng Seafood POS.
+CHỈ được trả lời dựa trên phần "Tài liệu".
+Nếu không có thông tin liên quan trong tài liệu, phải trả lời đúng câu:
+"Không thấy trong tài liệu."
+Trả lời tiếng Việt thân thiện, rõ ràng, ngắn gọn.
 `.trim();
-
 
     const usr = `Câu hỏi: ${question}\n\nTài liệu:\n${context || "(trống)"}`;
 
     let answer = "";
     try {
-      answer = (await this.llm.chat(sys, usr, 28_000)) || "";
+      answer = (await this.llm.chat(sys, usr, 20_000)) || "";
     } catch (e) {
       this.log.warn(
-        `[RAG.ask] llm.chat error: ${
+        `[RAG.askLight] llm.chat error: ${
           e instanceof Error ? e.message : e
         }`,
       );
     }
 
-    if ((!answer || !answer.trim()) && hits.length > 0) {
+    const hasDocs = hits.length > 0;
+    const norm = (answer || "").toLowerCase().normalize("NFC");
+    const looksLikeNotFound =
+      norm.includes("không thấy trong tài liệu") ||
+      norm.includes("khong thay trong tai lieu") ||
+      norm.includes("khong tim thay trong tai lieu");
+
+    // Nếu có docs mà LLM lại nói "không thấy" hoặc im luôn → ép trả context
+    if ((!answer || !answer.trim()) && hasDocs) {
       this.log.warn(
-        `[RAG.ask] LLM không trả lời, dùng fallback từ context. hits=${hits.length}`,
+        `[RAG.askLight] Empty answer but has docs, using context fallback.`,
       );
       answer =
-        "Dưới đây là nội dung tài liệu liên quan mà hệ thống tìm được:\n\n" +
+        "Theo tài liệu nội bộ, hệ thống tìm được các nội dung sau:\n\n" +
+        context;
+    } else if (looksLikeNotFound && hasDocs) {
+      this.log.warn(
+        `[RAG.askLight] LLM said 'không thấy trong tài liệu' but docs exist, overriding with context.`,
+      );
+      answer =
+        "Theo tài liệu nội bộ, hệ thống tìm được các nội dung sau (bạn xem và áp dụng phù hợp):\n\n" +
         context;
     }
 
-    if ((!answer || !answer.trim()) && hits.length === 0) {
-      answer = "Không tìm thấy trong tài liệu.";
+    // Nếu thực sự KHÔNG có docs → mới cho nói "Không thấy trong tài liệu."
+    if ((!answer || !answer.trim()) && !hasDocs) {
+      answer = "Không thấy trong tài liệu.";
     }
 
     return {
@@ -269,7 +282,12 @@ Trả lời tiếng Việt thân thiện, rõ ràng.
     };
   }
 
-  // ========== PAYLOAD INDEXES ==========
+  // Alias chung cho các nơi khác
+  async ask(question: string, topK?: number) {
+    return this.askLight(question, { topK });
+  }
+
+  // ========== PAYLOAD INDEXES & MAINTENANCE ==========
 
   private async ensureDocPayloadIndexes() {
     try {
@@ -335,425 +353,26 @@ Trả lời tiếng Việt thân thiện, rõ ràng.
     this.log.warn(`[RAG] Schema collection recreated.`);
   }
 
-  // ========== LangChain VectorStore ==========
-
-  private lcEmbeddings?: GatewayEmbeddings;
-  private lcVectorStore?: QdrantVectorStore;
-
-  private async getVectorStore() {
-    if (this.lcVectorStore) return this.lcVectorStore;
-
-    this.lcEmbeddings = new GatewayEmbeddings(this.llm);
-
-    this.lcVectorStore =
-      await QdrantVectorStore.fromExistingCollection(
-        this.lcEmbeddings,
-        {
-          url: process.env.QDRANT_URL || "http://localhost:6333",
-          apiKey: process.env.QDRANT_API_KEY || undefined,
-          collectionName: this.docCollection,
-          contentPayloadKey: "page_content",
-          metadataPayloadKey: "metadata",
+  async deleteDocsBySource(source: string) {
+    await this.ensureCollection(this.docCollection);
+    try {
+      await this.qdrant.delete(this.docCollection as any, {
+        filter: {
+          must: [
+            {
+              key: "metadata.source",
+              match: { value: source },
+            },
+          ],
         },
-      );
-
-    return this.lcVectorStore;
-  }
-
-  // ========== Query Expansion (không ép file) ==========
-
-  private buildEnrichedQuestion(question: string): string {
-    const q = question.toLowerCase();
-    const keywords: string[] = [];
-
-    // Khiếu nại khách
-    if (
-      q.includes("khiếu nại") ||
-      q.includes("khieu nai") ||
-      q.includes("phàn nàn") ||
-      q.includes("phan nan") ||
-      q.includes("complain")
-    ) {
-      keywords.push(
-        "khiếu nại khách",
-        "phàn nàn của khách",
-        "xử lý phàn nàn",
-        "quy trình xử lý khiếu nại",
-        "khách không hài lòng",
+      } as any);
+      this.log.log(`[RAG] Deleted docs for source=${source}`);
+    } catch (e: any) {
+      this.log.warn(
+        `[RAG] deleteDocsBySource(${source}) error: ${
+          e?.message || e
+        }`,
       );
     }
-
-    // Giờ giấc / chấm công
-    if (
-      q.includes("giờ giấc") ||
-      q.includes("gio giac") ||
-      q.includes("đi trễ") ||
-      q.includes("di tre") ||
-      q.includes("về sớm") ||
-      q.includes("ve som") ||
-      q.includes("chấm công") ||
-      q.includes("cham cong")
-    ) {
-      keywords.push(
-        "quy định giờ giấc làm việc",
-        "đi trễ về sớm",
-        "nội quy chấm công",
-        "quy định chấm công",
-      );
-    }
-
-    // Thưởng phạt / kỷ luật
-    if (
-      q.includes("thưởng phạt") ||
-      q.includes("thuong phat") ||
-      q.includes("kỷ luật") ||
-      q.includes("ky luat") ||
-      q.includes("khen thưởng") ||
-      q.includes("khen thuong")
-    ) {
-      keywords.push(
-        "quy định thưởng phạt",
-        "nội quy kỷ luật",
-        "quy định khen thưởng",
-        "chính sách thưởng phạt",
-        "xử lý vi phạm nội quy",
-      );
-    }
-
-    // PCCC
-    if (
-      q.includes("cháy") ||
-      q.includes("chay") ||
-      q.includes("nổ") ||
-      q.includes("no ") ||
-      q.includes("pccc") ||
-      q.includes("hoả hoạn") ||
-      q.includes("hoa hoan")
-    ) {
-      keywords.push(
-        "phòng cháy chữa cháy",
-        "xử lý cháy nổ",
-        "an toàn PCCC",
-        "quy trình PCCC",
-      );
-    }
-
-    if (!keywords.length) return question;
-
-    return `${question}\n\nTỪ KHÓA LIÊN QUAN: ${keywords.join(", ")}`;
   }
-
-  // ========== LLM RERANK (B) ==========
-
-  private async rerankDocsWithLLM(
-    docs: Document[],
-    question: string,
-  ): Promise<Document[]> {
-    if (!docs.length) return docs;
-
-    // Giới hạn số doc gửi lên LLM cho đỡ nặng
-    const MAX_RERANK = 20;
-    const slice = docs.slice(0, MAX_RERANK);
-
-    const sys = `
-Bạn là mô-đun RERANK tài liệu cho trợ lý nội bộ nhà hàng.
-
-NHIỆM VỤ:
-- Nhận vào câu hỏi + một danh sách đoạn tài liệu (doc).
-- Xếp hạng các doc theo mức độ LIÊN QUAN đến câu hỏi, từ cao đến thấp.
-- Chỉ trả về DANH SÁCH CHỈ SỐ, dạng: "0, 5, 2, 1, 3" (sử dụng chỉ số đã cho).
-- Không giải thích, không thêm từ nào khác.
-
-Nếu không chắc, cứ dựa trên mức độ gần nghĩa với câu hỏi.
-Trả về ÍT NHẤT 1 chỉ số.
-`.trim();
-
-    const docsText = slice
-      .map((d, i) => {
-        const meta = (d as any).metadata || {};
-        const src = meta.source || "";
-        let txt = (d as any).pageContent || (d as any).page_content || "";
-        txt = txt.replace(/^=+\s*FILE:[^\n]*\n/gi, "").trim();
-        if (txt.length > 500) {
-          txt = txt.slice(0, 500) + " …";
-        }
-        return `[#${i}] source=${src}\n${txt}`;
-      })
-      .join("\n\n---\n\n");
-
-    const usr = `
-Câu hỏi: """${question}"""
-
-DANH SÁCH DOC:
-${docsText}
-
-Hãy trả về danh sách chỉ số (ví dụ: "0, 2, 1, 3").
-`.trim();
-
-    const out = await this.llm.chat(sys, usr, 12_000);
-    const raw = (out || "").trim();
-    if (!raw) return docs;
-
-    // Parse chuỗi "0, 5, 2, 1"
-    const idxs = raw
-      .split(/[^0-9]+/)
-      .map((x) => x.trim())
-      .filter(Boolean)
-      .map((x) => Number(x))
-      .filter((n) => Number.isInteger(n) && n >= 0 && n < slice.length);
-
-    if (!idxs.length) return docs;
-
-    const reordered: Document[] = [];
-    const used = new Set<number>();
-
-    for (const i of idxs) {
-      if (!used.has(i)) {
-        reordered.push(slice[i]);
-        used.add(i);
-      }
-    }
-
-    // Thêm các doc còn lại (nếu LLM không liệt kê đủ)
-    slice.forEach((d, i) => {
-      if (!used.has(i)) reordered.push(d);
-    });
-
-    // Nếu docs gốc nhiều hơn MAX_RERANK → nối phần còn lại phía sau
-    if (docs.length > MAX_RERANK) {
-      reordered.push(...docs.slice(MAX_RERANK));
-    }
-
-    return reordered;
-  }
-
- async askWithLangChain(
-  question: string,
-  opts?: {
-    topK?: number;
-    role?: "KITCHEN" | "WAITER" | "CASHIER" | "MANAGER" | "ALL";
-    scoreThreshold?: number; // tạm chưa dùng vì LangChain không trả score
-  },
-) {
-  await this.ensureCollection(this.docCollection);
-  await this.ensureDocPayloadIndexes();
-
-  const topK = opts?.topK ?? Number(process.env.RAG_TOPK || 40);
-  const role = opts?.role;
-
-  const store = await this.getVectorStore();
-
-  // ===== 1) Filter theo role =====
-  const must: any[] = [];
-  const q = question.toLowerCase();
-  let deptRole: RagRole | null = null;
-
-  if (q.includes("bếp") || q.includes("bep") || q.includes("kitchen")) {
-    deptRole = "KITCHEN";
-  } else if (
-    q.includes("phục vụ") ||
-    q.includes("phuc vu") ||
-    q.includes("waiter")
-  ) {
-    deptRole = "WAITER";
-  } else if (
-    q.includes("thu ngân") ||
-    q.includes("thu ngan") ||
-    q.includes("cashier")
-  ) {
-    deptRole = "CASHIER";
-  } else if (
-    q.includes("quản lý") ||
-    q.includes("quan ly") ||
-    q.includes("manager")
-  ) {
-    deptRole = "MANAGER";
-  }
-
- let roleFilter: RagRole | null = null;
-
-// đoán bộ phận theo câu hỏi
-if (deptRole) {
-  roleFilter = deptRole;
-} else if (role && role !== "ALL" && role !== "MANAGER") {
-  // 👈 MANAGER coi như ALL, không filter
-  roleFilter = role;
-}
-
-if (roleFilter) {
-  must.push({
-    key: "metadata.role",
-    match: { any: [roleFilter, "ALL"] },
-  });
-}
-
-
-  const filter = must.length ? { must } : undefined;
-
-  // ===== 2) Query expansion + vector search =====
-  const enrichedQuestion = this.buildEnrichedQuestion(question);
-
-  const docs = (await store.similaritySearch(
-    enrichedQuestion,
-    topK,
-    filter,
-  )) as Document[];
-
-  this.log.log(
-    `[RAG] [LangChain] query="${question}" enriched="${enrichedQuestion}" docs=${docs.length}`,
-  );
-  docs.forEach((d: any, i) => {
-    this.log.log(
-      `[RAG] [${i}] src=${d.metadata?.source} idx=${d.metadata?.index} role=${d.metadata?.role}`,
-    );
-  });
-
-  if (!docs.length) {
-    return {
-      answer: "Không tìm thấy trong tài liệu.",
-      sources: [],
-    };
-  }
-
-  // ===== 3) Rerank bằng LLM (nếu lỗi thì giữ nguyên) =====
-  let rankedDocs = docs;
-  try {
-    rankedDocs = await this.rerankDocsWithLLM(docs, question);
-  } catch (e: any) {
-    this.log.warn(`[RAG] rerankDocsWithLLM error: ${e?.message || e}`);
-  }
-
-  // ===== 4) Chọn doc dùng làm context (giới hạn cho gọn) =====
-  const MAX_CONTEXT_DOCS = 6;
-
-  // Option: ưu tiên các chunk cùng source với doc tốt nhất, nhưng vẫn giới hạn số lượng
-  const bestSource = (rankedDocs[0] as any).metadata?.source as
-    | string
-    | undefined;
-
-  let selectedDocs: Document[];
-  if (bestSource) {
-    const sameSource = rankedDocs.filter(
-      (d: any) => d.metadata?.source === bestSource,
-    );
-    sameSource.sort(
-      (a: any, b: any) => (a.metadata?.index ?? 0) - (b.metadata?.index ?? 0),
-    );
-    selectedDocs = sameSource.slice(0, MAX_CONTEXT_DOCS);
-  } else {
-    selectedDocs = rankedDocs.slice(0, MAX_CONTEXT_DOCS);
-  }
-
-  const context = selectedDocs
-    .map((d: any, i) => {
-      let txt = d.pageContent ?? d.page_content ?? "";
-      txt = String(txt)
-        .replace(/^=+\s*FILE:[^\n]*\n/gi, "")
-        .trim();
-      return `[#${i + 1}] source=${d.metadata?.source ?? ""}\n${txt}`;
-    })
-    .join("\n\n---\n\n");
-
-  // ===== 5) Gọi LLM trả lời dựa trên context =====
-  const sys = `
-Bạn là trợ lý nội bộ của nhà hàng.
-
-NHIỆM VỤ:
-- Chỉ dựa vào phần "Tài liệu" để trả lời.
-- Trả lời NGẮN GỌN, đúng TRỌNG TÂM câu hỏi.
-- Nếu câu hỏi dạng "quy trình", "các bước", "workflow":
-  → Trả lời theo dạng:
-    1) ...
-    2) ...
-    3) ...
-- Không bịa, không thêm nội dung bên ngoài.
-- Nếu thật sự không có thông tin liên quan, trả lời đúng 1 câu:
-  "Không tìm thấy trong tài liệu."
-
-Trả lời tiếng Việt thân thiện, rõ ràng.
-`.trim();
-
-  const usr = `
-Câu hỏi: ${question}
-
-Tài liệu:
-${context || "(trống)"}
-`.trim();
-
-  // ... sau khi build `context` và gọi LLM:
-
-let answer = "";
-try {
-  answer = (await this.llm.chat(sys, usr, 28_000)) || "";
-} catch (e) {
-  this.log.warn(
-    `[RAG.askWithLangChain] llm.chat error: ${
-      e instanceof Error ? e.message : e
-    }`,
-  );
-}
-
-// ===== Fallback thông minh =====
-const hasDocs = rankedDocs.length > 0;
-const normAnswer = (answer || "").toLowerCase().normalize("NFC");
-
-// Nếu LLM bảo "không tìm thấy" nhưng thực ra MÌNH có docs → không cho nói câu đó
-const looksLikeNotFound =
-  normAnswer.includes("không tìm thấy trong tài liệu") ||
-  normAnswer.includes("khong tim thay trong tai lieu");
-
-if ((!answer || !answer.trim()) && hasDocs) {
-  // LLM im luôn → show context
-  this.log.warn(
-    `[RAG.askWithLangChain] Empty answer but has docs, using context fallback.`,
-  );
-  answer =
-    "Theo tài liệu nội bộ, thông tin liên quan như sau:\n\n" + context;
-} else if (looksLikeNotFound && hasDocs) {
-  // LLM nói "không tìm thấy" mà thực tế có doc → override
-  this.log.warn(
-    `[RAG.askWithLangChain] LLM said 'không tìm thấy' but docs exist, overriding with context.`,
-  );
-  answer =
-    "Theo tài liệu nội bộ, hệ thống tìm được các nội dung sau (bạn xem và áp dụng phù hợp):\n\n" +
-    context;
-}
-
-// Nếu thực sự KHÔNG có docs → mới cho nói "Không tìm thấy trong tài liệu."
-if (!answer?.trim() && !hasDocs) {
-  answer = "Không tìm thấy trong tài liệu.";
-}
-
-return {
-  answer: answer.trim(),
-  sources: selectedDocs.map((d: any, i) => ({
-    index: i + 1,
-    source: d.metadata?.source,
-    role: d.metadata?.role,
-  })),
-};
-}
-// src/modules/rag/rag.service.ts
-
-async deleteDocsBySource(source: string) {
-  await this.ensureCollection(this.docCollection);
-  try {
-    await this.qdrant.delete(this.docCollection as any, {
-      filter: {
-        must: [
-          {
-            key: "metadata.source",
-            match: { value: source },
-          },
-        ],
-      },
-    } as any);
-    this.log.log(`[RAG] Deleted docs for source=${source}`);
-  } catch (e: any) {
-    this.log.warn(
-      `[RAG] deleteDocsBySource(${source}) error: ${e?.message || e}`,
-    );
-  }
-}
-
 }

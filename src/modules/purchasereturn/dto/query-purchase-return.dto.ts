@@ -12,12 +12,12 @@ export class QueryPurchaseReturnDto {
     @Min(1)
     page?: number = 1;
 
-    @ApiPropertyOptional({ example: 20 })
+    @ApiPropertyOptional({ example: 10 })
     @IsOptional()
     @Type(() => Number)
     @IsInt()
     @Min(1)
-    limit?: number = 20;
+    limit?: number = 10;
 
     @ApiPropertyOptional({ example: '' })
     @IsOptional()
