@@ -355,26 +355,31 @@ async findOrCreatePendingPayosPayment(invoiceId: string, amount: number) {
     return this.paymentRepo.findOne({ where: { externalTxnId: String(orderCode), status: PaymentStatus.PENDING } });
   }
 
-  async markPaymentSuccessByOrderCode(orderCode: number, extra?: { transactionId?: string }) {
-    const pay = await this.paymentRepo.findOne({ where: { externalTxnId: String(orderCode) } });
-    if (!pay) return;
+ async markPaymentSuccessByOrderCode(
+  orderCode: number,
+  extra?: { transactionId?: string },
+) {
+  const pay = await this.paymentRepo.findOne({
+    where: { externalTxnId: String(orderCode) },
+  });
+  if (!pay) return;
 
-    pay.status = PaymentStatus.SUCCESS;
+  // ❌ KHÔNG set SUCCESS nữa, vì payment SUCCESS đã được tạo bởi addPayment
+  // if (pay.status !== PaymentStatus.SUCCESS) {
+  //   pay.status = PaymentStatus.SUCCESS;
+  // }
 
-    // chỉ set externalTxnId = transactionId nếu chưa bị dùng
-    if (extra?.transactionId) {
-      const txId = String(extra.transactionId);
-      const dup = await this.paymentRepo.exist({ where: { externalTxnId: txId } });
-      if (!dup) {
-        pay.externalTxnId = txId;
-      } else {
-        // giữ nguyên orderCode, ghi transactionId vào note để đối soát
-        pay.note = [pay.note, `txnId=${txId}`].filter(Boolean).join(' | ');
-      }
-    }
+  // Chỉ cập nhật thêm thông tin transactionId vào note để đối soát
+  if (extra?.transactionId) {
+    const txId = String(extra.transactionId);
 
-    await this.paymentRepo.save(pay);
+    // Nếu muốn tránh trùng externalTxnId, chỉ log vào note
+    pay.note = [pay.note, `txnId=${txId}`].filter(Boolean).join(' | ');
   }
+
+  await this.paymentRepo.save(pay);
+}
+
 
   async createPendingPayment(dto: CreatePendingPaymentDto) {
     const inv = await this.invoiceRepo.findOne({ where: { id: dto.invoiceId } });
