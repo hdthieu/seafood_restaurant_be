@@ -6,7 +6,6 @@ import { LlmGateway } from "./llm.gateway";
 
 type UiMsg = { role: "user" | "assistant"; content: string };
 type QuestionKind = "DATA" | "RAG" | "CHAT" | "SQL" | "TIME";
-type RagRole = "KITCHEN" | "WAITER" | "CASHIER" | "MANAGER" | "ALL";
 
 const TZ_DEFAULT = process.env.TZ || "Asia/Ho_Chi_Minh";
 
@@ -149,9 +148,9 @@ CHỈ trả về một trong năm chuỗi: DATA, SQL, RAG, TIME, CHAT.
   }
 
   // =============================
-  // AUTO MODE
+  // AUTO MODE (không dùng role nữa)
   // =============================
-  private async autoRoute(question: string, ragRole: RagRole = "ALL") {
+  private async autoRoute(question: string) {
     // 0) TIME bằng regex → trả lời ngay
     if (this.isTimeQuestion(question)) {
       this.logger.log(
@@ -198,19 +197,17 @@ CHỈ trả về một trong năm chuỗi: DATA, SQL, RAG, TIME, CHAT.
       }
     }
 
-    // 4) RAG → đọc tài liệu (dùng LangChain + role)
+    // 4) RAG → dùng LIGHT RAG alias this.rag.ask (role = ALL bên trong)
     if (kind === "RAG") {
       try {
-        const rag = await this.rag.askWithLangChain(question, {
-          role: ragRole,
-        });
+        const rag = await this.rag.ask(question);
         return {
           role: "assistant",
           content: rag.answer,
           data: { sources: rag.sources },
         };
       } catch (e: any) {
-        this.logger.warn(`[RAG] Lỗi RAG: ${e?.message}`);
+        this.logger.warn(`[RAG] Lỗi LIGHT RAG: ${e?.message}`);
         return {
           role: "assistant",
           content: "❌ Không đọc được tài liệu nội bộ.",
@@ -218,7 +215,7 @@ CHỈ trả về một trong năm chuỗi: DATA, SQL, RAG, TIME, CHAT.
       }
     }
 
-    // 5) CHAT → Gemini
+    // 5) CHAT → Gemini/OpenAI qua LlmGateway
     const text = await this.llm.chat(
       `
 Bạn là trợ lý AI thân thiện cho quản lý nhà hàng.
@@ -239,9 +236,9 @@ Bạn là trợ lý AI thân thiện cho quản lý nhà hàng.
   }
 
   // =============================
-  // MAIN ROUTE
+  // MAIN ROUTE (không còn ctx.role)
   // =============================
-  async route(messages: UiMsg[], ctx: { role: RagRole }) {
+  async route(messages: UiMsg[]) {
     const questionRaw =
       messages.filter((m) => m.role === "user").pop()?.content || "";
     if (!questionRaw) return { role: "assistant", content: "Xin chào 👋" };
@@ -252,7 +249,7 @@ Bạn là trợ lý AI thân thiện cho quản lý nhà hàng.
       .trim();
 
     this.logger.log(
-      `[AiService] mode=${mode}, role=${ctx.role}, question="${question}"`,
+      `[AiService] mode=${mode}, question="${question}"`,
     );
 
     // ép /sql → SmartSQL
@@ -273,11 +270,9 @@ Bạn là trợ lý AI thân thiện cho quản lý nhà hàng.
       }
     }
 
-    // ép /rag → RAG (LangChain + role)
+    // ép /rag → LIGHT RAG (không phân role)
     if (mode === "rag") {
-      const rag = await this.rag.askWithLangChain(question, {
-        role: ctx.role ?? "ALL",
-      });
+      const rag = await this.rag.ask(question);
       return {
         role: "assistant",
         content: rag.answer,
@@ -301,10 +296,11 @@ Bạn là trợ lý AI thân thiện cho quản lý nhà hàng.
     }
 
     // AUTO
-    return this.autoRoute(question, ctx.role ?? "ALL");
+    return this.autoRoute(question);
   }
 
-  async chat(uiMessages: UiMsg[], ctx: { role: RagRole }) {
-    return this.route(uiMessages || [], ctx);
+  // Hàm public cho controller – KHÔNG cần ctx nữa
+  async chat(uiMessages: UiMsg[]) {
+    return this.route(uiMessages || []);
   }
 }

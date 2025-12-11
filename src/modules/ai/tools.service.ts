@@ -33,6 +33,8 @@ export class ToolsService {
   private schemaContext = "";
   private schemaLoadedAt = 0;
 
+  private COLUMN_NAME_MAP = new Map<string, string>();
+
   constructor(
     private readonly ds: DataSource,
     private readonly llm: LlmGateway,
@@ -127,11 +129,10 @@ ${JSON.stringify(sample, null, 2)}
       ].join(", ")}]`,
     );
   }
- private COLUMN_NAME_MAP = new Map<string, string>();
 
-private async refreshSchemaContext() {
-  const cols = await this.ds.query(
-    `
+  private async refreshSchemaContext() {
+    const cols = await this.ds.query(
+      `
       SELECT c.table_schema, c.table_name, c.column_name, c.data_type
       FROM information_schema.columns c
       JOIN information_schema.tables t
@@ -140,71 +141,72 @@ private async refreshSchemaContext() {
         AND c.table_schema = ANY($1)
       ORDER BY c.table_schema, c.table_name, c.ordinal_position
       `,
-    [[...this.SCHEMA_ALLOWLIST]],
-  );
+      [[...this.SCHEMA_ALLOWLIST]],
+    );
 
-  const perTable: Record<
-    string,
-    Array<{ column_name: string; data_type: string }>
-  > = {};
+    const perTable: Record<
+      string,
+      Array<{ column_name: string; data_type: string }>
+    > = {};
 
-  // reset map mỗi lần reload schema
-  this.COLUMN_NAME_MAP = new Map<string, string>();
+    // reset map mỗi lần reload schema
+    this.COLUMN_NAME_MAP = new Map<string, string>();
 
-  for (const r of cols) {
-    const key = `${r.table_schema}.${r.table_name}`;
-    if (!perTable[key]) perTable[key] = [];
-    perTable[key].push({
-      column_name: r.column_name,
-      data_type: r.data_type,
-    });
+    for (const r of cols) {
+      const key = `${r.table_schema}.${r.table_name}`;
+      if (!perTable[key]) perTable[key] = [];
+      perTable[key].push({
+        column_name: r.column_name,
+        data_type: r.data_type,
+      });
 
-    const colName = String(r.column_name);          // ví dụ: menuItemId, menu_item_id
-    const norm = colName.toLowerCase();            // menuitemid / menu_item_id
+      const colName = String(r.column_name); // ví dụ: createdAt, created_at
+      const norm = colName.toLowerCase(); // createdat / created_at
 
-    // 1) lowercase giữ nguyên underscore
-    this.COLUMN_NAME_MAP.set(norm, colName);
+      // 1) lowercase giữ nguyên underscore
+      this.COLUMN_NAME_MAP.set(norm, colName);
 
-    // 2) lowercase bỏ underscore -> menuitemid
-    const normNoUnderscore = norm.replace(/_/g, "");
-    if (!this.COLUMN_NAME_MAP.has(normNoUnderscore)) {
-      this.COLUMN_NAME_MAP.set(normNoUnderscore, colName);
-    }
+      // 2) lowercase bỏ underscore -> createdat
+      const normNoUnderscore = norm.replace(/_/g, "");
+      if (!this.COLUMN_NAME_MAP.has(normNoUnderscore)) {
+        this.COLUMN_NAME_MAP.set(normNoUnderscore, colName);
+      }
 
-    // 3) nếu là snake_case -> thêm cả dạng camelCase (menuItemId) vào map
-    if (norm.includes("_")) {
-      const camel = norm.replace(/_([a-z0-9])/g, (_, c) => c.toUpperCase());
-      if (!this.COLUMN_NAME_MAP.has(camel)) {
-        this.COLUMN_NAME_MAP.set(camel, colName);
+      // 3) nếu là snake_case -> thêm cả dạng camelCase (createdAt) vào map
+      if (norm.includes("_")) {
+        const camel = norm.replace(/_([a-z0-9])/g, (_, c) => c.toUpperCase());
+        if (!this.COLUMN_NAME_MAP.has(camel)) {
+          this.COLUMN_NAME_MAP.set(camel, colName);
+        }
       }
     }
+
+    const lines: string[] = ["# DB Schema (short)"];
+    for (const [fqn, arr] of Object.entries(perTable)) {
+      lines.push(`\n## ${fqn}`);
+      const colsLine = arr
+        .slice(0, 48)
+        .map((c) => `- ${c.column_name} (${c.data_type})`)
+        .join("\n");
+      lines.push(colsLine || "- (no columns?)");
+      if (arr.length > 48) lines.push(`- ... (${arr.length - 48} more)`);
+    }
+
+    for (const f of this.EXTRA_SCHEMA_FILES) {
+      try {
+        const abs = path.resolve(f);
+        const text = await fs.readFile(abs, "utf8");
+        lines.push(`\n# EXTRA: ${path.basename(abs)}\n`);
+        lines.push(text.slice(0, 20_000));
+      } catch {
+        // ignore
+      }
+    }
+
+    this.schemaContext = lines.join("\n");
+    this.schemaLoadedAt = Date.now();
+    this.logger.log(`Schema context built (${this.schemaContext.length} chars)`);
   }
-
-  const lines: string[] = ["# DB Schema (short)"];
-  for (const [fqn, arr] of Object.entries(perTable)) {
-    lines.push(`\n## ${fqn}`);
-    const colsLine = arr
-      .slice(0, 48)
-      .map((c) => `- ${c.column_name} (${c.data_type})`)
-      .join("\n");
-    lines.push(colsLine || "- (no columns?)");
-    if (arr.length > 48) lines.push(`- ... (${arr.length - 48} more)`);
-  }
-
-  for (const f of this.EXTRA_SCHEMA_FILES) {
-    try {
-      const abs = path.resolve(f);
-      const text = await fs.readFile(abs, "utf8");
-      lines.push(`\n# EXTRA: ${path.basename(abs)}\n`);
-      lines.push(text.slice(0, 20_000));
-    } catch {}
-  }
-
-  this.schemaContext = lines.join("\n");
-  this.schemaLoadedAt = Date.now();
-  this.logger.log(`Schema context built (${this.schemaContext.length} chars)`);
-}
-
 
   private async ensureSchemaFresh(ttlMs: number) {
     if (!this.schemaLoadedAt || Date.now() - this.schemaLoadedAt > ttlMs) {
@@ -254,6 +256,7 @@ private async refreshSchemaContext() {
     let sql = sqlInput.trim().replace(/;+\s*$/g, "");
     const lower = sql.toLowerCase();
 
+    // chỉ cho phép SELECT
     if (!lower.startsWith("select")) throw new Error("Chỉ cho phép SELECT.");
     for (const bad of [
       " update ",
@@ -269,6 +272,7 @@ private async refreshSchemaContext() {
     }
     if (sql.includes(";")) throw new Error("Chỉ cho phép 1 câu lệnh duy nhất.");
 
+    // kiểm soát bảng
     if (!this.ALLOW_ALL_TABLES) {
       const tableMatches = [
         ...lower.matchAll(/\b(from|join)\s+([a-z0-9_."']+)/g),
@@ -292,6 +296,8 @@ private async refreshSchemaContext() {
         }
       }
     }
+
+    // LIMIT auto nếu không phải aggregate
     const hasLimit = /\blimit\s+\d+/i.test(sql);
     const isAgg =
       /\bcount\s*\(/i.test(sql) ||
@@ -358,7 +364,7 @@ private async refreshSchemaContext() {
       "at",
       "time",
       "zone",
-      // thêm vài từ hay dùng tránh bị nhầm là cột
+      // tránh nhầm mấy từ này là cột
       "public",
       "asia",
       "ho_chi_minh",
@@ -370,21 +376,22 @@ private async refreshSchemaContext() {
     let match: RegExpExecArray | null;
 
     while ((match = idRegex.exec(sql))) {
-      const token = match[1];           // vd: menuItemId, menuitemid
-      const norm = token.toLowerCase(); // menuitemid
+      const token = match[1]; // ví dụ: createdAt, created_at, createdat
+      const norm = token.toLowerCase();
+      const normNoUnderscore = norm.replace(/_/g, "");
 
       if (seen.has(token)) continue;
       seen.add(token);
 
       if (KEYWORDS.has(norm)) continue;
 
-      // tìm tên cột thật trong schema
-      let real = this.COLUMN_NAME_MAP.get(norm);
-      if (!real) {
-        const normNoUnderscore = norm.replace(/_/g, "");
-        real = this.COLUMN_NAME_MAP.get(normNoUnderscore);
-      }
-      if (!real) continue; // không phải cột -> bỏ
+      // tìm tên cột thật trong schema (ưu tiên token gốc → camelCase)
+      let real =
+        this.COLUMN_NAME_MAP.get(token) ||          // createdAt
+        this.COLUMN_NAME_MAP.get(norm) ||           // createdat / created_at
+        this.COLUMN_NAME_MAP.get(normNoUnderscore); // createdat (no _)
+
+      if (!real) continue; // không phải cột → bỏ
 
       if (real !== token) {
         // nếu tên thật có chữ hoa -> phải quote
@@ -396,5 +403,4 @@ private async refreshSchemaContext() {
 
     return sql;
   }
-
 }

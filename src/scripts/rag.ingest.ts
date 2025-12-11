@@ -1,8 +1,9 @@
-// src/scripts/rag.ingest.ts
+// scripts/rag.ingest.ts
 import "dotenv/config";
 import { NestFactory } from "@nestjs/core";
 import { AppModule } from "../app.module";
 import { RagService } from "../modules/rag/rag.service";
+
 import * as fs from "node:fs/promises";
 import * as fss from "node:fs";
 import * as path from "node:path";
@@ -10,102 +11,7 @@ import fg from "fast-glob";
 import { createHash } from "node:crypto";
 
 /* ─────────────────────────────────────────────
-   1) Helpers: chunking
-   ───────────────────────────────────────────── */
-
-function splitByParagraph(text: string, max = 1400): string[] {
-  const paras = text
-    .split(/\n{2,}/)
-    .map((p) => p.trim())
-    .filter(Boolean);
-
-  const out: string[] = [];
-  let buf = "";
-
-  const flush = () => {
-    const trimmed = buf.trim();
-    if (trimmed) out.push(trimmed);
-    buf = "";
-  };
-
-  for (const p of paras) {
-    const candidate = buf ? `${buf}\n\n${p}` : p;
-
-    if (candidate.length <= max) {
-      buf = candidate;
-    } else {
-      flush();
-
-      if (p.length <= max) {
-        buf = p;
-      } else {
-        let start = 0;
-        while (start < p.length) {
-          out.push(p.slice(start, start + max).trim());
-          start += max;
-        }
-        buf = "";
-      }
-    }
-  }
-
-  flush();
-  return out;
-}
-
-function cleanRawText(raw: string): string {
-  return raw
-    .replace(/^===== FILE:[^\n]*\n/gi, "")
-    .replace(/===== END FILE =====/gi, "")
-    .trim();
-}
-
-function splitDocBySection(raw: string, max = 1400): string[] {
-  const text = cleanRawText(raw);
-  const sections = text.split(/^##\s+/m);
-  const results: string[] = [];
-
-  if (sections[0]?.trim()) {
-    results.push(...splitByParagraph(sections[0].trim(), max));
-  }
-
-  for (let i = 1; i < sections.length; i++) {
-    const sec = sections[i];
-
-    const nlIndex = sec.indexOf("\n");
-    const heading = (nlIndex === -1 ? sec : sec.slice(0, nlIndex)).trim();
-    const body = nlIndex === -1 ? "" : sec.slice(nlIndex + 1).trim();
-
-    if (!heading && !body) continue;
-
-    const full = (`## ${heading}\n${body}`).trim();
-
-    if (full.length <= max) {
-      results.push(full);
-    } else {
-      const paragraphs = splitByParagraph(body, max);
-      if (paragraphs.length === 0) {
-        results.push(...splitByParagraph(full, max));
-        continue;
-      }
-
-      const [firstPara, ...rest] = paragraphs;
-      let firstChunk = (`## ${heading}\n${firstPara}`).trim();
-      if (firstChunk.length <= max) {
-        results.push(firstChunk);
-      } else {
-        results.push(...splitByParagraph(firstChunk, max));
-      }
-
-      results.push(...rest);
-    }
-  }
-
-  return results;
-}
-
-/* ─────────────────────────────────────────────
-   2) Helpers: file & role detection
+   1) Helpers
    ───────────────────────────────────────────── */
 
 const fileExists = (p: string) => {
@@ -118,31 +24,49 @@ const fileExists = (p: string) => {
 
 const DOC_ROOT = path.join(process.cwd(), "docs");
 
+// Role nhận diện theo thư mục (chỉ để lưu metadata cho dễ debug)
 type RagRole = "KITCHEN" | "WAITER" | "CASHIER" | "MANAGER" | "ALL";
+
+// Chủ đề tài liệu (dùng để filter HR / PCCC / Khiếu nại… nếu sau này cần)
+type RagTopic = "HR" | "KHIEN_NAI" | "PCCC" | "OTHER";
 
 function detectRoleByPath(filePath: string): RagRole {
   const s = filePath.toLowerCase().replace(/\\/g, "/");
+
   if (s.includes("/kitchen/")) return "KITCHEN";
   if (s.includes("/waiter/")) return "WAITER";
   if (s.includes("/cashier/")) return "CASHIER";
   if (s.includes("/manager/")) return "MANAGER";
+
   return "ALL";
+}
+
+function detectTopicByPath(filePath: string): RagTopic {
+  const base = path.basename(filePath).toLowerCase();
+
+  if (base.startsWith("hr_")) return "HR";
+  if (base.includes("khieu") || base.includes("kieu_nai")) return "KHIEN_NAI";
+  if (base.includes("pccc") || base.includes("chay") || base.includes("no"))
+    return "PCCC";
+
+  return "OTHER";
 }
 
 function buildPatterns(cliArgs: string[]): string[] {
   if (cliArgs?.length) {
     return cliArgs.map((a) => path.resolve(process.cwd(), a));
   }
-  const root = DOC_ROOT;
+
   return [
-    path.join(root, "**/*.txt").replace(/\\/g, "/"),
-    path.join(root, "**/*.md").replace(/\\/g, "/"),
+    path.join(DOC_ROOT, "**/*.txt").replace(/\\/g, "/"),
+    path.join(DOC_ROOT, "**/*.md").replace(/\\/g, "/"),
   ];
 }
 
 async function readTargets(cliArgs: string[]) {
   const patterns = buildPatterns(cliArgs);
   console.log("[RAG-Ingest] Patterns:", patterns);
+
   const files = await fg(patterns, {
     absolute: true,
     onlyFiles: true,
@@ -158,12 +82,12 @@ async function readTargets(cliArgs: string[]) {
   return files;
 }
 
-/** UUID v5-like deterministic từ baseName + index (Qdrant chấp nhận như UUID) */
+/* UUID deterministic (ổn định khi re-run ingest) */
 function makeDeterministicUUID(baseName: string, index: number): string {
   const hash = createHash("sha1")
     .update(`${baseName}::${index}`)
-    .digest("hex"); // 40 kí tự
-  // format thành 8-4-4-4-12 = 32 hex (bỏ bớt phần dư)
+    .digest("hex");
+
   return [
     hash.slice(0, 8),
     hash.slice(8, 12),
@@ -173,82 +97,79 @@ function makeDeterministicUUID(baseName: string, index: number): string {
   ].join("-");
 }
 
+function cleanRaw(raw: string): string {
+  return raw
+    .replace(/^===== FILE:[^\n]*\n/gi, "")
+    .replace(/===== END FILE =====/gi, "")
+    .trim();
+}
+
 /* ─────────────────────────────────────────────
-   3) MAIN
+   2) MAIN
    ───────────────────────────────────────────── */
 
 async function run() {
   const app = await NestFactory.createApplicationContext(AppModule, {
     logger: ["log", "warn", "error"],
   });
+
   const rag = app.get(RagService);
 
   const args = process.argv.slice(2);
   const files = await readTargets(args);
+
   console.log("[RAG-Ingest] Found", files.length, "files");
 
   if (!files.length) {
-    console.log(
-      "⚠️ Không tìm thấy file docs.\n" +
-        "Ví dụ: npx ts-node -r tsconfig-paths/register -r dotenv/config " +
-        "src/scripts/rag.ingest.ts ./docs/**/*.txt",
-    );
+    console.log("⚠️ Không tìm thấy file docs.");
   }
 
+  // Reset collection nếu cần
   if (String(process.env.RAG_RESET || "0") === "1") {
     console.log("🔥 RAG_RESET=1 → reset docs collection...");
     await rag.resetDocCollection();
   } else {
-    console.log("ℹ️ RAG_RESET!=1 → giữ nguyên dữ liệu cũ, chỉ upsert thêm/ghi đè.");
+    console.log("ℹ️ Giữ nguyên collection cũ, chỉ upsert thêm.");
   }
 
-  for (const f of files) {
-    const ext = path.extname(f).toLowerCase();
+  for (const filePath of files) {
+    const ext = path.extname(filePath).toLowerCase();
     if (ext !== ".txt" && ext !== ".md") {
-      console.log("⏭ skip (not txt/md):", f);
+      console.log("⏭ Skip (not txt/md):", filePath);
       continue;
     }
 
-    const baseName = path.basename(f);
+    const baseName = path.basename(filePath);
+    const raw = await fs.readFile(filePath, "utf8");
+    const cleaned = cleanRaw(raw);
 
-    // Nếu có file nào muốn skip (ví dụ sop_ menu), giữ rule này
-    if (baseName.startsWith("sop_")) {
-      console.log("⏭ skip SOP menu file:", baseName);
-      continue;
-    }
+    const role = detectRoleByPath(filePath);
+    const topic = detectTopicByPath(filePath);
 
-    const raw = await fs.readFile(f, "utf8");
-    const chunks = splitDocBySection(raw, 1400);
-    const role = detectRoleByPath(f);
+    console.log(`📄 Ingest file: ${baseName} (role=${role}, topic=${topic})`);
 
-    console.log(
-      `📚 Ingest file: ${baseName} (role=${role}) → ${chunks.length} chunk(s)`,
-    );
+    // 1 file = 1 chunk
+    const pointId = makeDeterministicUUID(baseName, 0);
 
-    for (let i = 0; i < chunks.length; i++) {
-      const meta: any = {
+    await rag.upsertDocChunk({
+      id: pointId,
+      text: cleaned,
+      meta: {
         source: baseName,
-        absPath: f,
-        index: i,
-        role,
-      };
+        absPath: filePath,
+        index: 0,
+        role,   // chỉ metadata, RAG không filter theo role nữa
+        topic,
+      },
+    });
 
-      const pointId = makeDeterministicUUID(baseName, i);
-
-      console.log(`   ↳ chunk ${i} (id=${pointId})`);
-
-      await rag.upsertDocChunk({
-        id: pointId,
-        text: chunks[i],
-        meta,
-      });
-    }
+    console.log(`   ✔ Upserted chunk id=${pointId}`);
   }
 
   await app.close();
 }
 
-run().catch((e) => {
-  console.error(e);
+run().catch((err) => {
+  console.error(err);
   process.exit(1);
 });
