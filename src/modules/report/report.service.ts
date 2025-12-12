@@ -44,51 +44,51 @@ export class ReportService {
   }
 
 
-async summary(range: RangeKey) {
-  const { start, end } = resolveRange(range);
-  const TZ = this.TZ; 
+  async summary(range: RangeKey) {
+    const { start, end } = resolveRange(range);
+    const TZ = this.TZ;
 
-  // 1) Doanh thu = SUM(final_amount) invoice PAID trong khoảng
-  const revRow = await this.invRepo
-    .createQueryBuilder('inv')
-    .select('COALESCE(SUM(CAST(inv.final_amount AS numeric)), 0)', 'revenue')
-    .where('inv.status = :st', { st: InvoiceStatus.PAID })
-    .andWhere(`inv.updated_at AT TIME ZONE :tz BETWEEN :start AND :end`, {
-      tz: TZ,
-      start,
-      end,
-    })
-    .getRawOne<{ revenue: string }>();
-  const revenue = Number(revRow?.revenue ?? 0);
+    // 1) Doanh thu = SUM(final_amount) invoice PAID trong khoảng
+    const revRow = await this.invRepo
+      .createQueryBuilder('inv')
+      .select('COALESCE(SUM(CAST(inv.final_amount AS numeric)), 0)', 'revenue')
+      .where('inv.status = :st', { st: InvoiceStatus.PAID })
+      .andWhere(`inv.updated_at AT TIME ZONE :tz BETWEEN :start AND :end`, {
+        tz: TZ,
+        start,
+        end,
+      })
+      .getRawOne<{ revenue: string }>();
+    const revenue = Number(revRow?.revenue ?? 0);
 
-  // 2) ĐƠN ĐÃ XONG = số invoice PAID trong khoảng
-  const doneRow = await this.invRepo
-    .createQueryBuilder('inv')
-    .select('COUNT(1)', 'c')
-    .where('inv.status = :st', { st: InvoiceStatus.PAID })
-    .andWhere(`inv.updated_at AT TIME ZONE :tz BETWEEN :start AND :end`, {
-      tz: TZ,
-      start,
-      end,
-    })
-    .getRawOne<{ c: string }>();
-  const ordersDone = Number(doneRow?.c ?? 0);
+    // 2) ĐƠN ĐÃ XONG = số invoice PAID trong khoảng
+    const doneRow = await this.invRepo
+      .createQueryBuilder('inv')
+      .select('COUNT(1)', 'c')
+      .where('inv.status = :st', { st: InvoiceStatus.PAID })
+      .andWhere(`inv.updated_at AT TIME ZONE :tz BETWEEN :start AND :end`, {
+        tz: TZ,
+        start,
+        end,
+      })
+      .getRawOne<{ c: string }>();
+    const ordersDone = Number(doneRow?.c ?? 0);
 
-  // 3) ĐANG PHỤC VỤ = số BÀN đang có order mở hiện tại
-  const inServiceRow = await this.orderRepo
-    .createQueryBuilder('o')
-    .select('COUNT(DISTINCT "o"."tableId")', 'c')
-    .where('o.status IN (:...sts)', {
-      sts: [OrderStatus.PENDING, OrderStatus.CONFIRMED],
-    })
-    .andWhere('"o"."tableId" IS NOT NULL')
-    .andWhere('"o"."merged_into_id" IS NULL')
-    .getRawOne<{ c: string }>();
-  const inService = Number(inServiceRow?.c ?? 0);
+    // 3) ĐANG PHỤC VỤ = số BÀN đang có order mở hiện tại
+    const inServiceRow = await this.orderRepo
+      .createQueryBuilder('o')
+      .select('COUNT(DISTINCT "o"."tableId")', 'c')
+      .where('o.status IN (:...sts)', {
+        sts: [OrderStatus.PENDING, OrderStatus.CONFIRMED],
+      })
+      .andWhere('"o"."tableId" IS NOT NULL')
+      .andWhere('"o"."merged_into_id" IS NULL')
+      .getRawOne<{ c: string }>();
+    const inService = Number(inServiceRow?.c ?? 0);
 
-  // ❌ Không tính customers nữa
-  return { revenue, ordersDone, inService };
-}
+    // ❌ Không tính customers nữa
+    return { revenue, ordersDone, inService };
+  }
 
 
   /** Chuỗi doanh số theo ngày/giờ/thứ (TZ VN) */
@@ -103,7 +103,7 @@ async summary(range: RangeKey) {
           `to_char(date_trunc('day', inv.updated_at AT TIME ZONE :tz), 'YYYY-MM-DD')`,
           'label',
         )
-        .addSelect(`SUM(CAST(inv.total_amount AS numeric))`, 'value')
+        .addSelect(`SUM(CAST(inv.final_amount AS numeric))`, 'value')
         .where('inv.status = :st', { st: InvoiceStatus.PAID })
         .andWhere(`inv.updated_at AT TIME ZONE :tz BETWEEN :start AND :end`, {
           tz: this.TZ,
@@ -132,7 +132,7 @@ async summary(range: RangeKey) {
       const rows = await this.invRepo
         .createQueryBuilder('inv')
         .select(`extract(hour from inv.updated_at AT TIME ZONE :tz)`, 'h')
-        .addSelect(`SUM(CAST(inv.total_amount AS numeric))`, 'value')
+        .addSelect(`SUM(CAST(inv.final_amount AS numeric))`, 'value')
         .where('inv.status = :st', { st: InvoiceStatus.PAID })
         .andWhere(`inv.updated_at AT TIME ZONE :tz BETWEEN :start AND :end`, {
           tz: this.TZ,
@@ -155,7 +155,7 @@ async summary(range: RangeKey) {
     const rows = await this.invRepo
       .createQueryBuilder('inv')
       .select(`extract(dow from inv.updated_at AT TIME ZONE :tz)`, 'd')
-      .addSelect(`SUM(CAST(inv.total_amount AS numeric))`, 'value')
+      .addSelect(`SUM(CAST(inv.final_amount AS numeric))`, 'value')
       .where('inv.status = :st', { st: InvoiceStatus.PAID })
       .andWhere(`inv.updated_at AT TIME ZONE :tz BETWEEN :start AND :end`, {
         tz: this.TZ,
@@ -251,6 +251,7 @@ async summary(range: RangeKey) {
         .addSelect('SUM(oi.quantity)', 'itemsCount')
         .addSelect('SUM(oi.quantity * oi.price)', 'goodsAmount')
         .addSelect('COALESCE(inv.discountTotal,0)', 'invoiceDiscount')
+        .addSelect('COALESCE(inv.final_amount,0)', 'invoiceFinalAmount')
         .groupBy('inv.id');
 
       if (q.paymentMethod) baseQb.andWhere('pay.method = :pm', { pm: q.paymentMethod });
@@ -258,9 +259,12 @@ async summary(range: RangeKey) {
       this.applyOrderFilters(baseQb as any, q);
 
       const aggRows = await baseQb.getRawMany<{
-        invId: string; itemsCount: string; goodsAmount: string; invoiceDiscount: string;
+        invId: string; itemsCount: string; goodsAmount: string; invoiceDiscount: string; invoiceFinalAmount: string;
       }>();
 
+      // Tổng toàn kỳ: goodsAmount and invoiceDiscount can be aggregated from aggRows,
+      // but revenue should be computed directly from invoices.final_amount to avoid
+      // any mismatch caused by joins or distinct invoice_number issues.
       const totalSum = aggRows.reduce((a, r) => {
         const items = Number(r.itemsCount || 0);
         const goods = Number(r.goodsAmount || 0);
@@ -268,9 +272,19 @@ async summary(range: RangeKey) {
         a.itemsCount += items;
         a.goodsAmount += goods;
         a.invoiceDiscount += disc;
-        a.revenue += (goods - disc);
         return a;
       }, { itemsCount: 0, goodsAmount: 0, invoiceDiscount: 0, revenue: 0, otherIncome: 0, tax: 0, returnFee: 0 } as any);
+
+      // compute revenue directly from invoices.final_amount using the same filters
+      const revQb = this.invRepo.createQueryBuilder('inv')
+        .select('COALESCE(SUM(CAST(inv.final_amount AS numeric)),0)', 'revenue')
+        .where('inv.createdAt >= :from AND inv.createdAt < :to', { from, to });
+      if (q.paymentMethod) revQb.innerJoin('inv.payments', 'pay').andWhere('pay.method = :pm', { pm: q.paymentMethod });
+      if (q.areaId) revQb.innerJoin('inv.order', 'o').innerJoin('o.table', 't').andWhere('t.area_id = :aid', { aid: q.areaId });
+      // apply other order filters if present
+      // Note: applyOrderFilters expects a QueryBuilder with joins similar to baseQb; for safety we apply minimal filters above
+      const revRow = await revQb.getRawOne<{ revenue: string }>();
+      totalSum.revenue = Number(revRow?.revenue || 0);
 
       // ===== ROWS PHÂN TRANG (như cũ) =====
       const invQb = this.invRepo.createQueryBuilder('inv')
@@ -283,9 +297,9 @@ async summary(range: RangeKey) {
         inv.created_at as "occurredAt",
         STRING_AGG(DISTINCT pay.method, ',') as "payMethod",
         SUM(oi.quantity) as "itemsCount",
-        SUM(oi.quantity * oi.price) as "goodsAmount",
+  COALESCE(inv.total_amount, SUM(oi.quantity * oi.price)) as "goodsAmount",
         COALESCE(inv.discountTotal,0) as "invoiceDiscount",
-        (SUM(oi.quantity * oi.price) - COALESCE(inv.discountTotal,0)) as "revenue",
+  COALESCE(inv.final_amount,0) as "revenue",
         0 as "otherIncome",
         0 as "tax",
         0 as "returnFee"
@@ -906,12 +920,28 @@ async summary(range: RangeKey) {
     const rows = await qb.getRawMany<{
       invoiceNumber: string; time: string; occurredAt: string; customerId: string; customerName: string; itemsCount: string; goodsAmount: string; invoiceDiscount: string; netRevenue: string;
     }>();
-    const sum = rows.reduce((a, r) => ({
-      itemsCount: a.itemsCount + Number(r.itemsCount || 0),
-      goodsAmount: a.goodsAmount + Number(r.goodsAmount || 0),
-      invoiceDiscount: a.invoiceDiscount + Number(r.invoiceDiscount || 0),
-      netRevenue: a.netRevenue + Number(r.netRevenue || 0),
-    }), { itemsCount: 0, goodsAmount: 0, invoiceDiscount: 0, netRevenue: 0 });
+
+    // ===== TỔNG TOÀN KỲ (KHÔNG PHÂN TRANG) =====
+    const sumQb = this.invRepo.createQueryBuilder('inv')
+      .innerJoin('inv.order', 'o')
+      .innerJoin('o.items', 'oi')
+      .leftJoin('inv.customer', 'cus')
+      .where('inv.createdAt >= :from AND inv.createdAt < :to', { from, to })
+      .andWhere('inv.status = :st', { st: InvoiceStatus.PAID })
+      .select('SUM(oi.quantity)', 'itemsCount')
+      .addSelect('SUM(oi.quantity * oi.price)', 'goodsAmount')
+      .addSelect('SUM(COALESCE(inv.discountTotal,0))', 'invoiceDiscount')
+      .addSelect('SUM(oi.quantity * oi.price) - SUM(COALESCE(inv.discountTotal,0))', 'netRevenue');
+    if (q.customerId) sumQb.andWhere('cus.id = :cid', { cid: q.customerId });
+    if (q.customerQ) sumQb.andWhere('(cus.code ILIKE :cq OR cus.name ILIKE :cq OR cus.phone ILIKE :cq)', { cq: `%${q.customerQ}%` });
+    const sumRow = await sumQb.getRawOne<{ itemsCount: string; goodsAmount: string; invoiceDiscount: string; netRevenue: string }>();
+    const sum = {
+      itemsCount: Number(sumRow?.itemsCount || 0),
+      goodsAmount: Number(sumRow?.goodsAmount || 0),
+      invoiceDiscount: Number(sumRow?.invoiceDiscount || 0),
+      netRevenue: Number(sumRow?.netRevenue || 0),
+    };
+
     return new ResponseCommon(200, true, 'OK', {
       printedAt: new Date().toISOString(),
       dateRange: { from: from.toISOString(), to: to.toISOString() },

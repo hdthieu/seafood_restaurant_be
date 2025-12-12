@@ -20,7 +20,10 @@ export class InvoicesController {
     @Param('orderId') orderId: string,
     @CurrentUser() user: any
   ) {
-    return this.svc.createFromOrder(orderId,user.id);
+    console.log('Creating invoice from order:', orderId, 'by user:', user.id);
+    // Note: service signature is (orderId, body = {}, userId?)
+    // pass empty body as second arg and user.id as third so cashier is set
+    return this.svc.createFromOrder(orderId, {}, user.id);
   }
 
   @Post(':id/payments')
