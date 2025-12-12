@@ -16,7 +16,7 @@ import { CashbookService } from '@modules/cashbook/cashbook.service';
 import { InvoicePromotion } from '@modules/promotions/entities/invoicepromotion.entity';
 import { Promotion } from '@modules/promotions/entities/promotion.entity';
 import { ApplyPromotionsDto } from './dto/apply-promotions.dto';
-import {PaymentsGateway} from '@modules/payments/payments.gateway';
+import { PaymentsGateway } from '@modules/payments/payments.gateway';
 import { KitchenGateway } from '@modules/socket/kitchen.gateway';
 @Injectable()
 export class InvoicesService {
@@ -27,102 +27,141 @@ export class InvoicesService {
     @InjectRepository(Payment) private payRepo: Repository<Payment>,
     private readonly cashbookService: CashbookService,
     @InjectRepository(InvoicePromotion) private invPromoRepo: Repository<InvoicePromotion>,
-     private readonly gateway: PaymentsGateway, 
-      private readonly kitchenGateway: KitchenGateway, 
+    private readonly gateway: PaymentsGateway,
+    private readonly kitchenGateway: KitchenGateway,
   ) { }
 
   /** Tạo invoice từ order (idempotent) */
 
 
   async createFromOrder(
-  orderId: string,
-  body: { customerId?: string | null; guestCount?: number } = {},
-  userId?: string,
-) {
-  return this.ds.transaction(async (em) => {
-    const oRepo = em.getRepository(Order);
-    const invRepo = em.getRepository(Invoice);
+    orderId: string,
+    body: { customerId?: string | null; guestCount?: number } = {},
+    userId?: string,
+  ) {
+    return this.ds.transaction(async (em) => {
+      const oRepo = em.getRepository(Order);
+      const invRepo = em.getRepository(Invoice);
 
-    const order = await oRepo.findOne({
-      where: { id: orderId },
-      relations: [
-        'items',
-        'items.menuItem',
-        'items.menuItem.category',
-        'table',
-        'customer',
-      ],
-    });
-    if (!order) throw new NotFoundException('ORDER_NOT_FOUND');
+      const order = await oRepo.findOne({
+        where: { id: orderId },
+        relations: [
+          'items',
+          'items.menuItem',
+          'items.menuItem.category',
+          'table',
+          'customer',
+        ],
+      });
+      if (!order) throw new NotFoundException('ORDER_NOT_FOUND');
 
-    const calcTotalFromOrder = () =>
-      (order.items ?? []).reduce(
-        (s, it) => s + Number(it.price ?? 0) * Number(it.quantity ?? 0),
-        0,
-      );
+      const calcTotalFromOrder = () =>
+        (order.items ?? []).reduce(
+          (s, it) => s + Number(it.price ?? 0) * Number(it.quantity ?? 0),
+          0,
+        );
 
-    // ---- canonical: ưu tiên body, fallback order ----
-    const canonicalCustomerId =
-      (body.customerId !== undefined ? body.customerId : order.customer?.id) ?? null;
+      // ---- canonical: ưu tiên body, fallback order ----
+      const canonicalCustomerId =
+        (body.customerId !== undefined ? body.customerId : order.customer?.id) ?? null;
 
-    const canonicalGuestCountRaw =
-      body.guestCount !== undefined && body.guestCount !== null
-        ? body.guestCount
-        : (order as any).guestCount ?? null;
+      const canonicalGuestCountRaw =
+        body.guestCount !== undefined && body.guestCount !== null
+          ? body.guestCount
+          : (order as any).guestCount ?? null;
 
-    const canonicalGuestCount =
-      canonicalGuestCountRaw === null || canonicalGuestCountRaw === undefined || canonicalGuestCountRaw === ''
-        ? null
-        : Number(canonicalGuestCountRaw);
+      const canonicalGuestCount =
+        canonicalGuestCountRaw === null || canonicalGuestCountRaw === undefined || canonicalGuestCountRaw === ''
+          ? null
+          : Number(canonicalGuestCountRaw);
 
-    // 2) Đã có invoice -> chỉ cập nhật nhẹ, KHÔNG autoApply/recompute
-    let existed = await invRepo.findOne({
-      where: { order: { id: orderId } },
-      relations: [
-        'order',
-        'order.items',
-        'order.items.menuItem',
-        'order.items.menuItem.category',
-        'order.table',
-        'customer',
-        'payments',
-        'invoicePromotions',
-        'invoicePromotions.promotion',
-      ],
-    });
+      // 2) Đã có invoice -> chỉ cập nhật nhẹ, KHÔNG autoApply/recompute
+      let existed = await invRepo.findOne({
+        where: { order: { id: orderId } },
+        relations: [
+          'order',
+          'order.items',
+          'order.items.menuItem',
+          'order.items.menuItem.category',
+          'order.table',
+          'customer',
+          'payments',
+          'invoicePromotions',
+          'invoicePromotions.promotion',
+        ],
+      });
 
-    if (existed) {
-      let touched = false;
+      if (existed) {
+        let touched = false;
 
-      if (existed.status === InvoiceStatus.UNPAID) {
-        existed.customer = canonicalCustomerId
-          ? ({ id: canonicalCustomerId } as any)
-          : null;
-        existed.guestCount =
-          typeof canonicalGuestCount === 'number' ? canonicalGuestCount : null;
-        touched = true;
+        if (existed.status === InvoiceStatus.UNPAID) {
+          existed.customer = canonicalCustomerId
+            ? ({ id: canonicalCustomerId } as any)
+            : null;
+          existed.guestCount =
+            typeof canonicalGuestCount === 'number' ? canonicalGuestCount : null;
+          touched = true;
 
-        // Đồng bộ totalAmount theo Order nếu cần
-        const total = calcTotalFromOrder();
-        if (Number(existed.totalAmount) !== total) {
-          existed.totalAmount = total.toFixed(2) as any;
+          // Đồng bộ totalAmount theo Order nếu cần
+          const total = calcTotalFromOrder();
+          if (Number(existed.totalAmount) !== total) {
+            existed.totalAmount = total.toFixed(2) as any;
+            touched = true;
+          }
+        }
+
+        if (!existed.cashier && userId) {
+          existed.cashier = { id: userId } as any;
           touched = true;
         }
+
+        if (touched) {
+          existed = await invRepo.save(existed);
+        }
+
+        // ❌ KHÔNG gọi autoApplyPromotions/recompute ở đây nữa
+
+        const full = await invRepo.findOne({
+          where: { id: existed.id },
+          relations: [
+            'order',
+            'order.items',
+            'order.items.menuItem',
+            'order.items.menuItem.category',
+            'order.table',
+            'customer',
+            'payments',
+            'invoicePromotions',
+            'invoicePromotions.promotion',
+          ],
+        });
+        return full!;
       }
 
-      if (!existed.cashier && userId) {
-        existed.cashier = { id: userId } as any;
-        touched = true;
-      }
+      // 3) Chưa có invoice -> tạo mới + auto apply
+      const total = calcTotalFromOrder();
+      const payload: DeepPartial<Invoice> = {
+        invoiceNumber: await this.genNumber(),
+        order: { id: orderId } as any,
+        guestCount:
+          typeof canonicalGuestCount === 'number' ? canonicalGuestCount : null,
+        customer: canonicalCustomerId
+          ? ({ id: canonicalCustomerId } as any)
+          : null,
+        totalAmount: total.toFixed(2),
+        discountTotal: '0',
+        finalAmount: total.toFixed(2),
+        status: InvoiceStatus.UNPAID,
+        cashier: userId ? ({ id: userId } as any) : null,
+      };
+      const created = await invRepo.save(invRepo.create(payload));
 
-      if (touched) {
-        existed = await invRepo.save(existed);
-      }
-
-      // ❌ KHÔNG gọi autoApplyPromotions/recompute ở đây nữa
+      // Chỉ auto apply lần đầu
+      await this.autoApplyPromotions(em, created.id);
+      await this.recomputeInvoiceTotals(em, created.id);
 
       const full = await invRepo.findOne({
-        where: { id: existed.id },
+        where: { id: created.id },
         relations: [
           'order',
           'order.items',
@@ -136,48 +175,8 @@ export class InvoicesService {
         ],
       });
       return full!;
-    }
-
-    // 3) Chưa có invoice -> tạo mới + auto apply
-    const total = calcTotalFromOrder();
-    const payload: DeepPartial<Invoice> = {
-      invoiceNumber: await this.genNumber(),
-      order: { id: orderId } as any,
-      guestCount:
-        typeof canonicalGuestCount === 'number' ? canonicalGuestCount : null,
-      customer: canonicalCustomerId
-        ? ({ id: canonicalCustomerId } as any)
-        : null,
-      totalAmount: total.toFixed(2),
-      discountTotal: '0',
-      finalAmount: total.toFixed(2),
-      status: InvoiceStatus.UNPAID,
-      cashier: userId ? ({ id: userId } as any) : null,
-    };
-
-    const created = await invRepo.save(invRepo.create(payload));
-
-    // Chỉ auto apply lần đầu
-    await this.autoApplyPromotions(em, created.id);
-    await this.recomputeInvoiceTotals(em, created.id);
-
-    const full = await invRepo.findOne({
-      where: { id: created.id },
-      relations: [
-        'order',
-        'order.items',
-        'order.items.menuItem',
-        'order.items.menuItem.category',
-        'order.table',
-        'customer',
-        'payments',
-        'invoicePromotions',
-        'invoicePromotions.promotion',
-      ],
     });
-    return full!;
-  });
-}
+  }
 
 
 
@@ -255,11 +254,11 @@ export class InvoicesService {
       // Nếu đã PAID thì đóng Order
       if (inv.status === InvoiceStatus.PAID && inv.order?.id) {
         await oRepo.update({ id: inv.order.id }, { status: OrderStatus.PAID });
-         this.kitchenGateway.emitOrderChanged({
-        orderId: inv.order.id,
-        tableId: inv.order.table?.id || '',
-        reason: 'ORDER_STATUS', 
-      });
+        this.kitchenGateway.emitOrderChanged({
+          orderId: inv.order.id,
+          tableId: inv.order.table?.id || '',
+          reason: 'ORDER_STATUS',
+        });
       }
 
       // Ghi vào sổ quỹ đã thu: áp dụng cho CASH, VIETQR, VNPAY, CARD
@@ -290,11 +289,11 @@ export class InvoicesService {
 
       if (inv.order?.id) {
         await oRepo.update({ id: inv.order.id }, { status: OrderStatus.PAID });
-         this.kitchenGateway.emitOrderChanged({
-        orderId: inv.order.id,
-        tableId: inv.order.table?.id || '',
-        reason: 'ORDER_STATUS',
-      });
+        this.kitchenGateway.emitOrderChanged({
+          orderId: inv.order.id,
+          tableId: inv.order.table?.id || '',
+          reason: 'ORDER_STATUS',
+        });
       }
       return inv;
     });
