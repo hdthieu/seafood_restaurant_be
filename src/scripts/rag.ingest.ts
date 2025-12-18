@@ -13,7 +13,7 @@ import { createHash } from "node:crypto";
 /* ─────────────────────────────────────────────
    1) Helpers
    ───────────────────────────────────────────── */
-
+// kiểm tra đường dẫn 
 const fileExists = (p: string) => {
   try {
     return fss.statSync(p).isFile();
@@ -30,6 +30,7 @@ type RagRole = "KITCHEN" | "WAITER" | "CASHIER" | "MANAGER" | "ALL";
 // Chủ đề tài liệu (dùng để filter HR / PCCC / Khiếu nại… nếu sau này cần)
 type RagTopic = "HR" | "KHIEN_NAI" | "PCCC" | "OTHER";
 
+// debug role
 function detectRoleByPath(filePath: string): RagRole {
   const s = filePath.toLowerCase().replace(/\\/g, "/");
 
@@ -40,7 +41,7 @@ function detectRoleByPath(filePath: string): RagRole {
 
   return "ALL";
 }
-
+// filter theo chủ đề
 function detectTopicByPath(filePath: string): RagTopic {
   const base = path.basename(filePath).toLowerCase();
 
@@ -62,7 +63,7 @@ function buildPatterns(cliArgs: string[]): string[] {
     path.join(DOC_ROOT, "**/*.md").replace(/\\/g, "/"),
   ];
 }
-
+// trả về file danh sách
 async function readTargets(cliArgs: string[]) {
   const patterns = buildPatterns(cliArgs);
   console.log("[RAG-Ingest] Patterns:", patterns);
@@ -81,7 +82,7 @@ async function readTargets(cliArgs: string[]) {
 
   return files;
 }
-
+// uuid theo tên file
 /* UUID deterministic (ổn định khi re-run ingest) */
 function makeDeterministicUUID(baseName: string, index: number): string {
   const hash = createHash("sha1")
@@ -96,7 +97,7 @@ function makeDeterministicUUID(baseName: string, index: number): string {
     hash.slice(20, 32),
   ].join("-");
 }
-
+// dọn rác
 function cleanRaw(raw: string): string {
   return raw
     .replace(/^===== FILE:[^\n]*\n/gi, "")

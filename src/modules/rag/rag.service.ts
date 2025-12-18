@@ -33,11 +33,12 @@ export class RagService {
   constructor(private readonly llm: LlmGateway) {}
 
   // ========== EMBEDDINGS / COLLECTION ==========
-
+  // gọi llm 
   private async embed(input: string | string[]) {
     return this.llm.embed(input);
   }
 
+  //vetotr size
   private async getEmbedDim(): Promise<number> {
     const v = await this.embed("probe");
     const arr =
@@ -47,7 +48,7 @@ export class RagService {
     if (!arr?.length) throw new Error("Cannot infer embedding dimension");
     return arr.length;
   }
-
+  // check collection
   private async ensureCollection(collection: string): Promise<number> {
     const dim = await this.getEmbedDim();
 
@@ -81,7 +82,7 @@ export class RagService {
 
     return dim;
   }
-
+  // chuẩn hóa vetor về số
   private normalizeVector(v: any): number[] {
     if (Array.isArray(v)) {
       if (Array.isArray(v[0])) {
@@ -93,7 +94,7 @@ export class RagService {
   }
 
   // ========== UPSERT ==========
-
+  // update and search schema chunk
   async upsertSchemaChunk(ch: { id: string; text: string; meta?: any }) {
     await this.ensureCollection(this.schemaCollection);
     const v = await this.embed(ch.text);
@@ -145,6 +146,7 @@ export class RagService {
 
   // ========== RAW SEARCH ==========
 
+  // tìm kiếm vector similiarity
   async searchDocs(
     question: string,
     topK = Number(process.env.RAG_TOPK || 16),
@@ -174,7 +176,7 @@ export class RagService {
       .sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
   }
 
-  // Không dùng role để filter nữa → query toàn bộ docs
+  // trả về hit
   async query(
     question: string,
     opts?: { topK?: number; scoreThreshold?: number },
@@ -203,7 +205,7 @@ export class RagService {
   }
 
   // ========== LIGHT RAG ==========
-
+  // trả lời dựa trên tài liệu
   async askLight(
     question: string,
     opts?: { topK?: number },

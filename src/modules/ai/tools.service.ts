@@ -1,9 +1,6 @@
-// src/modules/ai/tools.service.ts
 import { Injectable, Logger } from "@nestjs/common";
 import { DataSource } from "typeorm";
 import { LlmGateway } from "./llm.gateway";
-import * as fs from "node:fs/promises";
-import * as path from "node:path";
 
 const DEFAULT_MAX_LIMIT = Number(process.env.SMARTSQL_MAX_LIMIT || 200);
 const TZ_DEFAULT = process.env.TZ || "Asia/Ho_Chi_Minh";
@@ -12,8 +9,25 @@ const TZ_DEFAULT = process.env.TZ || "Asia/Ho_Chi_Minh";
 export class ToolsService {
   private readonly logger = new Logger(ToolsService.name);
 
-  private readonly ALLOW_ALL_TABLES =
-    String(process.env.ALLOW_ALL_TABLES || "false").toLowerCase() === "true";
+  /** enum_name -> (lower_label -> real_label) */
+  private ENUM_LABEL_MAP = new Map<string, Map<string, string>>();
+
+  /**
+   * Map cột -> enum type (theo bảng):
+   * key: schema.table
+   * value: Map<columnName, enum_name>
+   */
+  private TABLE_COLUMN_ENUM_TYPE = new Map<string, Map<string, string>>();
+
+  /**
+   * Map theo bảng:
+   * key: schema.table
+   * value: Map<normalizedColumn, realColumn>
+   */
+  private COLUMN_NAME_MAP_BY_TABLE = new Map<string, Map<string, string>>();
+
+  private schemaContext = "";
+  private schemaLoadedAt = 0;
 
   private readonly SCHEMA_ALLOWLIST = new Set<string>(
     (process.env.TABLE_SCHEMAS || "public")
@@ -22,121 +36,65 @@ export class ToolsService {
       .filter(Boolean),
   );
 
-  private readonly EXTRA_SCHEMA_FILES = (process.env.SMARTSQL_SCHEMA_FILES || "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-
-  private TABLE_ALLOWLIST = new Set<string>();
-  private TABLE_ALLOWLIST_FQN = new Set<string>();
-
-  private schemaContext = "";
-  private schemaLoadedAt = 0;
-
-  private COLUMN_NAME_MAP = new Map<string, string>();
-
   constructor(
     private readonly ds: DataSource,
     private readonly llm: LlmGateway,
   ) {}
 
   async onModuleInit() {
-    await this.refreshTableAllowlist();
     await this.refreshSchemaContext();
   }
 
-  // =========================================
-  //  MAIN: Smart SQL (luôn dùng LLM sinh SQL)
-  // =========================================
+  // ======================================================
+  // MAIN
+  // ======================================================
   async runSmartQuery(question: string) {
     await this.ensureSchemaFresh(5 * 60_000);
 
-    // 1) Nhờ LLM sinh SQL
     const raw = await this.generateSql(question, this.schemaContext, {
       timezone: TZ_DEFAULT,
     });
-    const sql = this.sanitize(this.extractSQL(raw));
 
-    // 2) Chạy query
+    let sql = this.extractSQL(raw);
+    sql = this.sanitize(sql);
+
     const rows = await this.ds.query(sql);
 
-    // 3) Dịch kết quả sang ngôn ngữ tự nhiên
     let explain = "";
     try {
-      const sys = `
-Bạn là trợ lý nhà hàng thông minh.
-Nhiệm vụ: diễn giải **kết quả truy vấn dữ liệu** một cách tự nhiên, thân thiện và dễ hiểu cho người quản lý nhà hàng.
-- Nếu kết quả là số lượng (count), hãy trả lời bằng câu tự nhiên, ví dụ:
-  "Hiện tại nhà hàng có 12 món trong thực đơn." hoặc "Có tổng cộng 85 đơn hàng trong tuần này."
-- Nếu là doanh thu hoặc tổng tiền, hãy thêm đơn vị "VNĐ" hoặc "đồng".
-- Nếu là danh sách món ăn, khách hàng, hoặc hóa đơn, hãy tóm tắt vài dòng đầu, không cần in nguyên bảng.
-- Nếu dữ liệu trống, hãy nói lịch sự rằng "Hiện chưa có dữ liệu cho truy vấn này."
-- Tránh dùng ký hiệu SQL hay từ ngữ kỹ thuật (SELECT, COUNT,...).
-- Trả lời bằng tiếng Việt, giọng tự nhiên, thân thiện, có thể dùng emoji nhẹ nhàng.
-`.trim();
+      explain = await this.llm.chat(
+        "Bạn là trợ lý nhà hàng thông minh. Trả lời tiếng Việt, dễ hiểu.",
+        `
+Câu hỏi: ${question}
 
-      const sample = Array.isArray(rows) ? rows.slice(0, 3) : rows;
-      const user = `
-Câu hỏi người dùng: ${question}
-
-SQL đã chạy:
+SQL:
 ${sql}
 
-Kết quả mẫu (tối đa 3 dòng):
-${JSON.stringify(sample, null, 2)}
-      `.trim();
-
-      explain = await this.llm.chat(sys, user, 18_000);
-    } catch (e) {
-      const count = Array.isArray(rows) ? rows.length : 0;
-      explain =
-        count > 0
-          ? `✅ Đã truy vấn xong (${count} dòng).`
-          : `Không có dữ liệu phù hợp với câu hỏi "${question}".`;
+Kết quả mẫu:
+${JSON.stringify(Array.isArray(rows) ? rows.slice(0, 3) : rows, null, 2)}
+        `,
+        18_000,
+      );
+    } catch {
+      explain = Array.isArray(rows) && rows.length
+        ? `✅ Truy vấn thành công (${rows.length} dòng).`
+        : `Hiện chưa có dữ liệu phù hợp.`;
     }
 
-    return {
-      sql,
-      rows,
-      explain,
-      sources: [{ type: "db", note: "Smart-SQL" }],
-    };
+    return { sql, rows, explain };
   }
 
-  // ===== helpers để build schema/sanitize =====
-
-  private async refreshTableAllowlist() {
-    const rows = await this.ds.query(`
-      SELECT table_schema, table_name
-      FROM information_schema.tables
-      WHERE table_type = 'BASE TABLE'
-        AND table_schema NOT IN ('pg_catalog','information_schema')
-    `);
-    const names = new Set<string>(),
-      fqns = new Set<string>();
-    for (const r of rows) {
-      const schema = String(r.table_schema);
-      const name = String(r.table_name);
-      if (!this.SCHEMA_ALLOWLIST.has(schema)) continue;
-      names.add(name);
-      fqns.add(`${schema}.${name}`);
-    }
-    this.TABLE_ALLOWLIST = names;
-    this.TABLE_ALLOWLIST_FQN = fqns;
-    this.logger.log(
-      `Table allowlist: ${names.size} tables from [${[
-        ...this.SCHEMA_ALLOWLIST,
-      ].join(", ")}]`,
-    );
-  }
-
+  // ======================================================
+  // SCHEMA
+  // ======================================================
   private async refreshSchemaContext() {
     const cols = await this.ds.query(
       `
-      SELECT c.table_schema, c.table_name, c.column_name, c.data_type
+      SELECT c.table_schema, c.table_name, c.column_name, c.data_type, c.udt_name
       FROM information_schema.columns c
       JOIN information_schema.tables t
-        ON t.table_schema = c.table_schema AND t.table_name = c.table_name
+        ON t.table_schema = c.table_schema
+       AND t.table_name   = c.table_name
       WHERE t.table_type = 'BASE TABLE'
         AND c.table_schema = ANY($1)
       ORDER BY c.table_schema, c.table_name, c.ordinal_position
@@ -144,68 +102,71 @@ ${JSON.stringify(sample, null, 2)}
       [[...this.SCHEMA_ALLOWLIST]],
     );
 
-    const perTable: Record<
-      string,
-      Array<{ column_name: string; data_type: string }>
-    > = {};
+    this.COLUMN_NAME_MAP_BY_TABLE.clear();
+    this.TABLE_COLUMN_ENUM_TYPE.clear();
+    this.ENUM_LABEL_MAP.clear();
 
-    // reset map mỗi lần reload schema
-    this.COLUMN_NAME_MAP = new Map<string, string>();
+    const perTable: Record<string, string[]> = {};
 
     for (const r of cols) {
-      const key = `${r.table_schema}.${r.table_name}`;
-      if (!perTable[key]) perTable[key] = [];
-      perTable[key].push({
-        column_name: r.column_name,
-        data_type: r.data_type,
-      });
+      const tableKey = `${r.table_schema}.${r.table_name}`;
+      const col = String(r.column_name);
+      const udt = String(r.udt_name || "");
 
-      const colName = String(r.column_name); // ví dụ: createdAt, created_at
-      const norm = colName.toLowerCase(); // createdat / created_at
-
-      // 1) lowercase giữ nguyên underscore
-      this.COLUMN_NAME_MAP.set(norm, colName);
-
-      // 2) lowercase bỏ underscore -> createdat
-      const normNoUnderscore = norm.replace(/_/g, "");
-      if (!this.COLUMN_NAME_MAP.has(normNoUnderscore)) {
-        this.COLUMN_NAME_MAP.set(normNoUnderscore, colName);
+      if (!this.COLUMN_NAME_MAP_BY_TABLE.has(tableKey)) {
+        this.COLUMN_NAME_MAP_BY_TABLE.set(tableKey, new Map());
+        perTable[tableKey] = [];
       }
 
-      // 3) nếu là snake_case -> thêm cả dạng camelCase (createdAt) vào map
-      if (norm.includes("_")) {
-        const camel = norm.replace(/_([a-z0-9])/g, (_, c) => c.toUpperCase());
-        if (!this.COLUMN_NAME_MAP.has(camel)) {
-          this.COLUMN_NAME_MAP.set(camel, colName);
+      if (r.data_type === "USER-DEFINED" && udt) {
+        if (!this.TABLE_COLUMN_ENUM_TYPE.has(tableKey)) {
+          this.TABLE_COLUMN_ENUM_TYPE.set(tableKey, new Map());
         }
+        this.TABLE_COLUMN_ENUM_TYPE.get(tableKey)!.set(col, udt);
+      }
+
+      const dtype =
+        r.data_type === "USER-DEFINED" && udt ? `enum:${udt}` : r.data_type;
+
+      perTable[tableKey].push(`${col} (${dtype})`);
+
+      const m = this.COLUMN_NAME_MAP_BY_TABLE.get(tableKey)!;
+
+      const norm = col.toLowerCase();
+      m.set(norm, col);
+      m.set(norm.replace(/_/g, ""), col);
+
+      if (norm.includes("_")) {
+        m.set(norm.replace(/_([a-z0-9])/g, (_, c) => c.toUpperCase()), col);
       }
     }
 
-    const lines: string[] = ["# DB Schema (short)"];
-    for (const [fqn, arr] of Object.entries(perTable)) {
-      lines.push(`\n## ${fqn}`);
-      const colsLine = arr
-        .slice(0, 48)
-        .map((c) => `- ${c.column_name} (${c.data_type})`)
+    const enums = await this.ds.query(`
+      SELECT t.typname AS enum_name, e.enumlabel AS enum_label
+      FROM pg_type t
+      JOIN pg_enum e ON t.oid = e.enumtypid
+    `);
+
+    for (const r of enums) {
+      if (!this.ENUM_LABEL_MAP.has(r.enum_name)) {
+        this.ENUM_LABEL_MAP.set(r.enum_name, new Map());
+      }
+      this.ENUM_LABEL_MAP.get(r.enum_name)!.set(
+        r.enum_label.toLowerCase(),
+        r.enum_label,
+      );
+    }
+
+    this.schemaContext =
+      "# DB Schema\n" +
+      Object.entries(perTable)
+        .map(
+          ([tbl, cols]) =>
+            `\n## ${tbl}\n${cols.map((c) => `- ${c}`).join("\n")}`,
+        )
         .join("\n");
-      lines.push(colsLine || "- (no columns?)");
-      if (arr.length > 48) lines.push(`- ... (${arr.length - 48} more)`);
-    }
 
-    for (const f of this.EXTRA_SCHEMA_FILES) {
-      try {
-        const abs = path.resolve(f);
-        const text = await fs.readFile(abs, "utf8");
-        lines.push(`\n# EXTRA: ${path.basename(abs)}\n`);
-        lines.push(text.slice(0, 20_000));
-      } catch {
-        // ignore
-      }
-    }
-
-    this.schemaContext = lines.join("\n");
     this.schemaLoadedAt = Date.now();
-    this.logger.log(`Schema context built (${this.schemaContext.length} chars)`);
   }
 
   private async ensureSchemaFresh(ttlMs: number) {
@@ -214,192 +175,146 @@ ${JSON.stringify(sample, null, 2)}
     }
   }
 
+  // ======================================================
+  // LLM
+  // ======================================================
   private async generateSql(
     question: string,
     context: string,
     opts?: { timezone?: string },
   ) {
-    const tz = opts?.timezone || TZ_DEFAULT;
-    const sys =
-      `Bạn là trợ lý PostgreSQL. NHIỆM VỤ: Sinh DUY NHẤT 1 câu SELECT (không CTE, không ; cuối).\n` +
-      `- Chỉ đọc dữ liệu: CẤM UPDATE/DELETE/INSERT/ALTER/DROP/TRUNCATE.\n` +
-      `- Các cột thời gian như created_at là timestamptz theo múi giờ ${tz}.\n` +
-      `- Nếu câu hỏi nói "tháng X năm Y", hiểu là từ 00:00:00 ngày 01 tháng X năm Y đến trước 00:00:00 ngày 01 tháng X+1 năm Y theo múi giờ ${tz}.\n` +
-      `- Nếu dự kiến trả quá nhiều dòng, thêm LIMIT ${DEFAULT_MAX_LIMIT} (trừ khi dùng COUNT/AGG).\n` +
-      `- Chỉ trả về đúng 1 code block \`\`\`sql ... \`\`\`.`;
-
-    const user =
-      `Câu hỏi: ${question}\n\nSchema (rút gọn):\n${context}\n\n` +
-      `Yêu cầu:\n- Dùng đúng tên bảng/cột theo schema trên.\n- KHÔNG thêm text ngoài code block.\n`;
-
-    const out = await this.llm.chat(sys, user, 25_000);
-    if (!out) throw new Error("LLM did not return any SQL.");
-    return out;
+    return this.llm.chat(
+      `
+Bạn là trợ lý PostgreSQL.
+- Chỉ sinh 1 câu SELECT
+- Mỗi bảng phải có alias
+- Mọi cột bắt buộc alias.column
+- Không đoán tên cột
+      `.trim(),
+      `Câu hỏi: ${question}\n\nSchema:\n${context}`,
+      25_000,
+    );
   }
 
+  // ======================================================
+  // SQL PROCESS
+  // ======================================================
   private extractSQL(text: string): string {
-    if (!text) throw new Error("LLM không trả về gì.");
-    const fence =
-      text.match(/```sql([\s\S]*?)```/i) ||
-      text.match(/```([\s\S]*?)```/i);
-    if (fence?.[1]) return fence[1].trim();
+    const m = text.match(/```sql([\s\S]*?)```/i) || text.match(/```([\s\S]*?)```/i);
+    if (m?.[1]) return m[1].trim();
+
     const idx = text.toLowerCase().indexOf("select ");
-    if (idx >= 0)
-      return text
-        .slice(idx)
-        .replace(/[\u0000-\u001F]+/g, " ")
-        .trim();
-    throw new Error("Không tìm thấy câu SELECT trong phản hồi LLM.");
+    if (idx >= 0) return text.slice(idx).trim();
+
+    throw new Error("Không tìm thấy SELECT.");
   }
 
   private sanitize(sqlInput: string): string {
     let sql = sqlInput.trim().replace(/;+\s*$/g, "");
-    const lower = sql.toLowerCase();
 
-    // chỉ cho phép SELECT
-    if (!lower.startsWith("select")) throw new Error("Chỉ cho phép SELECT.");
-    for (const bad of [
-      " update ",
-      " delete ",
-      " insert ",
-      " alter ",
-      " drop ",
-      " truncate ",
-      " create ",
-    ]) {
-      if (lower.includes(bad))
-        throw new Error(`Câu SQL chứa từ khóa cấm: ${bad.trim()}`);
-    }
-    if (sql.includes(";")) throw new Error("Chỉ cho phép 1 câu lệnh duy nhất.");
-
-    // kiểm soát bảng
-    if (!this.ALLOW_ALL_TABLES) {
-      const tableMatches = [
-        ...lower.matchAll(/\b(from|join)\s+([a-z0-9_."']+)/g),
-      ];
-      for (const m of tableMatches) {
-        let raw = m[2].replace(/["']/g, "");
-        raw = raw.split(/\s+/)[0];
-        if (raw.includes(".")) {
-          if (!this.TABLE_ALLOWLIST_FQN.has(raw)) {
-            const tbl = raw.split(".").pop()!;
-            if (!this.TABLE_ALLOWLIST.has(tbl))
-              throw new Error(
-                `Bảng không nằm trong danh sách cho phép: ${raw}`,
-              );
-          }
-        } else {
-          if (!this.TABLE_ALLOWLIST.has(raw))
-            throw new Error(
-              `Bảng không nằm trong danh sách cho phép: ${raw}`,
-            );
-        }
-      }
+    if (!sql.toLowerCase().startsWith("select")) {
+      throw new Error("Chỉ cho phép SELECT.");
     }
 
-    // LIMIT auto nếu không phải aggregate
-    const hasLimit = /\blimit\s+\d+/i.test(sql);
-    const isAgg =
-      /\bcount\s*\(/i.test(sql) ||
-      /\bgroup\s+by\b/i.test(sql) ||
-      /\bsum\s*\(/i.test(sql) ||
-      /\bavg\s*\(/i.test(sql) ||
-      /\bmin\s*\(/i.test(sql) ||
-      /\bmax\s*\(/i.test(sql);
-    if (!hasLimit && !isAgg) sql = `${sql} LIMIT ${DEFAULT_MAX_LIMIT}`;
+    // ==================================================
+    // PARSE TABLE + ALIAS
+    // ==================================================
+    const aliasToTable = new Map<string, string>();
 
-    // ====== AUTO CHUẨN HOÁ TÊN CỘT (camelCase, snake_case, hoa/thường) ======
-    const KEYWORDS = new Set<string>([
-      "select",
-      "from",
-      "where",
-      "and",
-      "or",
-      "not",
-      "group",
-      "by",
-      "order",
-      "limit",
-      "offset",
-      "having",
-      "asc",
-      "desc",
-      "case",
-      "when",
-      "then",
-      "else",
-      "end",
-      "in",
-      "is",
-      "null",
-      "between",
-      "distinct",
-      "like",
-      "ilike",
-      "on",
-      "join",
-      "inner",
-      "left",
-      "right",
-      "full",
-      "outer",
-      "exists",
-      "union",
-      "all",
-      "any",
-      "true",
-      "false",
-      "as",
-      "sum",
-      "count",
-      "avg",
-      "min",
-      "max",
-      "coalesce",
-      "extract",
-      "date_trunc",
-      "now",
-      "current_date",
-      "current_timestamp",
-      "at",
-      "time",
-      "zone",
-      // tránh nhầm mấy từ này là cột
-      "public",
-      "asia",
-      "ho_chi_minh",
-      "timestamptz",
-    ]);
+    const tblRe =
+      /\b(from|join)\s+([a-z0-9_."']+)(?:\s+(?:as\s+)?([a-zA-Z_][a-zA-Z0-9_]*))?/gi;
 
-    const idRegex = /\b([a-zA-Z_][a-zA-Z0-9_]*)\b/g;
-    const seen = new Set<string>();
-    let match: RegExpExecArray | null;
-
-    while ((match = idRegex.exec(sql))) {
-      const token = match[1]; // ví dụ: createdAt, created_at, createdat
-      const norm = token.toLowerCase();
-      const normNoUnderscore = norm.replace(/_/g, "");
-
-      if (seen.has(token)) continue;
-      seen.add(token);
-
-      if (KEYWORDS.has(norm)) continue;
-
-      // tìm tên cột thật trong schema (ưu tiên token gốc → camelCase)
-      let real =
-        this.COLUMN_NAME_MAP.get(token) ||          // createdAt
-        this.COLUMN_NAME_MAP.get(norm) ||           // createdat / created_at
-        this.COLUMN_NAME_MAP.get(normNoUnderscore); // createdat (no _)
-
-      if (!real) continue; // không phải cột → bỏ
-
-      if (real !== token) {
-        // nếu tên thật có chữ hoa -> phải quote
-        const replacement = /[A-Z]/.test(real) ? `"${real}"` : real;
-        const re = new RegExp(`\\b${token}\\b`, "g");
-        sql = sql.replace(re, replacement);
-      }
+    let m: RegExpExecArray | null;
+    while ((m = tblRe.exec(sql))) {
+      const raw = m[2].replace(/["']/g, "").split(/\s+/)[0];
+      const alias = m[3] || raw.split(".").pop()!;
+      aliasToTable.set(alias, raw.includes(".") ? raw : `public.${raw}`);
     }
+
+    // ==================================================
+    // REWRITE alias.column
+    // ==================================================
+    sql = sql.replace(
+      /\b([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z_][a-zA-Z0-9_]*)\b/g,
+      (_, a, c) => {
+        const tableKey = aliasToTable.get(a);
+        if (!tableKey) return `${a}.${c}`;
+
+        const map = this.COLUMN_NAME_MAP_BY_TABLE.get(tableKey);
+        if (!map) return `${a}.${c}`;
+
+        const real =
+          map.get(c) ||
+          map.get(c.toLowerCase()) ||
+          map.get(c.toLowerCase().replace(/_/g, ""));
+
+        if (!real) return `${a}.${c}`;
+        return `${a}.${/[A-Z]/.test(real) ? `"${real}"` : real}`;
+      },
+    );
+
+    // ==================================================
+    // REWRITE bare column (NO alias, không mơ hồ)
+    // ==================================================
+   const KW = new Set([
+  "select","from","join","where","and","or","on","as",
+  "left","right","inner","outer","full","cross",
+  "group","by","order","having","limit","offset",
+  "distinct","union","all","except","intersect",
+  "case","when","then","else","end",
+  "asc","desc","nulls","first","last",
+  "in","is","not","between","like","ilike","exists","any","some",
+  "true","false","null",
+  "count","sum","avg","min","max","coalesce","nullif","date_trunc","extract","now",
+]);
+
+ sql = sql.replace(/\b([a-zA-Z_][a-zA-Z0-9_]*)\b/g, (match, token, offset, src) => {
+  const lower = token.toLowerCase();
+
+  // 1) Skip keywords/functions
+  if (KW.has(lower)) return token;
+
+  // 2) Skip aliases
+  if (aliasToTable.has(token)) return token;
+
+  // 3) Skip nếu token đang sát dấu .  => tránh đụng alias.column, schema.table
+  const prev = src[offset - 1];
+  const next = src[offset + token.length];
+  if (prev === "." || next === ".") return token;
+
+  // 4) Skip nếu token đang nằm trong quote (đơn giản: kề " hoặc ')
+  if (prev === `"` || next === `"` || prev === `'` || next === `'`) return token;
+
+  const hits: Array<{ alias: string; real: string }> = [];
+  for (const [a, tableKey] of aliasToTable.entries()) {
+    const m = this.COLUMN_NAME_MAP_BY_TABLE.get(tableKey);
+    if (!m) continue;
+
+    const real = m.get(token) || m.get(lower) || m.get(lower.replace(/_/g, ""));
+    if (real) hits.push({ alias: a, real });
+  }
+
+  // chỉ rewrite khi khớp đúng 1 bảng -> không mơ hồ
+  if (hits.length !== 1) return token;
+
+  const { alias, real } = hits[0];
+  const out = /[A-Z]/.test(real) ? `"${real}"` : real;
+  return `${alias}.${out}`;
+});
+
+    // ==================================================
+    // AUTO LIMIT
+    // ==================================================
+    if (
+      !/\blimit\s+\d+/i.test(sql) &&
+      !/\b(group\s+by|count\(|sum\(|avg\(|min\(|max\()/i.test(sql)
+    ) {
+      sql += ` LIMIT ${DEFAULT_MAX_LIMIT}`;
+    }
+if (sql.includes('""')) {
+  this.logger.warn(`SmartSQL produced empty identifier: ${sql}`);
+  throw new Error('SQL có identifier rỗng (""), vui lòng thử lại.');
+}
 
     return sql;
   }
