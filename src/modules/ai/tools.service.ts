@@ -49,40 +49,59 @@ export class ToolsService {
   // MAIN
   // ======================================================
   async runSmartQuery(question: string) {
-    await this.ensureSchemaFresh(5 * 60_000);
+  await this.ensureSchemaFresh(5 * 60_000);
 
-    const raw = await this.generateSql(question, this.schemaContext, {
-      timezone: TZ_DEFAULT,
-    });
+  const raw = await this.generateSql(question, this.schemaContext, {
+    timezone: TZ_DEFAULT,
+  });
 
-    let sql = this.extractSQL(raw);
-    sql = this.sanitize(sql);
+  let sql = this.extractSQL(raw);
+  sql = this.sanitize(sql);
 
-    const rows = await this.ds.query(sql);
+  const rows = await this.ds.query(sql);
+  const totalRows = Array.isArray(rows) ? rows.length : 0;
 
-    let explain = "";
-    try {
-      explain = await this.llm.chat(
-        "Bạn là trợ lý nhà hàng thông minh. Trả lời tiếng Việt, dễ hiểu.",
-        `
+  // chỉ lấy mẫu 3 dòng để LLM hiểu cấu trúc
+  const sample = Array.isArray(rows) ? rows.slice(0, 3) : rows;
+
+  // (tuỳ chọn) cắt bớt rows trả về FE để FE khỏi nặng
+  const MAX_RETURN_ROWS = Number(process.env.SMARTSQL_RETURN_ROWS || 50);
+  const rowsForUi = Array.isArray(rows) ? rows.slice(0, MAX_RETURN_ROWS) : rows;
+
+  let explain = "";
+  try {
+    explain = await this.llm.chat(
+      [
+        "Bạn là trợ lý nhà hàng thông minh.",
+        "Trả lời tiếng Việt, dễ hiểu.",
+        "QUAN TRỌNG:",
+        "- Đừng suy ra số lượng bản ghi từ dữ liệu mẫu.",
+        "- Phải dùng TOTAL_ROWS để nói có bao nhiêu kết quả.",
+        "- Nếu TOTAL_ROWS > SAMPLE_ROWS, hãy nói rõ chỉ hiển thị ví dụ một vài dòng.",
+      ].join("\n"),
+      `
 Câu hỏi: ${question}
 
 SQL:
 ${sql}
 
-Kết quả mẫu:
-${JSON.stringify(Array.isArray(rows) ? rows.slice(0, 3) : rows, null, 2)}
-        `,
-        18_000,
-      );
-    } catch {
-      explain = Array.isArray(rows) && rows.length
-        ? `✅ Truy vấn thành công (${rows.length} dòng).`
-        : `Hiện chưa có dữ liệu phù hợp.`;
-    }
+TOTAL_ROWS: ${totalRows}
+SAMPLE_ROWS: ${Array.isArray(sample) ? sample.length : 0}
 
-    return { sql, rows, explain };
+Mẫu dữ liệu (tối đa 3 dòng):
+${JSON.stringify(sample, null, 2)}
+      `.trim(),
+      18_000
+    );
+  } catch {
+    explain = totalRows
+      ? `✅ Truy vấn thành công (${totalRows} dòng).`
+      : `Hiện chưa có dữ liệu phù hợp.`;
   }
+
+  return { sql, rows: rowsForUi, meta: { totalRows }, explain };
+}
+
 
   // ======================================================
   // SCHEMA
@@ -209,113 +228,221 @@ Bạn là trợ lý PostgreSQL.
     throw new Error("Không tìm thấy SELECT.");
   }
 
-  private sanitize(sqlInput: string): string {
-    let sql = sqlInput.trim().replace(/;+\s*$/g, "");
+ private sanitize(sqlInput: string): string {
+  this.logger.debug({ stage: "raw_sql", sql: sqlInput });
 
-    if (!sql.toLowerCase().startsWith("select")) {
-      throw new Error("Chỉ cho phép SELECT.");
+  let sql = sqlInput.trim().replace(/;+\s*$/g, "");
+
+  if (!sql.toLowerCase().startsWith("select")) {
+    throw new Error("Chỉ cho phép SELECT.");
+  }
+
+  // 1) normalize "a . b" => "a.b"
+  sql = sql.replace(
+    /\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\.\s*([a-zA-Z_][a-zA-Z0-9_"]*)\b/g,
+    (_, a, b) => `${a}.${b}`,
+  );
+  this.logger.debug({ stage: "after_normalize_dot", sql });
+
+  // 2) parse table + alias
+  const aliasToTable = new Map<string, string>();
+  const tblRe =
+    /\b(from|join)\s+([a-z0-9_."']+)(?:\s+(?:as\s+)?([a-zA-Z_][a-zA-Z0-9_]*))?/gi;
+
+  let m: RegExpExecArray | null;
+  while ((m = tblRe.exec(sql))) {
+    const raw = String(m[2] ?? "")
+      .replace(/["']/g, "")
+      .split(/\s+/)[0];
+
+    const alias = m[3] || raw.split(".").pop()!;
+    aliasToTable.set(alias, raw.includes(".") ? raw : `public.${raw}`);
+  }
+
+  this.logger.debug({
+    stage: "after_parse_alias",
+    aliases: Array.from(aliasToTable.entries()),
+  });
+
+  // 3) rewrite alias.column using COLUMN_NAME_MAP_BY_TABLE
+  sql = sql.replace(
+    /\b([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z_][a-zA-Z0-9_]*)\b/g,
+    (_, a, c) => {
+      const tableKey = aliasToTable.get(a);
+      if (!tableKey) return `${a}.${c}`;
+
+      const map = this.COLUMN_NAME_MAP_BY_TABLE.get(tableKey);
+      if (!map) return `${a}.${c}`;
+
+      const real =
+        map.get(c) ||
+        map.get(c.toLowerCase()) ||
+        map.get(c.toLowerCase().replace(/_/g, ""));
+
+      if (!real) return `${a}.${c}`;
+      return `${a}.${/[A-Z]/.test(real) ? `"${real}"` : real}`;
+    },
+  );
+  this.logger.debug({ stage: "after_alias_column", sql });
+
+  // helper: check if position is inside single-quoted string (Postgres '' escape)
+  const isInsideSingleQuote = (src: string, pos: number) => {
+    let inSingle = false;
+    for (let i = 0; i < pos; i++) {
+      if (src[i] === "'") {
+        if (src[i + 1] === "'") {
+          i++; // skip escaped ''
+          continue;
+        }
+        inSingle = !inSingle;
+      }
+    }
+    return inSingle;
+  };
+
+  // helper: check if position is inside double-quoted identifier "..."
+  const isInsideDoubleQuote = (src: string, pos: number) => {
+    let inDouble = false;
+    for (let i = 0; i < pos; i++) {
+      if (src[i] === `"`) {
+        // postgres identifier escape: "" inside "..."
+        if (src[i + 1] === `"`) {
+          i++;
+          continue;
+        }
+        inDouble = !inDouble;
+      }
+    }
+    return inDouble;
+  };
+// 3.5) rewrite enum literal values (WHERE alias.enum_col = 'value')
+sql = sql.replace(
+  /\b([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z_][a-zA-Z0-9_]*)\s*(=|!=|<>|IN)\s*(\([\s\S]*?\)|'[^']*')/gi,
+  (full, alias, col, op, rhs) => {
+    const tableKey = aliasToTable.get(alias);
+    if (!tableKey) return full;
+
+    const enumMap = this.TABLE_COLUMN_ENUM_TYPE.get(tableKey);
+    if (!enumMap) return full;
+
+    const enumName =
+      enumMap.get(col) ||
+      enumMap.get(col.toLowerCase()) ||
+      enumMap.get(col.toLowerCase().replace(/_/g, ""));
+    if (!enumName) return full;
+
+    const labelMap = this.ENUM_LABEL_MAP.get(enumName);
+    if (!labelMap) return full;
+
+    if (op.toUpperCase() === "IN" && rhs.startsWith("(")) {
+      const inner = rhs.slice(1, -1);
+      const items = inner
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .map((s) => s.replace(/^'|'$/g, ""));
+
+      const mapped = items.map((v) => {
+        const real = labelMap.get(v.toLowerCase());
+        return real ? `'${real}'` : `'${v}'`;
+      });
+
+      return `${alias}.${col} IN (${mapped.join(", ")})`;
     }
 
-    // ==================================================
-    // PARSE TABLE + ALIAS
-    // ==================================================
-    const aliasToTable = new Map<string, string>();
-
-    const tblRe =
-      /\b(from|join)\s+([a-z0-9_."']+)(?:\s+(?:as\s+)?([a-zA-Z_][a-zA-Z0-9_]*))?/gi;
-
-    let m: RegExpExecArray | null;
-    while ((m = tblRe.exec(sql))) {
-      const raw = m[2].replace(/["']/g, "").split(/\s+/)[0];
-      const alias = m[3] || raw.split(".").pop()!;
-      aliasToTable.set(alias, raw.includes(".") ? raw : `public.${raw}`);
+    if (rhs.startsWith("'")) {
+      const rawVal = rhs.replace(/^'|'$/g, "");
+      const real = labelMap.get(rawVal.toLowerCase());
+      if (!real) return full;
+      return `${alias}.${col} ${op} '${real}'`;
     }
 
-    // ==================================================
-    // REWRITE alias.column
-    // ==================================================
-    sql = sql.replace(
-      /\b([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z_][a-zA-Z0-9_]*)\b/g,
-      (_, a, c) => {
-        const tableKey = aliasToTable.get(a);
-        if (!tableKey) return `${a}.${c}`;
+    return full;
+  }
+);
 
-        const map = this.COLUMN_NAME_MAP_BY_TABLE.get(tableKey);
-        if (!map) return `${a}.${c}`;
+this.logger.debug({ stage: "after_enum_rewrite", sql });
+
+
+  // 4) rewrite bare token (NO alias) only when unambiguous
+  const KW = new Set([
+    "select","from","join","where","and","or","on","as",
+    "left","right","inner","outer","full","cross",
+    "group","by","order","having","limit","offset",
+    "distinct","union","all","except","intersect",
+    "case","when","then","else","end",
+    "asc","desc","nulls","first","last",
+    "in","is","not","between","like","ilike","exists","any","some",
+    "true","false","null",
+    "count","sum","avg","min","max","coalesce","nullif","date_trunc","extract","now",
+    "current_date","current_timestamp",
+  ]);
+
+  sql = sql.replace(
+    /\b([a-zA-Z_][a-zA-Z0-9_]*)\b/g,
+    (match, token, offset: number, src: string) => {
+      const lower = token.toLowerCase();
+
+      // 1) keywords/functions
+      if (KW.has(lower)) return token;
+
+      // 2) table aliases
+      if (aliasToTable.has(token)) return token;
+
+      // 3) skip if adjacent to dot => avoid touching alias.column or schema.table
+      const prev = src[offset - 1];
+      const next = src[offset + token.length];
+      if (prev === "." || next === ".") return token;
+
+      // 4) skip if inside quotes
+      if (isInsideSingleQuote(src, offset)) return token;
+      if (isInsideDoubleQuote(src, offset)) return token;
+
+      // 5) skip if token is output alias after AS
+      const before = src.slice(Math.max(0, offset - 12), offset).toLowerCase();
+      if (/\bas\s*$/.test(before)) return token;
+
+      // 6) find matching column across aliases
+      const hits: Array<{ alias: string; real: string }> = [];
+      for (const [a, tableKey] of aliasToTable.entries()) {
+        const mm = this.COLUMN_NAME_MAP_BY_TABLE.get(tableKey);
+        if (!mm) continue;
 
         const real =
-          map.get(c) ||
-          map.get(c.toLowerCase()) ||
-          map.get(c.toLowerCase().replace(/_/g, ""));
+          mm.get(token) ||
+          mm.get(lower) ||
+          mm.get(lower.replace(/_/g, ""));
 
-        if (!real) return `${a}.${c}`;
-        return `${a}.${/[A-Z]/.test(real) ? `"${real}"` : real}`;
-      },
-    );
+        if (real) hits.push({ alias: a, real });
+      }
 
-    // ==================================================
-    // REWRITE bare column (NO alias, không mơ hồ)
-    // ==================================================
-   const KW = new Set([
-  "select","from","join","where","and","or","on","as",
-  "left","right","inner","outer","full","cross",
-  "group","by","order","having","limit","offset",
-  "distinct","union","all","except","intersect",
-  "case","when","then","else","end",
-  "asc","desc","nulls","first","last",
-  "in","is","not","between","like","ilike","exists","any","some",
-  "true","false","null",
-  "count","sum","avg","min","max","coalesce","nullif","date_trunc","extract","now",
-]);
+      // only rewrite when exactly 1 match -> not ambiguous
+      if (hits.length !== 1) return token;
 
- sql = sql.replace(/\b([a-zA-Z_][a-zA-Z0-9_]*)\b/g, (match, token, offset, src) => {
-  const lower = token.toLowerCase();
+      const { alias, real } = hits[0];
+      const out = /[A-Z]/.test(real) ? `"${real}"` : real;
+      return `${alias}.${out}`;
+    },
+  );
 
-  // 1) Skip keywords/functions
-  if (KW.has(lower)) return token;
+  this.logger.debug({ stage: "after_bare_rewrite", sql });
 
-  // 2) Skip aliases
-  if (aliasToTable.has(token)) return token;
-
-  // 3) Skip nếu token đang sát dấu .  => tránh đụng alias.column, schema.table
-  const prev = src[offset - 1];
-  const next = src[offset + token.length];
-  if (prev === "." || next === ".") return token;
-
-  // 4) Skip nếu token đang nằm trong quote (đơn giản: kề " hoặc ')
-  if (prev === `"` || next === `"` || prev === `'` || next === `'`) return token;
-
-  const hits: Array<{ alias: string; real: string }> = [];
-  for (const [a, tableKey] of aliasToTable.entries()) {
-    const m = this.COLUMN_NAME_MAP_BY_TABLE.get(tableKey);
-    if (!m) continue;
-
-    const real = m.get(token) || m.get(lower) || m.get(lower.replace(/_/g, ""));
-    if (real) hits.push({ alias: a, real });
+  // 5) auto limit
+  if (
+    !/\blimit\s+\d+/i.test(sql) &&
+    !/\b(group\s+by|count\(|sum\(|avg\(|min\(|max\()/i.test(sql)
+  ) {
+    sql += ` LIMIT ${DEFAULT_MAX_LIMIT}`;
   }
 
-  // chỉ rewrite khi khớp đúng 1 bảng -> không mơ hồ
-  if (hits.length !== 1) return token;
+  // guard
+  if (sql.includes('""')) {
+    this.logger.warn(`SmartSQL produced empty identifier: ${sql}`);
+    throw new Error('SQL có identifier rỗng (""), vui lòng thử lại.');
+  }
 
-  const { alias, real } = hits[0];
-  const out = /[A-Z]/.test(real) ? `"${real}"` : real;
-  return `${alias}.${out}`;
-});
-
-    // ==================================================
-    // AUTO LIMIT
-    // ==================================================
-    if (
-      !/\blimit\s+\d+/i.test(sql) &&
-      !/\b(group\s+by|count\(|sum\(|avg\(|min\(|max\()/i.test(sql)
-    ) {
-      sql += ` LIMIT ${DEFAULT_MAX_LIMIT}`;
-    }
-if (sql.includes('""')) {
-  this.logger.warn(`SmartSQL produced empty identifier: ${sql}`);
-  throw new Error('SQL có identifier rỗng (""), vui lòng thử lại.');
+  return sql;
 }
 
-    return sql;
-  }
+  
 }
