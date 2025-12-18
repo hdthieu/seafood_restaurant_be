@@ -202,17 +202,25 @@ ${JSON.stringify(sample, null, 2)}
     context: string,
     opts?: { timezone?: string },
   ) {
-    return this.llm.chat(
-      `
+   return this.llm.chat(
+  `
 Bạn là trợ lý PostgreSQL.
 - Chỉ sinh 1 câu SELECT
 - Mỗi bảng phải có alias
 - Mọi cột bắt buộc alias.column
 - Không đoán tên cột
-      `.trim(),
-      `Câu hỏi: ${question}\n\nSchema:\n${context}`,
-      25_000,
-    );
+
+QUAN TRỌNG TIMEZONE:
+- Khi lọc "hôm nay/hôm qua/tuần này/tháng này" theo giờ Việt Nam (Asia/Ho_Chi_Minh),
+  KHÔNG dùng: DATE(col)=CURRENT_DATE
+- PHẢI dùng dạng:
+  DATE(col AT TIME ZONE 'Asia/Ho_Chi_Minh') = DATE(NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh')
+  và "hôm qua":
+  DATE(col AT TIME ZONE 'Asia/Ho_Chi_Minh') = DATE((NOW() AT TIME ZONE 'Asia/Ho_Chi_Minh') - INTERVAL '1 day')
+  `.trim(),
+  `Câu hỏi: ${question}\n\nSchema:\n${context}`,
+  25_000,
+);
   }
 
   // ======================================================
@@ -363,6 +371,20 @@ sql = sql.replace(
 
 this.logger.debug({ stage: "after_enum_rewrite", sql });
 
+// 3.6) rewrite "DATE(alias.created_at) = CURRENT_DATE" => timezone VN
+sql = sql.replace(
+  /\bDATE\s*\(\s*([a-zA-Z_][a-zA-Z0-9_]*)\.(created_at|updated_at)\s*\)\s*=\s*CURRENT_DATE\b/gi,
+  (_full, a, col) =>
+    `DATE(${a}.${col} AT TIME ZONE '${TZ_DEFAULT}') = DATE(NOW() AT TIME ZONE '${TZ_DEFAULT}')`
+);
+
+sql = sql.replace(
+  /\bDATE\s*\(\s*([a-zA-Z_][a-zA-Z0-9_]*)\.(created_at|updated_at)\s*\)\s*=\s*CURRENT_DATE\s*-\s*INTERVAL\s*'1\s*day'\b/gi,
+  (_full, a, col) =>
+    `DATE(${a}.${col} AT TIME ZONE '${TZ_DEFAULT}') = DATE((NOW() AT TIME ZONE '${TZ_DEFAULT}') - INTERVAL '1 day')`
+);
+
+this.logger.debug({ stage: "after_tz_rewrite", sql });
 
   // 4) rewrite bare token (NO alias) only when unambiguous
   const KW = new Set([
