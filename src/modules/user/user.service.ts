@@ -10,6 +10,7 @@ import { PageMeta } from 'src/common/common_dto/paginated';
 import { QueryUserDto } from './dto/query-user.dto';
 import { Brackets } from 'typeorm';
 import { MailService } from '@modules/mail/mail.service';
+import { UpdateUserDto } from './dto/update-user.dto';
 @Injectable()
 export class UserService {
 
@@ -33,6 +34,58 @@ export class UserService {
     return this.userRepository.save(user);
   }
 
+async updateUser(userId: string, dto: UpdateUserDto) {
+  try {
+    const user = await this.userRepository.findOne({
+      where: { id: userId, isDelete: false },
+    });
+    if (!user) throw new ResponseException(null, 404, "USER_NOT_FOUND");
+
+    const username = dto.username?.trim();
+    const phone = dto.phoneNumber?.trim();
+
+    // Check trùng username (nếu có gửi)
+    if (username !== undefined) {
+      if (username.length === 0) user.username = null; // cho phép xoá
+      else {
+        const existed = await this.userRepository.findOne({
+          where: { username, isDelete: false },
+        });
+        if (existed && existed.id !== userId) {
+          throw new ResponseException(null, 400, "Username đã được sử dụng");
+        }
+        user.username = username;
+      }
+    }
+
+    // Check trùng SĐT (nếu có gửi)
+    if (phone !== undefined) {
+      if (phone.length === 0) user.phoneNumber = null; // cho phép xoá
+      else {
+        const existed = await this.userRepository.findOne({
+          where: { phoneNumber: phone, isDelete: false },
+        });
+        if (existed && existed.id !== userId) {
+          throw new ResponseException(null, 400, "Số điện thoại đã tồn tại trong hệ thống");
+        }
+        user.phoneNumber = phone;
+      }
+    }
+
+    const saved = await this.userRepository.save(user);
+    return new ResponseCommon(200, true, "Cập nhật user thành công", {
+      id: saved.id,
+      email: saved.email,
+      username: saved.username,
+      phoneNumber: saved.phoneNumber,
+      role: saved.role,
+    });
+  } catch (err) {
+    throw err instanceof ResponseException
+      ? err
+      : new ResponseException(err, 500, "Không thể cập nhật user");
+  }
+}
  async createUser(dto: CreateUserDto): Promise<User> {
   // chuẩn hóa dữ liệu vào
   const email = dto.email?.trim();
@@ -118,6 +171,7 @@ export class UserService {
           'u.role',
           'u.createdAt',        // cần cho ORDER BY
           'p.fullName',
+           'p.address', 
         ])
         .where('u.isDelete = false')
         .andWhere('u.id != :currentUserId', { currentUserId });
@@ -147,7 +201,10 @@ export class UserService {
         phoneNumber: u.phoneNumber ?? null,
         username: u.username ?? null,
         role: u.role,
-        profile: { fullName: u.profile?.fullName ?? null },
+       profile: {
+  fullName: u.profile?.fullName ?? null,
+  address: u.profile?.address ?? null, // ✅ thêm
+},
       }));
 
       return new ResponseCommon<typeof items, PageMeta>(

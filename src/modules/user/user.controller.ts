@@ -8,10 +8,24 @@ import { CurrentUser } from 'src/common/decorators/user.decorator';
 import { QueryUserDto } from './dto/query-user.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { ParseUUIDPipe } from '@nestjs/common/pipes/parse-uuid.pipe';
+import { UpdateUserDto } from './dto/update-user.dto';
+
 @UseGuards(JwtAuthGuard)
 @Controller('user')
 export class UserController {
   constructor(private readonly userService: UserService) { }
+
+
+
+@Patch("update-user/:userId")
+@ApiOperation({ summary: "Cập nhật username/sđt nhân viên [MANAGER]" })
+async updateUser(
+  @Param("userId", new ParseUUIDPipe()) userId: string,
+  @Body() dto: UpdateUserDto,
+) {
+  return this.userService.updateUser(userId, dto);
+}
 
   // this endpoint for create new user (MANAGER only)
   @Post('/create-user')

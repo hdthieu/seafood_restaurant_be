@@ -181,12 +181,12 @@ CHỈ trả về một trong năm chuỗi: DATA, SQL, RAG, TIME, CHAT.
     // 3) DATA & SQL → SmartSQL
     if (kind === "DATA" || kind === "SQL") {
       try {
-        const { sql, rows, explain, sources } =
+        const { sql, rows, explain } =
           await this.tools.runSmartQuery(question);
         return {
           role: "assistant",
           content: explain,
-          data: { sql, rows, sources },
+          data: { sql, rows},
         };
       } catch (e: any) {
         this.logger.warn(`[SQL] Lỗi khi chạy SmartSQL: ${e?.message}`);
@@ -255,12 +255,12 @@ Bạn là trợ lý AI thân thiện cho quản lý nhà hàng.
     // ép /sql → SmartSQL
     if (mode === "sql") {
       try {
-        const { sql, rows, explain, sources } =
+        const { sql, rows, explain,  } =
           await this.tools.runSmartQuery(question);
         return {
           role: "assistant",
           content: explain,
-          data: { sql, rows, sources },
+          data: { sql, rows },
         };
       } catch (e: any) {
         return {
